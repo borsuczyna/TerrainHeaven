@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type WorldNode from '../elements/WorldNode';
 import type WorldElement from '../elements/WorldElement';
 import type GizmoManager from './GizmoManager';
+import type ToolManager from './ToolManager';
 
 export default class SelectionManager {
     private selected: Set<WorldNode> = new Set();
@@ -11,6 +12,7 @@ export default class SelectionManager {
     private camera: THREE.PerspectiveCamera;
     private scene: THREE.Scene;
     public gizmo: GizmoManager | null = null;
+    public toolManager: ToolManager | null = null;
     private _nodeWasHit = false;
 
     public get nodeWasHit(): boolean {
@@ -35,6 +37,10 @@ export default class SelectionManager {
         // Ignore clicks on UI
         if ((e.target as HTMLElement).closest('#toolbar')) return;
         if ((e.target as HTMLElement).closest('#properties-panel')) return;
+
+        // Delegate to active tool first
+        const activeTool = this.toolManager?.getActive();
+        if (activeTool?.name !== 'select' && activeTool?.onMouseDown?.(e)) return;
 
         // Ignore when gizmo is being used
         if (this.gizmo?.isDragging) return;
@@ -61,17 +67,12 @@ export default class SelectionManager {
                 hitNode = node;
                 break;
             }
-            // Walk up to find a WorldElement
-            let obj: THREE.Object3D | null = hit.object;
-            while (obj) {
-                const el = obj.userData.worldElement as WorldElement | undefined;
-                if (el) {
-                    hitElement = el;
-                    break;
-                }
-                obj = obj.parent;
+            // Only match the directly hit mesh if it is a WorldElement
+            const el = hit.object.userData.worldElement as WorldElement | undefined;
+            if (el) {
+                hitElement = el;
+                break;
             }
-            if (hitElement) break;
         }
 
         const ctrlHeld = e.ctrlKey || e.metaKey;

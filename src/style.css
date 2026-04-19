@@ -39,6 +39,11 @@ html, body {
     justify-content: center;
 }
 
+#toolbar button svg {
+    width: 18px;
+    height: 18px;
+}
+
 #toolbar button:hover {
     background: rgba(255, 255, 255, 0.25);
 }

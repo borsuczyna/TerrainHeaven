@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import type SelectionManager from './SelectionManager';
+import type ToolManager from './ToolManager';
 
 export default class Camera {
     public readonly instance: THREE.PerspectiveCamera;
     public selectionManager: SelectionManager | null = null;
+    public toolManager: ToolManager | null = null;
 
     private keys = new Set<string>();
     private moveSpeed: number;
@@ -54,6 +56,7 @@ export default class Camera {
 
     private onMouseDown = (e: MouseEvent): void => {
         if (e.button !== 0) return;
+        if (this.toolManager?.getActive()?.blocksCamera) return;
         if (this.selectionManager?.nodeWasHit) return;
         if (this.selectionManager?.gizmo?.isDragging) return;
         this.isDragging = true;

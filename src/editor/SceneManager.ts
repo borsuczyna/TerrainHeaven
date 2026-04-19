@@ -4,16 +4,18 @@ import type WorldElement from '../elements/WorldElement';
 export default class SceneManager {
     public readonly instance: THREE.Scene = new THREE.Scene();
     private elements: WorldElement[] = [];
-
     constructor() {
         this.instance = new THREE.Scene();
         this.setupGrid();
+        this.setupLighting();
     }
 
     private setupGrid(): void {
-        const gridHelper = new THREE.GridHelper(100, 100, 0x888888, 0x444444);
+        const gridHelper = new THREE.GridHelper(100, 100, 0x444444, 0x333333);
         this.instance.add(gridHelper);
+    }
 
+    private setupLighting(): void {
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         this.instance.add(ambientLight);
 

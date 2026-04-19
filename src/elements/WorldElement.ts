@@ -83,7 +83,14 @@ export default abstract class WorldElement {
 
         const avgRight = basis.right.clone();
         for (const conn of conns) {
-            avgRight.add(conn.element.getNodeBasis(conn.nodeIndex).right);
+            const connBasis = conn.element.getNodeBasis(conn.nodeIndex);
+            // If forwards point opposite (e.g. end-to-end), the connected
+            // right is flipped — negate it to keep sides consistent
+            if (basis.forward.dot(connBasis.forward) < 0) {
+                avgRight.sub(connBasis.right);
+            } else {
+                avgRight.add(connBasis.right);
+            }
         }
         avgRight.normalize();
 
