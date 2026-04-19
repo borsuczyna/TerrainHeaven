@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertyButton, SectionItem } from './Properties';
+import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertySelect, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
 
 export default class PropertiesPanel {
@@ -124,6 +124,22 @@ export default class PropertiesPanel {
                 </div>`;
         }
 
+        if (prop.type === 'select') {
+            const v = prop.get();
+            const optionsHtml = prop.options.map(o =>
+                `<option value="${o.value}"${o.value === v ? ' selected' : ''}>${o.label}</option>`
+            ).join('');
+            return `
+                <div class="prop-row" data-prop-id="${id}" data-prop-type="select">
+                    <span class="prop-label">${prop.label}</span>
+                    <div class="prop-fields">
+                        <div class="prop-field-single">
+                            <select>${optionsHtml}</select>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
         return '';
     }
 
@@ -174,6 +190,13 @@ export default class PropertiesPanel {
                     (prop as PropertyButton).onClick();
                 });
             }
+
+            if (prop.type === 'select') {
+                const select = row.querySelector('select')!;
+                select.addEventListener('change', () => {
+                    (prop as PropertySelect).set(select.value);
+                });
+            }
         }
     }
 
@@ -200,6 +223,13 @@ export default class PropertiesPanel {
                     const input = row.querySelector('input')!;
                     if (input !== document.activeElement) {
                         (input as HTMLInputElement).value = String(prop.get());
+                    }
+                }
+
+                if (prop.type === 'select') {
+                    const select = row.querySelector('select')!;
+                    if (select !== document.activeElement) {
+                        (select as HTMLSelectElement).value = (prop as PropertySelect).get();
                     }
                 }
             }

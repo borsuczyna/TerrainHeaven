@@ -224,3 +224,18 @@ html, body {
 #properties-panel .prop-button:hover {
     background: #4a8ec5;
 }
+
+#properties-panel select {
+    width: 100%;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 3px;
+    color: #ccc;
+    font-size: 11px;
+    padding: 3px 4px;
+    box-sizing: border-box;
+}
+
+#properties-panel select:focus {
+    background: #252525;
+}

@@ -17,7 +17,15 @@ export interface PropertyNumber {
     step?: number;
 }
 
-export type Property = PropertyVector3 | PropertyNumber;
+export type Property = PropertyVector3 | PropertyNumber | PropertySelect;
+
+export interface PropertySelect {
+    type: 'select';
+    label: string;
+    options: { label: string; value: string }[];
+    get: () => string;
+    set: (v: string) => void;
+}
 
 export interface PropertyButton {
     type: 'button';

@@ -92,11 +92,25 @@ export default abstract class WorldElement {
     public abstract getProperties(): PropertyDefinition;
 
     public getWidth(): number { return 0; }
+    public getSidewalkWidth(): number { return 0; }
+    public getCurbHeight(): number { return 0; }
 
     public getResolvedHalfWidth(index: number): number {
         const conn = this.connections.get(index);
         if (!conn) return this.getWidth() / 2;
         return (this.getWidth() + conn.element.getWidth()) / 2 / 2;
+    }
+
+    public getResolvedSidewalkWidth(index: number): number {
+        const conn = this.connections.get(index);
+        if (!conn) return this.getSidewalkWidth();
+        return (this.getSidewalkWidth() + conn.element.getSidewalkWidth()) / 2;
+    }
+
+    public getResolvedCurbHeight(index: number): number {
+        const conn = this.connections.get(index);
+        if (!conn) return this.getCurbHeight();
+        return (this.getCurbHeight() + conn.element.getCurbHeight()) / 2;
     }
 
     public setSelected(selected: boolean): void {

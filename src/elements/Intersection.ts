@@ -5,12 +5,19 @@ import Triangle from './Vertex';
 import Config from '../utils/Config';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 
+export type EdgeType = 'none' | 'sidewalk';
+
 export default class Intersection extends WorldElement {
     public width: number = 3;
     public length: number = 3;
     private _nodeCount: number = 4;
+    public edgeType: EdgeType = 'none';
+    public sidewalkWidth: number = 1;
+    public curbHeight: number = 0.15;
 
     public override getWidth(): number { return this.width; }
+    public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
+    public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
 
     constructor(position: THREE.Vector3, nodeCount: number = 4) {
         super();
@@ -136,6 +143,39 @@ export default class Intersection extends WorldElement {
                         },
                     ],
                 },
+                {
+                    label: 'Edges',
+                    properties: [
+                        {
+                            type: 'select' as const,
+                            label: 'Type',
+                            options: [
+                                { label: 'None', value: 'none' },
+                                { label: 'Sidewalk', value: 'sidewalk' },
+                            ],
+                            get: () => self.edgeType,
+                            set: (v: string) => { self.edgeType = v as EdgeType; self.update(); self.onPropertiesChanged?.(); },
+                        },
+                        ...(self.edgeType === 'sidewalk' ? [
+                            {
+                                type: 'number' as const,
+                                label: 'Sidewalk Width',
+                                get: () => self.sidewalkWidth,
+                                set: (v: number) => { self.sidewalkWidth = Math.max(0.1, v); self.update(); },
+                                min: 0.1,
+                                step: 0.1,
+                            },
+                            {
+                                type: 'number' as const,
+                                label: 'Curb Height',
+                                get: () => self.curbHeight,
+                                set: (v: number) => { self.curbHeight = Math.max(0, v); self.update(); },
+                                min: 0,
+                                step: 0.05,
+                            },
+                        ] : []),
+                    ],
+                },
                 ...nodeSections,
             ],
         };
@@ -165,6 +205,46 @@ export default class Intersection extends WorldElement {
 
             // Fill gap between node i's right edge and next node's left edge
             triangles.push(new Triangle(center.clone(), leftEdges[nextIdx].clone(), rightEdges[i].clone()));
+        }
+
+        // Sidewalk around the perimeter
+        if (this.edgeType === 'sidewalk') {
+            for (let i = 0; i < this._nodeCount; i++) {
+                const nextIdx = (i + 1) % this._nodeCount;
+                const nodePos = this.nodes[i].mesh.position;
+                const nextNodePos = this.nodes[nextIdx].mesh.position;
+                const basis = this.getResolvedNodeBasis(i);
+                const nextBasis = this.getResolvedNodeBasis(nextIdx);
+                const hw = this.getResolvedHalfWidth(i);
+                const nextHw = this.getResolvedHalfWidth(nextIdx);
+                const sw = this.getResolvedSidewalkWidth(i);
+                const nextSw = this.getResolvedSidewalkWidth(nextIdx);
+                const ch = this.getResolvedCurbHeight(i);
+                const nextCh = this.getResolvedCurbHeight(nextIdx);
+                const up = new THREE.Vector3(0, 1, 0);
+
+                // Right edge of node i and left edge of next node form the gap
+                const innerA = rightEdges[i];
+                const innerB = leftEdges[nextIdx];
+                // Outer edges: extend outward by sidewalk width
+                const outerA = nodePos.clone().add(basis.right.clone().multiplyScalar(hw + sw));
+                const outerB = nextNodePos.clone().sub(nextBasis.right.clone().multiplyScalar(nextHw + nextSw));
+
+                const upA = up.clone().multiplyScalar(ch);
+                const upB = up.clone().multiplyScalar(nextCh);
+
+                // Curb face (vertical)
+                const innerAUp = innerA.clone().add(upA);
+                const innerBUp = innerB.clone().add(upB);
+                triangles.push(new Triangle(innerA.clone(), innerBUp.clone(), innerAUp.clone()));
+                triangles.push(new Triangle(innerA.clone(), innerB.clone(), innerBUp.clone()));
+
+                // Sidewalk top (raised)
+                const outerAUp = outerA.clone().add(upA);
+                const outerBUp = outerB.clone().add(upB);
+                triangles.push(new Triangle(innerAUp.clone(), innerBUp.clone(), outerBUp.clone()));
+                triangles.push(new Triangle(innerAUp.clone(), outerBUp.clone(), outerAUp.clone()));
+            }
         }
 
         return triangles;

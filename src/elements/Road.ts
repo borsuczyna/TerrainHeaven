@@ -6,14 +6,21 @@ import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 
+export type EdgeType = 'none' | 'sidewalk';
+
 export default class Road extends WorldElement {
     public get nodeA(): WorldNode { return this.nodes[0]; }
     public get nodeB(): WorldNode { return this.nodes[1]; }
 
     public width: number = 3;
     public lanes: number = 2;
+    public edgeType: EdgeType = 'none';
+    public sidewalkWidth: number = 1;
+    public curbHeight: number = 0.15;
 
     public override getWidth(): number { return this.width; }
+    public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
+    public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
     private _divisions: number = 0;
     private curvePointA: WorldNode | null = null;
     private curvePointB: WorldNode | null = null;
@@ -229,6 +236,39 @@ export default class Road extends WorldElement {
                     },
                 ],
             },
+            {
+                label: 'Edges',
+                properties: [
+                    {
+                        type: 'select' as const,
+                        label: 'Type',
+                        options: [
+                            { label: 'None', value: 'none' },
+                            { label: 'Sidewalk', value: 'sidewalk' },
+                        ],
+                        get: () => self.edgeType,
+                        set: (v: string) => { self.edgeType = v as EdgeType; self.update(); self.onPropertiesChanged?.(); },
+                    },
+                    ...(self.edgeType === 'sidewalk' ? [
+                        {
+                            type: 'number' as const,
+                            label: 'Sidewalk Width',
+                            get: () => self.sidewalkWidth,
+                            set: (v: number) => { self.sidewalkWidth = Math.max(0.1, v); self.update(); },
+                            min: 0.1,
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Curb Height',
+                            get: () => self.curbHeight,
+                            set: (v: number) => { self.curbHeight = Math.max(0, v); self.update(); },
+                            min: 0,
+                            step: 0.05,
+                        },
+                    ] : []),
+                ],
+            },
         ];
 
         if (this.curvePointA) {
@@ -251,6 +291,10 @@ export default class Road extends WorldElement {
         const triangles: Triangle[] = [];
         for (let lane = 0; lane < this.lanes; lane++) {
             triangles.push(...this.getLaneTriangles(lane));
+        }
+        if (this.edgeType === 'sidewalk') {
+            triangles.push(...this.getSidewalkTriangles(-1)); // left
+            triangles.push(...this.getSidewalkTriangles(1));  // right
         }
         return triangles;
     }
@@ -301,6 +345,79 @@ export default class Road extends WorldElement {
 
             triangles.push(new Triangle(bl, br, tr));
             triangles.push(new Triangle(bl, tr, tl));
+        }
+
+        return triangles;
+    }
+
+    /** Generate sidewalk triangles on one side. side: -1 = left, +1 = right */
+    private getSidewalkTriangles(side: number): Triangle[] {
+        const triangles: Triangle[] = [];
+        const points = this.getBezierCurvePoints();
+        const up = new THREE.Vector3(0, 1, 0);
+        const halfWidthStart = this.getResolvedHalfWidth(0);
+        const halfWidthEnd = this.getResolvedHalfWidth(1);
+        const swStart = this.getResolvedSidewalkWidth(0);
+        const swEnd = this.getResolvedSidewalkWidth(1);
+        const chStart = this.getResolvedCurbHeight(0);
+        const chEnd = this.getResolvedCurbHeight(1);
+
+        const getRightAtIndex = (index: number): THREE.Vector3 => {
+            if (index === 0) return this.getResolvedNodeBasis(0).right;
+            if (index === points.length - 1) return this.getResolvedNodeBasis(1).right;
+            const next = points[index + 1];
+            const prev = points[index - 1];
+            const direction = new THREE.Vector3().subVectors(next, prev).normalize();
+            return new THREE.Vector3().crossVectors(direction, up).normalize();
+        };
+
+        for (let i = 0; i < points.length - 1; i++) {
+            const curr = points[i];
+            const next = points[i + 1];
+
+            const tCurr = i / (points.length - 1);
+            const tNext = (i + 1) / (points.length - 1);
+            const hwCurr = halfWidthStart + (halfWidthEnd - halfWidthStart) * tCurr;
+            const hwNext = halfWidthStart + (halfWidthEnd - halfWidthStart) * tNext;
+            const swCurr = swStart + (swEnd - swStart) * tCurr;
+            const swNext = swStart + (swEnd - swStart) * tNext;
+            const chCurr = chStart + (chEnd - chStart) * tCurr;
+            const chNext = chStart + (chEnd - chStart) * tNext;
+
+            const rightCurr = getRightAtIndex(i);
+            const rightNext = getRightAtIndex(i + 1);
+
+            // Inner edge = road edge, outer edge = road edge + sidewalkWidth
+            const innerCurr = curr.clone().add(rightCurr.clone().multiplyScalar(side * hwCurr));
+            const innerNext = next.clone().add(rightNext.clone().multiplyScalar(side * hwNext));
+            const outerCurr = curr.clone().add(rightCurr.clone().multiplyScalar(side * (hwCurr + swCurr)));
+            const outerNext = next.clone().add(rightNext.clone().multiplyScalar(side * (hwNext + swNext)));
+
+            // Raised versions (curb top)
+            const upCurr = up.clone().multiplyScalar(chCurr);
+            const upNext = up.clone().multiplyScalar(chNext);
+            const innerCurrUp = innerCurr.clone().add(upCurr);
+            const innerNextUp = innerNext.clone().add(upNext);
+            const outerCurrUp = outerCurr.clone().add(upCurr);
+            const outerNextUp = outerNext.clone().add(upNext);
+
+            // Curb face (vertical wall on road side)
+            if (side > 0) {
+                triangles.push(new Triangle(innerCurr.clone(), innerCurrUp.clone(), innerNextUp.clone()));
+                triangles.push(new Triangle(innerCurr.clone(), innerNextUp.clone(), innerNext.clone()));
+            } else {
+                triangles.push(new Triangle(innerCurr.clone(), innerNextUp.clone(), innerCurrUp.clone()));
+                triangles.push(new Triangle(innerCurr.clone(), innerNext.clone(), innerNextUp.clone()));
+            }
+
+            // Sidewalk top (raised flat surface)
+            if (side > 0) {
+                triangles.push(new Triangle(innerCurrUp.clone(), outerCurrUp.clone(), outerNextUp.clone()));
+                triangles.push(new Triangle(innerCurrUp.clone(), outerNextUp.clone(), innerNextUp.clone()));
+            } else {
+                triangles.push(new Triangle(innerCurrUp.clone(), outerNextUp.clone(), outerCurrUp.clone()));
+                triangles.push(new Triangle(innerCurrUp.clone(), innerNextUp.clone(), outerNextUp.clone()));
+            }
         }
 
         return triangles;
