@@ -10,6 +10,8 @@ import RoadTool from "./RoadTool";
 import IntersectionTool from "./IntersectionTool";
 import WireframeManager from "./WireframeManager";
 import TextureBrowser from "./TextureBrowser";
+import UVEditorPanel from "./UVEditorPanel";
+import UVTool from "./UVTool";
 import * as THREE from "three";
 import type WorldNode from "../elements/WorldNode";
 import type WorldElement from "../elements/WorldElement";
@@ -67,10 +69,13 @@ export default class App {
 
         const roadTool = new RoadTool(this.scene, this.camera.instance);
         const intersectionTool = new IntersectionTool(this.scene, this.camera.instance);
+        const uvEditor = new UVEditorPanel();
+        const uvTool = new UVTool(this.scene.instance, this.camera.instance, uvEditor);
 
         this.toolManager.register(selectTool, document.getElementById('btn-select') as HTMLButtonElement);
         this.toolManager.register(roadTool, document.getElementById('btn-road') as HTMLButtonElement);
         this.toolManager.register(intersectionTool, document.getElementById('btn-intersection') as HTMLButtonElement);
+        this.toolManager.register(uvTool, document.getElementById('btn-uv') as HTMLButtonElement);
         this.toolManager.setActive('select');
 
         const btnWireframe = document.getElementById('btn-wireframe')!;

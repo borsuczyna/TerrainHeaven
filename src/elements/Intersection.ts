@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis, type GeometryGroup } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type UVTransform } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -14,13 +14,38 @@ export default class Intersection extends WorldElement {
     public edgeType: EdgeType = 'none';
     public sidewalkWidth: number = 1;
     public curbHeight: number = 0.15;
-    public roadTexSize: number = 3;
+    public roadTexWidth: number = 3;
+    public roadTexHeight: number = 3;
     public roadTexOffsetX: number = 0;
     public roadTexOffsetY: number = 0;
 
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
     public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
+
+    public override getUVGroups(): string[] { return ['road']; }
+
+    public override getUVTransform(group: string): UVTransform {
+        if (group === 'road') {
+            return {
+                offsetX: this.roadTexOffsetX,
+                offsetY: this.roadTexOffsetY,
+                scaleX: this.roadTexWidth,
+                scaleY: this.roadTexHeight,
+            };
+        }
+        return super.getUVTransform(group);
+    }
+
+    public override setUVTransform(group: string, t: UVTransform): void {
+        if (group === 'road') {
+            this.roadTexOffsetX = t.offsetX;
+            this.roadTexOffsetY = t.offsetY;
+            this.roadTexWidth = Math.max(0.1, t.scaleX);
+            this.roadTexHeight = Math.max(0.1, t.scaleY);
+            this.update();
+        }
+    }
 
     constructor(position: THREE.Vector3, nodeCount: number = 4) {
         super();
@@ -184,9 +209,17 @@ export default class Intersection extends WorldElement {
                     properties: [
                         {
                             type: 'number' as const,
-                            label: 'Road Size',
-                            get: () => self.roadTexSize,
-                            set: (v: number) => { self.roadTexSize = Math.max(0.1, v); self.update(); },
+                            label: 'Tex Width',
+                            get: () => self.roadTexWidth,
+                            set: (v: number) => { self.roadTexWidth = Math.max(0.1, v); self.update(); },
+                            min: 0.1,
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Tex Height',
+                            get: () => self.roadTexHeight,
+                            set: (v: number) => { self.roadTexHeight = Math.max(0.1, v); self.update(); },
                             min: 0.1,
                             step: 0.1,
                         },
@@ -251,11 +284,12 @@ export default class Intersection extends WorldElement {
             rightEdges.push(nodePos.clone().add(basis.right.clone().multiplyScalar(hw)));
         }
 
-        // Use planar UV based on world XZ relative to center, scaled by roadTexSize
-        const s = this.roadTexSize || 1;
+        // Use planar UV based on world XZ relative to center, scaled by tex width/height
+        const sw = this.roadTexWidth || 1;
+        const sh = this.roadTexHeight || 1;
         const uvOf = (p: THREE.Vector3) => new THREE.Vector2(
-            (p.x - center.x) / s + this.roadTexOffsetX,
-            (p.z - center.z) / s + this.roadTexOffsetY,
+            (p.x - center.x) / sw + this.roadTexOffsetX,
+            (p.z - center.z) / sh + this.roadTexOffsetY,
         );
 
         for (let i = 0; i < this._nodeCount; i++) {

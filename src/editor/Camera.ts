@@ -56,6 +56,7 @@ export default class Camera {
 
     private onMouseDown = (e: MouseEvent): void => {
         if (e.button !== 0) return;
+        if ((e.target as HTMLElement).closest('#uv-editor')) return;
         if (this.toolManager?.getActive()?.blocksCamera) return;
         if (this.selectionManager?.nodeWasHit) return;
         if (this.selectionManager?.gizmo?.isDragging) return;

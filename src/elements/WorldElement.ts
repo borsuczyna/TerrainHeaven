@@ -16,6 +16,13 @@ export interface GeometryGroup {
     triangles: Triangle[];
 }
 
+export interface UVTransform {
+    offsetX: number;
+    offsetY: number;
+    scaleX: number;
+    scaleY: number;
+}
+
 interface Connection {
     element: WorldElement;
     nodeIndex: number;
@@ -99,6 +106,17 @@ export default abstract class WorldElement {
 
     public abstract getProperties(): PropertyDefinition;
 
+    /** Override to return group names that support UV editing */
+    public getUVGroups(): string[] { return []; }
+
+    /** Override to get current UV transform for a group */
+    public getUVTransform(_group: string): UVTransform {
+        return { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    }
+
+    /** Override to set UV transform for a group */
+    public setUVTransform(_group: string, _transform: UVTransform): void {}
+
     public getWidth(): number { return 0; }
     public getSidewalkWidth(): number { return 0; }
     public getCurbHeight(): number { return 0; }
@@ -175,6 +193,14 @@ export default abstract class WorldElement {
             }
         }
         return this.groupNames[0] ?? null;
+    }
+
+    public getGroupTexture(groupName: string): THREE.Texture | undefined {
+        return this.groupTextures.get(groupName);
+    }
+
+    public getGroupNames(): string[] {
+        return this.groupNames;
     }
 
     public setGroupTexture(groupName: string, texture: THREE.Texture): void {

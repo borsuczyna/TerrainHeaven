@@ -38,6 +38,7 @@ export default class SelectionManager {
         if ((e.target as HTMLElement).closest('#toolbar')) return;
         if ((e.target as HTMLElement).closest('#properties-panel')) return;
         if ((e.target as HTMLElement).closest('#texture-browser')) return;
+        if ((e.target as HTMLElement).closest('#uv-editor')) return;
 
         // Delegate to active tool first
         const activeTool = this.toolManager?.getActive();
