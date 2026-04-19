@@ -4,12 +4,15 @@ import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
+import type { PropertyDefinition } from '../editor/Properties';
 
 export default class Road extends WorldElement {
     public get nodeA(): WorldNode { return this.nodes[0]; }
     public get nodeB(): WorldNode { return this.nodes[1]; }
 
     public width: number = 3;
+
+    public override getWidth(): number { return this.width; }
     private _divisions: number = 3;
     private curvePointA: WorldNode | null = null;
     private curvePointB: WorldNode | null = null;
@@ -123,18 +126,78 @@ export default class Road extends WorldElement {
         otherRoad.update();
     }
 
+    public getProperties(): PropertyDefinition {
+        const self = this;
+        const makeNodeVec3 = (label: string, node: WorldNode) => ({
+            type: 'vector3' as const,
+            label,
+            get: () => node.mesh.position.clone(),
+            set: (v: THREE.Vector3) => { node.update(v); },
+        });
+
+        const sections = [
+            {
+                label: 'Node A',
+                properties: [makeNodeVec3('Position', this.nodeA)],
+            },
+            {
+                label: 'Node B',
+                properties: [makeNodeVec3('Position', this.nodeB)],
+            },
+            {
+                label: 'Road',
+                properties: [
+                    {
+                        type: 'number' as const,
+                        label: 'Width',
+                        get: () => self.width,
+                        set: (v: number) => { self.width = v; self.update(); },
+                        min: 0.1,
+                        step: 0.1,
+                    },
+                    {
+                        type: 'number' as const,
+                        label: 'Divisions',
+                        get: () => self.divisions,
+                        set: (v: number) => { self.divisions = Math.max(0, Math.round(v)); self.update(); },
+                        min: 0,
+                        step: 1,
+                    },
+                ],
+            },
+        ];
+
+        if (this.curvePointA) {
+            sections.push({
+                label: 'Curve Point A',
+                properties: [makeNodeVec3('Position', this.curvePointA)],
+            });
+        }
+        if (this.curvePointB) {
+            sections.push({
+                label: 'Curve Point B',
+                properties: [makeNodeVec3('Position', this.curvePointB)],
+            });
+        }
+
+        return { title: 'Road', icon: '&#9776;', sections };
+    }
+
     protected getTriangles(): Triangle[] {
         const triangles: Triangle[] = [];
         const points = this.getBezierCurvePoints();
-        const halfWidth = this.width / 2;
         const up = new THREE.Vector3(0, 1, 0);
+        const halfWidthStart = this.getResolvedHalfWidth(0);
+        const halfWidthEnd = this.getResolvedHalfWidth(1);
+
+        const getHalfWidthAtIndex = (index: number): number => {
+            const t = index / (points.length - 1);
+            return halfWidthStart + (halfWidthEnd - halfWidthStart) * t;
+        };
 
         const getRightAtIndex = (index: number): THREE.Vector3 => {
-            // At endpoints, use resolved basis (accounts for connections)
             if (index === 0) return this.getResolvedNodeBasis(0).right;
             if (index === points.length - 1) return this.getResolvedNodeBasis(1).right;
-
-            // Interior points: compute from neighbors
             const next = points[index + 1];
             const prev = points[index - 1];
             const direction = new THREE.Vector3().subVectors(next, prev).normalize();
@@ -144,8 +207,8 @@ export default class Road extends WorldElement {
         for (let i = 0; i < points.length - 1; i++) {
             const curr = points[i];
             const next = points[i + 1];
-            const rightCurr = getRightAtIndex(i).multiplyScalar(halfWidth);
-            const rightNext = getRightAtIndex(i + 1).multiplyScalar(halfWidth);
+            const rightCurr = getRightAtIndex(i).multiplyScalar(getHalfWidthAtIndex(i));
+            const rightNext = getRightAtIndex(i + 1).multiplyScalar(getHalfWidthAtIndex(i + 1));
 
             const bl = curr.clone().sub(rightCurr);
             const br = curr.clone().add(rightCurr);

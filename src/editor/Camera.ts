@@ -10,6 +10,7 @@ export default class Camera {
     private lookSpeed: number;
     private pitch = -0.2;
     private yaw = -Math.PI / 2;
+    private isDragging = false;
 
     constructor(
         fov = 75,
@@ -38,8 +39,9 @@ export default class Camera {
         window.addEventListener('keydown', this.onKeyDown);
         window.addEventListener('keyup', this.onKeyUp);
         window.addEventListener('mousemove', this.onMouseMove);
+        window.addEventListener('mousedown', this.onMouseDown);
+        window.addEventListener('mouseup', this.onMouseUp);
         window.addEventListener('resize', this.onResize);
-        window.addEventListener('mousedown', this.onClick, { capture: false });
     }
 
     private onKeyDown = (e: KeyboardEvent): void => {
@@ -50,8 +52,20 @@ export default class Camera {
         this.keys.delete(e.code);
     };
 
+    private onMouseDown = (e: MouseEvent): void => {
+        if (e.button !== 0) return;
+        if (this.selectionManager?.nodeWasHit) return;
+        if (this.selectionManager?.gizmo?.isDragging) return;
+        this.isDragging = true;
+    };
+
+    private onMouseUp = (e: MouseEvent): void => {
+        if (e.button !== 0) return;
+        this.isDragging = false;
+    };
+
     private onMouseMove = (e: MouseEvent): void => {
-        if (document.pointerLockElement !== document.body) return;
+        if (!this.isDragging) return;
 
         this.yaw -= e.movementX * this.lookSpeed;
         this.pitch -= e.movementY * this.lookSpeed;
@@ -67,15 +81,6 @@ export default class Camera {
         this.instance.updateProjectionMatrix();
     };
 
-    private onClick = async (e: MouseEvent): Promise<void> => {
-        if (e.button !== 0) return;
-        if (this.selectionManager?.nodeWasHit) return;
-        if (this.selectionManager?.gizmo?.isDragging) return;
-        if (document.pointerLockElement !== document.body) {
-            await document.body.requestPointerLock();
-        }
-    };
-
     private updateRotation(): void {
         this.instance.rotation.order = 'YXZ';
         this.instance.rotation.y = this.yaw;
@@ -85,8 +90,6 @@ export default class Camera {
     public update(delta: number): void {
         const forward = new THREE.Vector3();
         this.instance.getWorldDirection(forward);
-        forward.y = 0;
-        forward.normalize();
 
         const right = new THREE.Vector3();
         right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
@@ -115,7 +118,8 @@ export default class Camera {
         window.removeEventListener('keydown', this.onKeyDown);
         window.removeEventListener('keyup', this.onKeyUp);
         window.removeEventListener('mousemove', this.onMouseMove);
+        window.removeEventListener('mousedown', this.onMouseDown);
+        window.removeEventListener('mouseup', this.onMouseUp);
         window.removeEventListener('resize', this.onResize);
-        window.removeEventListener('mousedown', this.onClick);
     }
 }

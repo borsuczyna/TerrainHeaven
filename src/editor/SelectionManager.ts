@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import type WorldNode from '../elements/WorldNode';
+import type WorldElement from '../elements/WorldElement';
 import type GizmoManager from './GizmoManager';
 
 export default class SelectionManager {
     private selected: Set<WorldNode> = new Set();
+    private selectedElement: WorldElement | null = null;
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
     private camera: THREE.PerspectiveCamera;
@@ -18,6 +20,7 @@ export default class SelectionManager {
     }
 
     public onSelectionChanged: ((nodes: WorldNode[]) => void) | null = null;
+    public onElementSelected: ((element: WorldElement | null) => void) | null = null;
 
     constructor(camera: THREE.PerspectiveCamera, scene: THREE.Scene) {
         this.camera = camera;
@@ -27,12 +30,11 @@ export default class SelectionManager {
     }
 
     private onMouseDown = (e: MouseEvent): void => {
-        // Only handle when pointer is not locked (edit mode)
-        if (document.pointerLockElement) return;
         if (e.button !== 0) return;
 
         // Ignore clicks on UI
         if ((e.target as HTMLElement).closest('#toolbar')) return;
+        if ((e.target as HTMLElement).closest('#properties-panel')) return;
 
         // Ignore when gizmo is being used
         if (this.gizmo?.isDragging) return;
@@ -52,18 +54,37 @@ export default class SelectionManager {
         const intersects = this.raycaster.intersectObjects(targets, true);
 
         let hitNode: WorldNode | null = null;
+        let hitElement: WorldElement | null = null;
         for (const hit of intersects) {
             const node = hit.object.userData.worldNode as WorldNode | undefined;
             if (node) {
                 hitNode = node;
                 break;
             }
+            // Walk up to find a WorldElement
+            let obj: THREE.Object3D | null = hit.object;
+            while (obj) {
+                const el = obj.userData.worldElement as WorldElement | undefined;
+                if (el) {
+                    hitElement = el;
+                    break;
+                }
+                obj = obj.parent;
+            }
+            if (hitElement) break;
         }
 
         const ctrlHeld = e.ctrlKey || e.metaKey;
 
         if (hitNode) {
             this._nodeWasHit = true;
+            // Also select the parent element for properties
+            if (hitNode.parent && hitNode.parent !== this.selectedElement) {
+                this.deselectElement();
+                this.selectedElement = hitNode.parent;
+                this.selectedElement.setSelected(true);
+                this.onElementSelected?.(this.selectedElement);
+            }
             if (ctrlHeld) {
                 if (this.selected.has(hitNode)) {
                     this.deselect(hitNode);
@@ -74,8 +95,17 @@ export default class SelectionManager {
                 this.clearSelection();
                 this.selectAdd(hitNode);
             }
+        } else if (hitElement) {
+            this._nodeWasHit = true;
+            this.clearSelection();
+            this.deselectElement();
+            this.selectedElement = hitElement;
+            this.selectedElement.setSelected(true);
+            this.onElementSelected?.(this.selectedElement);
         } else if (!ctrlHeld) {
             this.clearSelection();
+            this.deselectElement();
+            this.onElementSelected?.(null);
         }
 
         this.onSelectionChanged?.(this.getSelected());
@@ -96,6 +126,13 @@ export default class SelectionManager {
             node.setSelected(false);
         }
         this.selected.clear();
+    }
+
+    private deselectElement(): void {
+        if (this.selectedElement) {
+            this.selectedElement.setSelected(false);
+            this.selectedElement = null;
+        }
     }
 
     public getSelected(): WorldNode[] {

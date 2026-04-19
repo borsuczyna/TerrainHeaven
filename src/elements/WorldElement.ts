@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type Triangle from './Vertex';
 import type WorldNode from './WorldNode';
 import WireframeManager from '../editor/WireframeManager';
+import type { PropertyDefinition } from '../editor/Properties';
 
 export interface NodeBasis {
     forward: THREE.Vector3;
@@ -15,12 +16,13 @@ interface Connection {
 }
 
 export default abstract class WorldElement {
-    public readonly mesh: THREE.Mesh = new THREE.Mesh();
+    public readonly mesh: THREE.Mesh = new THREE.Mesh(undefined, new THREE.MeshStandardMaterial());
     protected nodes: WorldNode[] = [];
     protected connections: Map<number, Connection[]> = new Map();
 
     constructor() {
         WireframeManager.register(this.mesh);
+        this.mesh.userData.worldElement = this;
     }
 
     public getNode(index: number): WorldNode {
@@ -49,6 +51,30 @@ export default abstract class WorldElement {
     }
 
     public abstract getNodeBasis(index: number): NodeBasis;
+
+    public abstract getProperties(): PropertyDefinition;
+
+    public getWidth(): number { return 0; }
+
+    public getResolvedHalfWidth(index: number): number {
+        const conns = this.connections.get(index);
+        if (!conns || conns.length === 0) return this.getWidth() / 2;
+        let total = this.getWidth();
+        for (const conn of conns) total += conn.element.getWidth();
+        return total / (conns.length + 1) / 2;
+    }
+
+    public setSelected(selected: boolean): void {
+        const mat = this.mesh.material as THREE.MeshStandardMaterial;
+        if (!mat?.emissive) return;
+        if (selected) {
+            mat.emissive.setHex(0x0044ff);
+            mat.emissiveIntensity = 0.5;
+        } else {
+            mat.emissive.setHex(0x000000);
+            mat.emissiveIntensity = 1;
+        }
+    }
 
     public getResolvedNodeBasis(index: number): NodeBasis {
         const basis = this.getNodeBasis(index);
