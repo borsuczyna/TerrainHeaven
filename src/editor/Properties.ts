@@ -19,9 +19,17 @@ export interface PropertyNumber {
 
 export type Property = PropertyVector3 | PropertyNumber;
 
+export interface PropertyButton {
+    type: 'button';
+    label: string;
+    onClick: () => void;
+}
+
+export type SectionItem = Property | PropertyButton;
+
 export interface PropertySection {
     label: string;
-    properties: Property[];
+    properties: SectionItem[];
 }
 
 export interface PropertyDefinition {

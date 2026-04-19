@@ -4,7 +4,7 @@ import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
-import type { PropertyDefinition } from '../editor/Properties';
+import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 
 export default class Road extends WorldElement {
     public get nodeA(): WorldNode { return this.nodes[0]; }
@@ -14,7 +14,7 @@ export default class Road extends WorldElement {
     public lanes: number = 2;
 
     public override getWidth(): number { return this.width; }
-    private _divisions: number = 3;
+    private _divisions: number = 0;
     private curvePointA: WorldNode | null = null;
     private curvePointB: WorldNode | null = null;
     private curveLineA: THREE.Line | null = null;
@@ -22,7 +22,27 @@ export default class Road extends WorldElement {
     private laneLines: THREE.Line[] = [];
 
     public get divisions(): number { return this._divisions; }
-    public set divisions(value: number) { this._divisions = value; this.updateCurveLines(); }
+    public set divisions(value: number) {
+        this._divisions = Math.max(0, Math.round(value));
+        if (this._divisions > 0) {
+            // Auto-create curve points at 1/3 and 2/3 along the line if missing
+            if (!this.curvePointA) {
+                const a = this.nodeA.mesh.position;
+                const b = this.nodeB.mesh.position;
+                this.setCurvePointA(a.clone().lerp(b.clone(), 1 / 3));
+            }
+            if (!this.curvePointB) {
+                const a = this.nodeA.mesh.position;
+                const b = this.nodeB.mesh.position;
+                this.setCurvePointB(a.clone().lerp(b.clone(), 2 / 3));
+            }
+        } else {
+            // Remove curve points when divisions is 0
+            this.setCurvePointA(null);
+            this.setCurvePointB(null);
+        }
+        this.updateCurveLines();
+    }
 
     constructor(positionA: THREE.Vector3, positionB: THREE.Vector3) {
         super();
@@ -165,15 +185,21 @@ export default class Road extends WorldElement {
             set: (v: THREE.Vector3) => { node.update(v); },
         });
 
+        const makeNodeSection = (label: string, node: WorldNode, nodeIndex: number) => {
+            const props: SectionItem[] = [makeNodeVec3('Position', node)];
+            if (this.isConnected(nodeIndex)) {
+                props.push({
+                    type: 'button' as const,
+                    label: 'Disconnect',
+                    onClick: () => { self.disconnect(nodeIndex); self.onPropertiesChanged?.(); },
+                });
+            }
+            return { label, properties: props };
+        };
+
         const sections = [
-            {
-                label: 'Node A',
-                properties: [makeNodeVec3('Position', this.nodeA)],
-            },
-            {
-                label: 'Node B',
-                properties: [makeNodeVec3('Position', this.nodeB)],
-            },
+            makeNodeSection('Node A', this.nodeA, 0),
+            makeNodeSection('Node B', this.nodeB, 1),
             {
                 label: 'Road',
                 properties: [

@@ -23,13 +23,13 @@ export default class RoadTool implements Tool {
 
     activate(): void {
         this.reset();
-        window.addEventListener('mouseup', this.onMouseUp);
+        window.addEventListener('mouseup', this.handleMouseUp);
         window.addEventListener('mousemove', this.onMouseMove);
     }
 
     deactivate(): void {
         this.cancelPreview();
-        window.removeEventListener('mouseup', this.onMouseUp);
+        window.removeEventListener('mouseup', this.handleMouseUp);
         window.removeEventListener('mousemove', this.onMouseMove);
     }
 
@@ -117,18 +117,20 @@ export default class RoadTool implements Tool {
         this.previewRoad = new Road(startPos.clone(), startPos.clone());
         this.scene.add(this.previewRoad);
 
-        // Connect start node if snapped
+        // Connect start node if snapped (only if not already connected)
         if (this.startNode?.parent) {
             const parentElement = this.startNode.parent;
-            const nodeIndex = parentElement.getNode(0) === this.startNode ? 0 : 1;
-            this.previewRoad.connectWith(0, parentElement, nodeIndex);
+            const nodeIndex = parentElement.getNodeIndex(this.startNode);
+            if (nodeIndex >= 0 && !parentElement.isConnected(nodeIndex)) {
+                this.previewRoad.connectWith(0, parentElement, nodeIndex);
+            }
         }
 
         this.dragging = true;
         return true;
     }
 
-    private onMouseUp = (e: MouseEvent): void => {
+    private handleMouseUp = (e: MouseEvent): void => {
         if (e.button !== 0 || !this.dragging || !this.previewRoad) return;
 
         this.updateMouse(e);
@@ -161,11 +163,13 @@ export default class RoadTool implements Tool {
         // Finalize position
         this.previewRoad.nodeB.update(endPos);
 
-        // Connect end node if snapped
+        // Connect end node if snapped (only if not already connected)
         if (hitNode?.parent) {
             const parentElement = hitNode.parent;
-            const nodeIndex = parentElement.getNode(0) === hitNode ? 0 : 1;
-            this.previewRoad.connectWith(1, parentElement, nodeIndex);
+            const nodeIndex = parentElement.getNodeIndex(hitNode);
+            if (nodeIndex >= 0 && !parentElement.isConnected(nodeIndex)) {
+                this.previewRoad.connectWith(1, parentElement, nodeIndex);
+            }
         }
 
         this.reset();

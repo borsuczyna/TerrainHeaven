@@ -1,18 +1,24 @@
 import * as THREE from 'three';
-import type { PropertyDefinition, Property, PropertyVector3, PropertyNumber } from './Properties';
+import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
 
 export default class PropertiesPanel {
     private container: HTMLElement;
     private element: WorldElement | null = null;
     private refreshInterval: number | null = null;
+    private customDef: PropertyDefinition | null = null;
 
     constructor() {
         this.container = document.getElementById('properties-panel')!;
     }
 
     public show(element: WorldElement): void {
+        if (this.element) {
+            this.element.onPropertiesChanged = null;
+        }
+        this.customDef = null;
         this.element = element;
+        this.element.onPropertiesChanged = () => this.render();
         this.render();
         this.container.classList.add('visible');
 
@@ -21,7 +27,23 @@ export default class PropertiesPanel {
         this.refreshInterval = window.setInterval(() => this.refreshValues(), 100);
     }
 
+    public showCustom(def: PropertyDefinition): void {
+        if (this.element) {
+            this.element.onPropertiesChanged = null;
+            this.element = null;
+        }
+        this.customDef = def;
+        this.render();
+        this.container.classList.add('visible');
+
+        if (this.refreshInterval) clearInterval(this.refreshInterval);
+        this.refreshInterval = null;
+    }
+
     public hide(): void {
+        if (this.element) {
+            this.element.onPropertiesChanged = null;
+        }
         this.element = null;
         this.container.classList.remove('visible');
         this.container.innerHTML = '';
@@ -32,8 +54,8 @@ export default class PropertiesPanel {
     }
 
     private render(): void {
-        if (!this.element) return;
-        const def = this.element.getProperties();
+        const def = this.customDef ?? this.element?.getProperties();
+        if (!def) return;
 
         let html = `<div class="panel-header"><span class="icon">${def.icon}</span>${def.title}</div>`;
 
@@ -54,8 +76,15 @@ export default class PropertiesPanel {
         this.bindEvents(def);
     }
 
-    private renderProperty(prop: Property, sectionLabel: string): string {
+    private renderProperty(prop: SectionItem, sectionLabel: string): string {
         const id = `${sectionLabel}-${prop.label}`.replace(/\s+/g, '-').toLowerCase();
+
+        if (prop.type === 'button') {
+            return `
+                <div class="prop-row" data-prop-id="${id}" data-prop-type="button">
+                    <button class="prop-button">${prop.label}</button>
+                </div>`;
+        }
 
         if (prop.type === 'vector3') {
             const v = prop.get();
@@ -138,12 +167,19 @@ export default class PropertiesPanel {
                     (prop as PropertyNumber).set(v);
                 });
             }
+
+            if (prop.type === 'button') {
+                const btn = row.querySelector('button')!;
+                btn.addEventListener('click', () => {
+                    (prop as PropertyButton).onClick();
+                });
+            }
         }
     }
 
     private refreshValues(): void {
-        if (!this.element) return;
-        const def = this.element.getProperties();
+        const def = this.customDef ?? this.element?.getProperties();
+        if (!def) return;
 
         // Only refresh values of inputs not currently focused
         for (const section of def.sections) {
