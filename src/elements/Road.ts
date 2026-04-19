@@ -11,6 +11,7 @@ export default class Road extends WorldElement {
     public get nodeB(): WorldNode { return this.nodes[1]; }
 
     public width: number = 3;
+    public lanes: number = 2;
 
     public override getWidth(): number { return this.width; }
     private _divisions: number = 3;
@@ -18,7 +19,7 @@ export default class Road extends WorldElement {
     private curvePointB: WorldNode | null = null;
     private curveLineA: THREE.Line | null = null;
     private curveLineB: THREE.Line | null = null;
-    private bezierLine: THREE.Line | null = null;
+    private laneLines: THREE.Line[] = [];
 
     public get divisions(): number { return this._divisions; }
     public set divisions(value: number) { this._divisions = value; this.updateCurveLines(); }
@@ -67,7 +68,8 @@ export default class Road extends WorldElement {
     private updateCurveLines(): void {
         if (this.curveLineA) { this.mesh.remove(this.curveLineA); this.curveLineA = null; }
         if (this.curveLineB) { this.mesh.remove(this.curveLineB); this.curveLineB = null; }
-        if (this.bezierLine) { this.mesh.remove(this.bezierLine); this.bezierLine = null; }
+        for (const line of this.laneLines) this.mesh.remove(line);
+        this.laneLines = [];
 
         if (!this.curvePointA || !this.curvePointB) return;
 
@@ -88,9 +90,37 @@ export default class Road extends WorldElement {
         this.mesh.add(this.curveLineB);
 
         const points = this.getBezierCurvePoints();
-        const bezierGeo = new THREE.BufferGeometry().setFromPoints(points);
-        this.bezierLine = new THREE.Line(bezierGeo, new THREE.LineBasicMaterial({ color: 0xffffff }));
-        this.mesh.add(this.bezierLine);
+        const up = new THREE.Vector3(0, 1, 0);
+        const halfWidthStart = this.getResolvedHalfWidth(0);
+        const halfWidthEnd = this.getResolvedHalfWidth(1);
+
+        const getRightAtIndex = (index: number): THREE.Vector3 => {
+            if (index === 0) return this.getResolvedNodeBasis(0).right;
+            if (index === points.length - 1) return this.getResolvedNodeBasis(1).right;
+            const next = points[index + 1];
+            const prev = points[index - 1];
+            const direction = new THREE.Vector3().subVectors(next, prev).normalize();
+            return new THREE.Vector3().crossVectors(direction, up).normalize();
+        };
+
+        // Draw N+1 lane boundary lines (edges + interior dividers)
+        for (let b = 0; b <= this.lanes; b++) {
+            const frac = b / this.lanes; // 0..1
+            const offsetPoints: THREE.Vector3[] = [];
+            for (let i = 0; i < points.length; i++) {
+                const t = i / (points.length - 1);
+                const hw = halfWidthStart + (halfWidthEnd - halfWidthStart) * t;
+                const offset = -hw + 2 * hw * frac;
+                const right = getRightAtIndex(i);
+                offsetPoints.push(points[i].clone().add(right.clone().multiplyScalar(offset)));
+            }
+            const isEdge = b === 0 || b === this.lanes;
+            const mat = new THREE.LineBasicMaterial({ color: isEdge ? 0xffffff : 0x888888 });
+            const geo = new THREE.BufferGeometry().setFromPoints(offsetPoints);
+            const line = new THREE.Line(geo, mat);
+            this.laneLines.push(line);
+            this.mesh.add(line);
+        }
     }
 
     private getBezierCurvePoints(): THREE.Vector3[] {
@@ -157,6 +187,14 @@ export default class Road extends WorldElement {
                     },
                     {
                         type: 'number' as const,
+                        label: 'Lanes',
+                        get: () => self.lanes,
+                        set: (v: number) => { self.lanes = Math.max(1, Math.round(v)); self.update(); },
+                        min: 1,
+                        step: 1,
+                    },
+                    {
+                        type: 'number' as const,
                         label: 'Divisions',
                         get: () => self.divisions,
                         set: (v: number) => { self.divisions = Math.max(0, Math.round(v)); self.update(); },
@@ -185,15 +223,18 @@ export default class Road extends WorldElement {
 
     protected getTriangles(): Triangle[] {
         const triangles: Triangle[] = [];
+        for (let lane = 0; lane < this.lanes; lane++) {
+            triangles.push(...this.getLaneTriangles(lane));
+        }
+        return triangles;
+    }
+
+    private getLaneTriangles(laneIndex: number): Triangle[] {
+        const triangles: Triangle[] = [];
         const points = this.getBezierCurvePoints();
         const up = new THREE.Vector3(0, 1, 0);
         const halfWidthStart = this.getResolvedHalfWidth(0);
         const halfWidthEnd = this.getResolvedHalfWidth(1);
-
-        const getHalfWidthAtIndex = (index: number): number => {
-            const t = index / (points.length - 1);
-            return halfWidthStart + (halfWidthEnd - halfWidthStart) * t;
-        };
 
         const getRightAtIndex = (index: number): THREE.Vector3 => {
             if (index === 0) return this.getResolvedNodeBasis(0).right;
@@ -204,16 +245,33 @@ export default class Road extends WorldElement {
             return new THREE.Vector3().crossVectors(direction, up).normalize();
         };
 
+        // Lane goes from laneIndex/lanes to (laneIndex+1)/lanes across the width
+        // Map from [-halfWidth, +halfWidth] so lane 0 is leftmost
+        const laneLeftFrac = laneIndex / this.lanes;       // 0..1
+        const laneRightFrac = (laneIndex + 1) / this.lanes; // 0..1
+
         for (let i = 0; i < points.length - 1; i++) {
             const curr = points[i];
             const next = points[i + 1];
-            const rightCurr = getRightAtIndex(i).multiplyScalar(getHalfWidthAtIndex(i));
-            const rightNext = getRightAtIndex(i + 1).multiplyScalar(getHalfWidthAtIndex(i + 1));
 
-            const bl = curr.clone().sub(rightCurr);
-            const br = curr.clone().add(rightCurr);
-            const tl = next.clone().sub(rightNext);
-            const tr = next.clone().add(rightNext);
+            const tCurr = i / (points.length - 1);
+            const tNext = (i + 1) / (points.length - 1);
+            const hwCurr = halfWidthStart + (halfWidthEnd - halfWidthStart) * tCurr;
+            const hwNext = halfWidthStart + (halfWidthEnd - halfWidthStart) * tNext;
+
+            const rightCurr = getRightAtIndex(i);
+            const rightNext = getRightAtIndex(i + 1);
+
+            // Left/right offsets for this lane at current and next points
+            const currLeft = rightCurr.clone().multiplyScalar(-hwCurr + 2 * hwCurr * laneLeftFrac);
+            const currRight = rightCurr.clone().multiplyScalar(-hwCurr + 2 * hwCurr * laneRightFrac);
+            const nextLeft = rightNext.clone().multiplyScalar(-hwNext + 2 * hwNext * laneLeftFrac);
+            const nextRight = rightNext.clone().multiplyScalar(-hwNext + 2 * hwNext * laneRightFrac);
+
+            const bl = curr.clone().add(currLeft);
+            const br = curr.clone().add(currRight);
+            const tl = next.clone().add(nextLeft);
+            const tr = next.clone().add(nextRight);
 
             triangles.push(new Triangle(bl, br, tr));
             triangles.push(new Triangle(bl, tr, tl));
