@@ -4,11 +4,20 @@ export default class Triangle {
     public a: THREE.Vector3;
     public b: THREE.Vector3;
     public c: THREE.Vector3;
+    public uvA: THREE.Vector2;
+    public uvB: THREE.Vector2;
+    public uvC: THREE.Vector2;
 
-    constructor(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) {
+    constructor(
+        a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
+        uvA = new THREE.Vector2(), uvB = new THREE.Vector2(), uvC = new THREE.Vector2()
+    ) {
         this.a = a;
         this.b = b;
         this.c = c;
+        this.uvA = uvA;
+        this.uvB = uvB;
+        this.uvC = uvC;
     }
 
     public toArray(): number[] {
@@ -16,6 +25,14 @@ export default class Triangle {
             this.a.x, this.a.y, this.a.z,
             this.b.x, this.b.y, this.b.z,
             this.c.x, this.c.y, this.c.z,
+        ];
+    }
+
+    public uvToArray(): number[] {
+        return [
+            this.uvA.x, this.uvA.y,
+            this.uvB.x, this.uvB.y,
+            this.uvC.x, this.uvC.y,
         ];
     }
 

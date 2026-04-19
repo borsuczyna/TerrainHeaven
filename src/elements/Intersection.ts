@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -14,6 +14,9 @@ export default class Intersection extends WorldElement {
     public edgeType: EdgeType = 'none';
     public sidewalkWidth: number = 1;
     public curbHeight: number = 0.15;
+    public roadTexSize: number = 3;
+    public roadTexOffsetX: number = 0;
+    public roadTexOffsetY: number = 0;
 
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
@@ -176,16 +179,67 @@ export default class Intersection extends WorldElement {
                         ] : []),
                     ],
                 },
+                {
+                    label: 'Textures',
+                    properties: [
+                        {
+                            type: 'number' as const,
+                            label: 'Road Size',
+                            get: () => self.roadTexSize,
+                            set: (v: number) => { self.roadTexSize = Math.max(0.1, v); self.update(); },
+                            min: 0.1,
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Offset X',
+                            get: () => self.roadTexOffsetX,
+                            set: (v: number) => { self.roadTexOffsetX = v; self.update(); },
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Offset Y',
+                            get: () => self.roadTexOffsetY,
+                            set: (v: number) => { self.roadTexOffsetY = v; self.update(); },
+                            step: 0.1,
+                        },
+                        {
+                            type: 'select' as const,
+                            label: 'Road Rot.',
+                            options: [
+                                { label: '0°', value: '0' },
+                                { label: '90°', value: '90' },
+                                { label: '180°', value: '180' },
+                                { label: '270°', value: '270' },
+                            ],
+                            get: () => String(self.textureRotations.get('road') ?? 0),
+                            set: (v: string) => { self.setTextureRotation('road', Number(v)); },
+                        },
+                        {
+                            type: 'select' as const,
+                            label: 'Sidewalk Rot.',
+                            options: [
+                                { label: '0°', value: '0' },
+                                { label: '90°', value: '90' },
+                                { label: '180°', value: '180' },
+                                { label: '270°', value: '270' },
+                            ],
+                            get: () => String(self.textureRotations.get('sidewalk') ?? 0),
+                            set: (v: string) => { self.setTextureRotation('sidewalk', Number(v)); },
+                        },
+                    ],
+                },
                 ...nodeSections,
             ],
         };
     }
 
-    protected getTriangles(): Triangle[] {
-        const triangles: Triangle[] = [];
+    protected getGeometry(): GeometryGroup[] {
+        const roadTris: Triangle[] = [];
+        const swTris: Triangle[] = [];
         const center = this.getCenter();
 
-        // For each node, compute left/right edge points using resolved basis + half-width
         const leftEdges: THREE.Vector3[] = [];
         const rightEdges: THREE.Vector3[] = [];
 
@@ -197,14 +251,23 @@ export default class Intersection extends WorldElement {
             rightEdges.push(nodePos.clone().add(basis.right.clone().multiplyScalar(hw)));
         }
 
+        // Use planar UV based on world XZ relative to center, scaled by roadTexSize
+        const s = this.roadTexSize || 1;
+        const uvOf = (p: THREE.Vector3) => new THREE.Vector2(
+            (p.x - center.x) / s + this.roadTexOffsetX,
+            (p.z - center.z) / s + this.roadTexOffsetY,
+        );
+
         for (let i = 0; i < this._nodeCount; i++) {
             const nextIdx = (i + 1) % this._nodeCount;
 
-            // Road mouth quad at node i (two triangles)
-            triangles.push(new Triangle(center.clone(), rightEdges[i].clone(), leftEdges[i].clone()));
+            // Road mouth quad at node i
+            roadTris.push(new Triangle(center.clone(), rightEdges[i].clone(), leftEdges[i].clone(),
+                uvOf(center), uvOf(rightEdges[i]), uvOf(leftEdges[i])));
 
             // Fill gap between node i's right edge and next node's left edge
-            triangles.push(new Triangle(center.clone(), leftEdges[nextIdx].clone(), rightEdges[i].clone()));
+            roadTris.push(new Triangle(center.clone(), leftEdges[nextIdx].clone(), rightEdges[i].clone(),
+                uvOf(center), uvOf(leftEdges[nextIdx]), uvOf(rightEdges[i])));
         }
 
         // Sidewalk around the perimeter
@@ -223,30 +286,37 @@ export default class Intersection extends WorldElement {
                 const nextCh = this.getResolvedCurbHeight(nextIdx);
                 const up = new THREE.Vector3(0, 1, 0);
 
-                // Right edge of node i and left edge of next node form the gap
                 const innerA = rightEdges[i];
                 const innerB = leftEdges[nextIdx];
-                // Outer edges: extend outward by sidewalk width
                 const outerA = nodePos.clone().add(basis.right.clone().multiplyScalar(hw + sw));
                 const outerB = nextNodePos.clone().sub(nextBasis.right.clone().multiplyScalar(nextHw + nextSw));
 
                 const upA = up.clone().multiplyScalar(ch);
                 const upB = up.clone().multiplyScalar(nextCh);
 
-                // Curb face (vertical)
                 const innerAUp = innerA.clone().add(upA);
                 const innerBUp = innerB.clone().add(upB);
-                triangles.push(new Triangle(innerA.clone(), innerBUp.clone(), innerAUp.clone()));
-                triangles.push(new Triangle(innerA.clone(), innerB.clone(), innerBUp.clone()));
-
-                // Sidewalk top (raised)
                 const outerAUp = outerA.clone().add(upA);
                 const outerBUp = outerB.clone().add(upB);
-                triangles.push(new Triangle(innerAUp.clone(), innerBUp.clone(), outerBUp.clone()));
-                triangles.push(new Triangle(innerAUp.clone(), outerBUp.clone(), outerAUp.clone()));
+
+                const edgeLen = innerA.distanceTo(innerB);
+
+                // Curb face
+                swTris.push(new Triangle(innerA.clone(), innerBUp.clone(), innerAUp.clone(),
+                    new THREE.Vector2(0, 0), new THREE.Vector2(1, edgeLen), new THREE.Vector2(1, 0)));
+                swTris.push(new Triangle(innerA.clone(), innerB.clone(), innerBUp.clone(),
+                    new THREE.Vector2(0, 0), new THREE.Vector2(0, edgeLen), new THREE.Vector2(1, edgeLen)));
+
+                // Sidewalk top
+                swTris.push(new Triangle(innerAUp.clone(), innerBUp.clone(), outerBUp.clone(),
+                    new THREE.Vector2(0, 0), new THREE.Vector2(0, edgeLen), new THREE.Vector2(1, edgeLen)));
+                swTris.push(new Triangle(innerAUp.clone(), outerBUp.clone(), outerAUp.clone(),
+                    new THREE.Vector2(0, 0), new THREE.Vector2(1, edgeLen), new THREE.Vector2(1, 0)));
             }
         }
 
-        return triangles;
+        const groups: GeometryGroup[] = [{ name: 'road', triangles: roadTris }];
+        if (swTris.length > 0) groups.push({ name: 'sidewalk', triangles: swTris });
+        return groups;
     }
 }

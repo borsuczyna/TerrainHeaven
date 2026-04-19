@@ -11,16 +11,24 @@ export interface NodeBasis {
     up: THREE.Vector3;
 }
 
+export interface GeometryGroup {
+    name: string;
+    triangles: Triangle[];
+}
+
 interface Connection {
     element: WorldElement;
     nodeIndex: number;
 }
 
 export default abstract class WorldElement {
-    public readonly mesh: THREE.Mesh = new THREE.Mesh(undefined, new THREE.MeshStandardMaterial());
+    public readonly mesh: THREE.Mesh = new THREE.Mesh(undefined, [new THREE.MeshStandardMaterial()]);
     protected nodes: WorldNode[] = [];
     public connections: Map<number, Connection> = new Map();
     public onPropertiesChanged: (() => void) | null = null;
+    private groupNames: string[] = [];
+    private groupTextures: Map<string, THREE.Texture> = new Map();
+    public textureRotations: Map<string, number> = new Map();
 
     constructor() {
         WireframeManager.register(this.mesh);
@@ -114,14 +122,17 @@ export default abstract class WorldElement {
     }
 
     public setSelected(selected: boolean): void {
-        const mat = this.mesh.material as THREE.MeshStandardMaterial;
-        if (!mat?.emissive) return;
-        if (selected) {
-            mat.emissive.setHex(0x0044ff);
-            mat.emissiveIntensity = 0.5;
-        } else {
-            mat.emissive.setHex(0x000000);
-            mat.emissiveIntensity = 1;
+        const mats = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+        for (const mat of mats) {
+            const m = mat as THREE.MeshStandardMaterial;
+            if (!m?.emissive) continue;
+            if (selected) {
+                m.emissive.setHex(0x0044ff);
+                m.emissiveIntensity = 0.5;
+            } else {
+                m.emissive.setHex(0x000000);
+                m.emissiveIntensity = 1;
+            }
         }
     }
 
@@ -148,21 +159,103 @@ export default abstract class WorldElement {
     }
 
     public update(): void {
-        const triangles = this.getTriangles();
-        this.setTriangles(triangles);
+        const groups = this.getGeometry();
+        this.setGeometry(groups);
     }
 
-    protected abstract getTriangles(): Triangle[];
+    protected abstract getGeometry(): GeometryGroup[];
 
-    private setTriangles(triangles: Triangle[]): void {
+    public getGroupNameAtFace(faceIndex: number): string | null {
+        const geometry = this.mesh.geometry;
+        if (!geometry) return null;
+        const vertexIndex = faceIndex * 3;
+        for (const group of geometry.groups) {
+            if (vertexIndex >= group.start && vertexIndex < group.start + group.count) {
+                return this.groupNames[group.materialIndex ?? 0] ?? null;
+            }
+        }
+        return this.groupNames[0] ?? null;
+    }
+
+    public setGroupTexture(groupName: string, texture: THREE.Texture): void {
+        this.groupTextures.set(groupName, texture);
+        this.applyTextureRotation(groupName, texture);
+        // Update existing material if already built
+        const mats = this.mesh.material;
+        if (Array.isArray(mats)) {
+            const idx = this.groupNames.indexOf(groupName);
+            if (idx >= 0 && mats[idx]) {
+                const m = mats[idx] as THREE.MeshStandardMaterial;
+                m.map = texture;
+                m.needsUpdate = true;
+            }
+        }
+    }
+
+    public setTextureRotation(groupName: string, degrees: number): void {
+        this.textureRotations.set(groupName, degrees);
+        const tex = this.groupTextures.get(groupName);
+        if (tex) {
+            this.applyTextureRotation(groupName, tex);
+            // Force material update
+            const mats = this.mesh.material;
+            if (Array.isArray(mats)) {
+                const idx = this.groupNames.indexOf(groupName);
+                if (idx >= 0 && mats[idx]) {
+                    (mats[idx] as THREE.MeshStandardMaterial).needsUpdate = true;
+                }
+            }
+        }
+    }
+
+    private applyTextureRotation(groupName: string, tex: THREE.Texture): void {
+        const deg = this.textureRotations.get(groupName) ?? 0;
+        tex.rotation = (deg * Math.PI) / 180;
+        tex.center.set(0.5, 0.5);
+    }
+
+    private setGeometry(groups: GeometryGroup[]): void {
         const geometry = new THREE.BufferGeometry();
-        const positionArray = new Float32Array(triangles.length * 9);
-        triangles.forEach((triangle, index) => {
-            positionArray.set(triangle.toArray(), index * 9);
+        const allTriangles: Triangle[] = [];
+        const groupInfos: { name: string; start: number; count: number }[] = [];
+
+        let vertexOffset = 0;
+        for (const group of groups) {
+            const count = group.triangles.length * 3;
+            groupInfos.push({ name: group.name, start: vertexOffset, count });
+            allTriangles.push(...group.triangles);
+            vertexOffset += count;
+        }
+
+        const totalVerts = allTriangles.length * 3;
+        const positionArray = new Float32Array(totalVerts * 3);
+        const uvArray = new Float32Array(totalVerts * 2);
+
+        allTriangles.forEach((tri, idx) => {
+            positionArray.set(tri.toArray(), idx * 9);
+            uvArray.set(tri.uvToArray(), idx * 6);
         });
 
         geometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
         geometry.computeVertexNormals();
+
+        this.groupNames = [];
+        const materials: THREE.MeshStandardMaterial[] = [];
+        for (let i = 0; i < groupInfos.length; i++) {
+            const info = groupInfos[i];
+            geometry.addGroup(info.start, info.count, i);
+            this.groupNames.push(info.name);
+            const mat = new THREE.MeshStandardMaterial();
+            const tex = this.groupTextures.get(info.name);
+            if (tex) {
+                this.applyTextureRotation(info.name, tex);
+                mat.map = tex;
+            }
+            materials.push(mat);
+        }
+
         this.mesh.geometry = geometry;
+        this.mesh.material = materials;
     }
 }

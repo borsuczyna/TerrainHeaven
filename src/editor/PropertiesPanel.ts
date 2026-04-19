@@ -178,10 +178,12 @@ export default class PropertiesPanel {
 
             if (prop.type === 'number') {
                 const input = row.querySelector('input')!;
-                input.addEventListener('change', () => {
+                const commitNumber = () => {
                     const v = parseFloat(input.value) || 0;
                     (prop as PropertyNumber).set(v);
-                });
+                };
+                input.addEventListener('change', commitNumber);
+                input.addEventListener('input', commitNumber);
             }
 
             if (prop.type === 'button') {

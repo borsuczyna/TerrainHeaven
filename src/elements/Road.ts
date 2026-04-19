@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -269,6 +269,35 @@ export default class Road extends WorldElement {
                     ] : []),
                 ],
             },
+            {
+                label: 'Textures',
+                properties: [
+                    {
+                        type: 'select' as const,
+                        label: 'Road Rot.',
+                        options: [
+                            { label: '0°', value: '0' },
+                            { label: '90°', value: '90' },
+                            { label: '180°', value: '180' },
+                            { label: '270°', value: '270' },
+                        ],
+                        get: () => String(self.textureRotations.get('road') ?? 0),
+                        set: (v: string) => { self.setTextureRotation('road', Number(v)); },
+                    },
+                    {
+                        type: 'select' as const,
+                        label: 'Sidewalk Rot.',
+                        options: [
+                            { label: '0°', value: '0' },
+                            { label: '90°', value: '90' },
+                            { label: '180°', value: '180' },
+                            { label: '270°', value: '270' },
+                        ],
+                        get: () => String(self.textureRotations.get('sidewalk') ?? 0),
+                        set: (v: string) => { self.setTextureRotation('sidewalk', Number(v)); },
+                    },
+                ],
+            },
         ];
 
         if (this.curvePointA) {
@@ -287,52 +316,91 @@ export default class Road extends WorldElement {
         return { title: 'Road', icon: '&#9776;', sections };
     }
 
-    protected getTriangles(): Triangle[] {
-        const triangles: Triangle[] = [];
+    protected getGeometry(): GeometryGroup[] {
+        const edge = this.computeEdgeData();
+        const roadTris: Triangle[] = [];
         for (let lane = 0; lane < this.lanes; lane++) {
-            triangles.push(...this.getLaneTriangles(lane));
+            roadTris.push(...this.getLaneTriangles(lane, edge));
         }
+        const groups: GeometryGroup[] = [{ name: 'road', triangles: roadTris }];
         if (this.edgeType === 'sidewalk') {
-            triangles.push(...this.getSidewalkTriangles(-1)); // left
-            triangles.push(...this.getSidewalkTriangles(1));  // right
+            const swTris: Triangle[] = [];
+            swTris.push(...this.getSidewalkTriangles(-1, edge));
+            swTris.push(...this.getSidewalkTriangles(1, edge));
+            groups.push({ name: 'sidewalk', triangles: swTris });
         }
-        return triangles;
+        return groups;
     }
 
-    private getLaneTriangles(laneIndex: number): Triangle[] {
-        const triangles: Triangle[] = [];
+    private computeEdgeData() {
         const points = this.getBezierCurvePoints();
         const up = new THREE.Vector3(0, 1, 0);
         const halfWidthStart = this.getResolvedHalfWidth(0);
         const halfWidthEnd = this.getResolvedHalfWidth(1);
 
-        const getRightAtIndex = (index: number): THREE.Vector3 => {
-            if (index === 0) return this.getResolvedNodeBasis(0).right;
-            if (index === points.length - 1) return this.getResolvedNodeBasis(1).right;
-            const next = points[index + 1];
-            const prev = points[index - 1];
-            const direction = new THREE.Vector3().subVectors(next, prev).normalize();
-            return new THREE.Vector3().crossVectors(direction, up).normalize();
-        };
+        const rightVecs: THREE.Vector3[] = [];
+        const halfWidths: number[] = [];
 
-        // Lane goes from laneIndex/lanes to (laneIndex+1)/lanes across the width
-        // Map from [-halfWidth, +halfWidth] so lane 0 is leftmost
-        const laneLeftFrac = laneIndex / this.lanes;       // 0..1
-        const laneRightFrac = (laneIndex + 1) / this.lanes; // 0..1
+        for (let i = 0; i < points.length; i++) {
+            const t = i / (points.length - 1);
+            halfWidths.push(halfWidthStart + (halfWidthEnd - halfWidthStart) * t);
+
+            if (i === 0) rightVecs.push(this.getResolvedNodeBasis(0).right);
+            else if (i === points.length - 1) rightVecs.push(this.getResolvedNodeBasis(1).right);
+            else {
+                const next = points[i + 1];
+                const prev = points[i - 1];
+                const direction = new THREE.Vector3().subVectors(next, prev).normalize();
+                rightVecs.push(new THREE.Vector3().crossVectors(direction, up).normalize());
+            }
+        }
+
+        // Compute left/right edge positions
+        const leftEdgePos: THREE.Vector3[] = [];
+        const rightEdgePos: THREE.Vector3[] = [];
+        for (let i = 0; i < points.length; i++) {
+            leftEdgePos.push(points[i].clone().add(rightVecs[i].clone().multiplyScalar(-halfWidths[i])));
+            rightEdgePos.push(points[i].clone().add(rightVecs[i].clone().multiplyScalar(halfWidths[i])));
+        }
+
+        // Cumulative distances along each edge
+        const leftCumDist = [0];
+        const rightCumDist = [0];
+        for (let i = 1; i < points.length; i++) {
+            leftCumDist.push(leftCumDist[i - 1] + leftEdgePos[i].distanceTo(leftEdgePos[i - 1]));
+            rightCumDist.push(rightCumDist[i - 1] + rightEdgePos[i].distanceTo(rightEdgePos[i - 1]));
+        }
+
+        const leftTotal = leftCumDist[leftCumDist.length - 1];
+        const rightTotal = rightCumDist[rightCumDist.length - 1];
+        const maxEdgeLen = Math.max(leftTotal, rightTotal, 0.001);
+
+        // Normalize so both edges end at maxEdgeLen
+        for (let i = 0; i < leftCumDist.length; i++) {
+            leftCumDist[i] = leftTotal > 0 ? (leftCumDist[i] / leftTotal) * maxEdgeLen : 0;
+        }
+        for (let i = 0; i < rightCumDist.length; i++) {
+            rightCumDist[i] = rightTotal > 0 ? (rightCumDist[i] / rightTotal) * maxEdgeLen : 0;
+        }
+
+        return { points, rightVecs, halfWidths, leftCumDist, rightCumDist, maxEdgeLen };
+    }
+
+    private getLaneTriangles(laneIndex: number, edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
+        const triangles: Triangle[] = [];
+        const { points, rightVecs, halfWidths, leftCumDist, rightCumDist } = edge;
+
+        const laneLeftFrac = laneIndex / this.lanes;
+        const laneRightFrac = (laneIndex + 1) / this.lanes;
 
         for (let i = 0; i < points.length - 1; i++) {
             const curr = points[i];
             const next = points[i + 1];
+            const hwCurr = halfWidths[i];
+            const hwNext = halfWidths[i + 1];
+            const rightCurr = rightVecs[i];
+            const rightNext = rightVecs[i + 1];
 
-            const tCurr = i / (points.length - 1);
-            const tNext = (i + 1) / (points.length - 1);
-            const hwCurr = halfWidthStart + (halfWidthEnd - halfWidthStart) * tCurr;
-            const hwNext = halfWidthStart + (halfWidthEnd - halfWidthStart) * tNext;
-
-            const rightCurr = getRightAtIndex(i);
-            const rightNext = getRightAtIndex(i + 1);
-
-            // Left/right offsets for this lane at current and next points
             const currLeft = rightCurr.clone().multiplyScalar(-hwCurr + 2 * hwCurr * laneLeftFrac);
             const currRight = rightCurr.clone().multiplyScalar(-hwCurr + 2 * hwCurr * laneRightFrac);
             const nextLeft = rightNext.clone().multiplyScalar(-hwNext + 2 * hwNext * laneLeftFrac);
@@ -343,57 +411,66 @@ export default class Road extends WorldElement {
             const tl = next.clone().add(nextLeft);
             const tr = next.clone().add(nextRight);
 
-            triangles.push(new Triangle(bl, br, tr));
-            triangles.push(new Triangle(bl, tr, tl));
+            // UV: U = 0..1 per lane (full texture width per lane), V along length (edge-length proportional)
+            // Every second lane is inverted (180° rotated)
+            const vBL = leftCumDist[i] + (rightCumDist[i] - leftCumDist[i]) * laneLeftFrac;
+            const vBR = leftCumDist[i] + (rightCumDist[i] - leftCumDist[i]) * laneRightFrac;
+            const vTL = leftCumDist[i + 1] + (rightCumDist[i + 1] - leftCumDist[i + 1]) * laneLeftFrac;
+            const vTR = leftCumDist[i + 1] + (rightCumDist[i + 1] - leftCumDist[i + 1]) * laneRightFrac;
+
+            const invert = laneIndex % 2 === 1;
+            const maxV = edge.maxEdgeLen;
+            const uL = invert ? 1 : 0;
+            const uR = invert ? 0 : 1;
+            const fvBL = invert ? maxV - vBL : vBL;
+            const fvBR = invert ? maxV - vBR : vBR;
+            const fvTL = invert ? maxV - vTL : vTL;
+            const fvTR = invert ? maxV - vTR : vTR;
+
+            triangles.push(new Triangle(bl, br, tr,
+                new THREE.Vector2(uL, fvBL),
+                new THREE.Vector2(uR, fvBR),
+                new THREE.Vector2(uR, fvTR),
+            ));
+            triangles.push(new Triangle(bl, tr, tl,
+                new THREE.Vector2(uL, fvBL),
+                new THREE.Vector2(uR, fvTR),
+                new THREE.Vector2(uL, fvTL),
+            ));
         }
 
         return triangles;
     }
 
-    /** Generate sidewalk triangles on one side. side: -1 = left, +1 = right */
-    private getSidewalkTriangles(side: number): Triangle[] {
+    private getSidewalkTriangles(side: number, edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
         const triangles: Triangle[] = [];
-        const points = this.getBezierCurvePoints();
+        const { points, rightVecs, halfWidths, leftCumDist, rightCumDist } = edge;
         const up = new THREE.Vector3(0, 1, 0);
-        const halfWidthStart = this.getResolvedHalfWidth(0);
-        const halfWidthEnd = this.getResolvedHalfWidth(1);
         const swStart = this.getResolvedSidewalkWidth(0);
         const swEnd = this.getResolvedSidewalkWidth(1);
         const chStart = this.getResolvedCurbHeight(0);
         const chEnd = this.getResolvedCurbHeight(1);
 
-        const getRightAtIndex = (index: number): THREE.Vector3 => {
-            if (index === 0) return this.getResolvedNodeBasis(0).right;
-            if (index === points.length - 1) return this.getResolvedNodeBasis(1).right;
-            const next = points[index + 1];
-            const prev = points[index - 1];
-            const direction = new THREE.Vector3().subVectors(next, prev).normalize();
-            return new THREE.Vector3().crossVectors(direction, up).normalize();
-        };
-
         for (let i = 0; i < points.length - 1; i++) {
             const curr = points[i];
             const next = points[i + 1];
-
+            const hwCurr = halfWidths[i];
+            const hwNext = halfWidths[i + 1];
             const tCurr = i / (points.length - 1);
             const tNext = (i + 1) / (points.length - 1);
-            const hwCurr = halfWidthStart + (halfWidthEnd - halfWidthStart) * tCurr;
-            const hwNext = halfWidthStart + (halfWidthEnd - halfWidthStart) * tNext;
             const swCurr = swStart + (swEnd - swStart) * tCurr;
             const swNext = swStart + (swEnd - swStart) * tNext;
             const chCurr = chStart + (chEnd - chStart) * tCurr;
             const chNext = chStart + (chEnd - chStart) * tNext;
 
-            const rightCurr = getRightAtIndex(i);
-            const rightNext = getRightAtIndex(i + 1);
+            const rightCurr = rightVecs[i];
+            const rightNext = rightVecs[i + 1];
 
-            // Inner edge = road edge, outer edge = road edge + sidewalkWidth
             const innerCurr = curr.clone().add(rightCurr.clone().multiplyScalar(side * hwCurr));
             const innerNext = next.clone().add(rightNext.clone().multiplyScalar(side * hwNext));
             const outerCurr = curr.clone().add(rightCurr.clone().multiplyScalar(side * (hwCurr + swCurr)));
             const outerNext = next.clone().add(rightNext.clone().multiplyScalar(side * (hwNext + swNext)));
 
-            // Raised versions (curb top)
             const upCurr = up.clone().multiplyScalar(chCurr);
             const upNext = up.clone().multiplyScalar(chNext);
             const innerCurrUp = innerCurr.clone().add(upCurr);
@@ -401,22 +478,34 @@ export default class Road extends WorldElement {
             const outerCurrUp = outerCurr.clone().add(upCurr);
             const outerNextUp = outerNext.clone().add(upNext);
 
-            // Curb face (vertical wall on road side)
+            // V along length — use the edge cumDist on the side of the road
+            const vCurr = side > 0 ? rightCumDist[i] : leftCumDist[i];
+            const vNext = side > 0 ? rightCumDist[i + 1] : leftCumDist[i + 1];
+
+            // Curb face (vertical wall): U = 0 at bottom, 1 at top
             if (side > 0) {
-                triangles.push(new Triangle(innerCurr.clone(), innerCurrUp.clone(), innerNextUp.clone()));
-                triangles.push(new Triangle(innerCurr.clone(), innerNextUp.clone(), innerNext.clone()));
+                triangles.push(new Triangle(innerCurr.clone(), innerCurrUp.clone(), innerNextUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(1, vCurr), new THREE.Vector2(1, vNext)));
+                triangles.push(new Triangle(innerCurr.clone(), innerNextUp.clone(), innerNext.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(1, vNext), new THREE.Vector2(0, vNext)));
             } else {
-                triangles.push(new Triangle(innerCurr.clone(), innerNextUp.clone(), innerCurrUp.clone()));
-                triangles.push(new Triangle(innerCurr.clone(), innerNext.clone(), innerNextUp.clone()));
+                triangles.push(new Triangle(innerCurr.clone(), innerNextUp.clone(), innerCurrUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(1, vNext), new THREE.Vector2(1, vCurr)));
+                triangles.push(new Triangle(innerCurr.clone(), innerNext.clone(), innerNextUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(0, vNext), new THREE.Vector2(1, vNext)));
             }
 
-            // Sidewalk top (raised flat surface)
+            // Sidewalk top (raised flat): U = 0 at inner, 1 at outer
             if (side > 0) {
-                triangles.push(new Triangle(innerCurrUp.clone(), outerCurrUp.clone(), outerNextUp.clone()));
-                triangles.push(new Triangle(innerCurrUp.clone(), outerNextUp.clone(), innerNextUp.clone()));
+                triangles.push(new Triangle(innerCurrUp.clone(), outerCurrUp.clone(), outerNextUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(1, vCurr), new THREE.Vector2(1, vNext)));
+                triangles.push(new Triangle(innerCurrUp.clone(), outerNextUp.clone(), innerNextUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(1, vNext), new THREE.Vector2(0, vNext)));
             } else {
-                triangles.push(new Triangle(innerCurrUp.clone(), outerNextUp.clone(), outerCurrUp.clone()));
-                triangles.push(new Triangle(innerCurrUp.clone(), innerNextUp.clone(), outerNextUp.clone()));
+                triangles.push(new Triangle(innerCurrUp.clone(), outerNextUp.clone(), outerCurrUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(1, vNext), new THREE.Vector2(1, vCurr)));
+                triangles.push(new Triangle(innerCurrUp.clone(), innerNextUp.clone(), outerNextUp.clone(),
+                    new THREE.Vector2(0, vCurr), new THREE.Vector2(0, vNext), new THREE.Vector2(1, vNext)));
             }
         }
 

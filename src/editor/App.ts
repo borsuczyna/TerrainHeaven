@@ -9,7 +9,10 @@ import type { Tool } from "./ToolManager";
 import RoadTool from "./RoadTool";
 import IntersectionTool from "./IntersectionTool";
 import WireframeManager from "./WireframeManager";
+import TextureBrowser from "./TextureBrowser";
+import * as THREE from "three";
 import type WorldNode from "../elements/WorldNode";
+import type WorldElement from "../elements/WorldElement";
 import type { PropertyDefinition } from "./Properties";
 
 export default class App {
@@ -74,6 +77,57 @@ export default class App {
         btnWireframe.addEventListener('click', () => {
             const active = WireframeManager.toggle();
             btnWireframe.classList.toggle('active', active);
+        });
+
+        const textureBrowser = new TextureBrowser();
+        const btnTextures = document.getElementById('btn-textures')!;
+        btnTextures.addEventListener('click', () => {
+            textureBrowser.toggle();
+            btnTextures.classList.toggle('active');
+        });
+
+        // Drag-and-drop textures onto 3D elements
+        const canvas = this.renderer.instance.domElement;
+        canvas.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer!.dropEffect = 'copy';
+        });
+        canvas.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const url = e.dataTransfer?.getData('application/x-texture-url');
+            if (!url) return;
+
+            const mouse = new THREE.Vector2(
+                (e.clientX / window.innerWidth) * 2 - 1,
+                -(e.clientY / window.innerHeight) * 2 + 1,
+            );
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, this.camera.instance);
+
+            const targets: THREE.Object3D[] = [];
+            for (const child of this.scene.instance.children) {
+                if (child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane') {
+                    targets.push(child);
+                }
+            }
+            const intersects = raycaster.intersectObjects(targets, true);
+
+            for (const hit of intersects) {
+                const el = hit.object.userData.worldElement as WorldElement | undefined;
+                if (el && hit.faceIndex != null) {
+                    const groupName = el.getGroupNameAtFace(hit.faceIndex);
+                    if (groupName) {
+                        const loader = new THREE.TextureLoader();
+                        loader.load(url, (tex) => {
+                            tex.wrapS = THREE.RepeatWrapping;
+                            tex.wrapT = THREE.RepeatWrapping;
+                            tex.colorSpace = THREE.SRGBColorSpace;
+                            el.setGroupTexture(groupName, tex);
+                        });
+                    }
+                    break;
+                }
+            }
         });
     }
 
