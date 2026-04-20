@@ -90,7 +90,7 @@ export default class App {
             if (nodes.length > 0) {
                 this.gizmo.attach(nodes);
             } else {
-                this.gizmo.attachElement(this.selection.getSelectedElement());
+                this.gizmo.attachElements(this.selection.getSelectedElements());
             }
             this.checkMerge(nodes);
         };

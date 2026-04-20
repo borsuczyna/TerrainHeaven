@@ -51,7 +51,6 @@ export default class Camera {
         if (e.button !== 0) return;
         if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
         if (this.toolManager?.getActive()?.blocksCamera) return;
-        if (this.selectionManager?.nodeWasHit) return;
         if (this.selectionManager?.gizmo?.isDragging) return;
         this.isDragging = true;
     };

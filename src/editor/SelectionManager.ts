@@ -10,7 +10,7 @@ import type ToolManager from './ToolManager';
 @singleton()
 export default class SelectionManager {
     private selected: Set<WorldNode> = new Set();
-    private selectedElement: WorldElement | null = null;
+    private selectedElements: Set<WorldElement> = new Set();
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
     private camera: THREE.PerspectiveCamera;
@@ -85,12 +85,14 @@ export default class SelectionManager {
 
         if (hitNode) {
             this._nodeWasHit = true;
-            // Also select the parent element for properties
-            if (hitNode.parent && hitNode.parent !== this.selectedElement) {
-                this.deselectElement();
-                this.selectedElement = hitNode.parent;
-                this.selectedElement.setSelected(true);
-                this.onElementSelected?.(this.selectedElement);
+            // Also select the parent element for properties / gizmo
+            if (hitNode.parent) {
+                if (ctrlHeld) {
+                    this.selectElementAdd(hitNode.parent);
+                } else {
+                    this.clearElementSelection();
+                    this.selectElementAdd(hitNode.parent);
+                }
             }
             if (ctrlHeld) {
                 if (this.selected.has(hitNode)) {
@@ -105,16 +107,22 @@ export default class SelectionManager {
         } else if (hitElement) {
             this._nodeWasHit = true;
             this.clearSelection();
-            this.deselectElement();
-            this.selectedElement = hitElement;
-            this.selectedElement.setSelected(true);
-            this.onElementSelected?.(this.selectedElement);
+            if (ctrlHeld) {
+                if (this.selectedElements.has(hitElement)) {
+                    this.deselectElement(hitElement);
+                } else {
+                    this.selectElementAdd(hitElement);
+                }
+            } else {
+                this.clearElementSelection();
+                this.selectElementAdd(hitElement);
+            }
         } else if (!ctrlHeld) {
             this.clearSelection();
-            this.deselectElement();
-            this.onElementSelected?.(null);
+            this.clearElementSelection();
         }
 
+        this.emitElementSelection();
         this.onSelectionChanged?.(this.getSelected());
     };
 
@@ -135,10 +143,29 @@ export default class SelectionManager {
         this.selected.clear();
     }
 
-    private deselectElement(): void {
-        if (this.selectedElement) {
-            this.selectedElement.setSelected(false);
-            this.selectedElement = null;
+    private selectElementAdd(element: WorldElement): void {
+        this.selectedElements.add(element);
+        element.setSelected(true);
+    }
+
+    private deselectElement(element: WorldElement): void {
+        if (!this.selectedElements.has(element)) return;
+        this.selectedElements.delete(element);
+        element.setSelected(false);
+    }
+
+    private clearElementSelection(): void {
+        for (const element of this.selectedElements) {
+            element.setSelected(false);
+        }
+        this.selectedElements.clear();
+    }
+
+    private emitElementSelection(): void {
+        if (this.selectedElements.size === 1) {
+            this.onElementSelected?.([...this.selectedElements][0]);
+        } else {
+            this.onElementSelected?.(null);
         }
     }
 
@@ -147,17 +174,18 @@ export default class SelectionManager {
     }
 
     public getSelectedElement(): WorldElement | null {
-        return this.selectedElement;
+        return this.selectedElements.size === 1 ? [...this.selectedElements][0] : null;
+    }
+
+    public getSelectedElements(): WorldElement[] {
+        return [...this.selectedElements];
     }
 
     public selectElement(element: WorldElement): void {
         this.clearSelection();
-        if (this.selectedElement) {
-            this.selectedElement.setSelected(false);
-        }
-        this.selectedElement = element;
-        this.selectedElement.setSelected(true);
-        this.onElementSelected?.(this.selectedElement);
+        this.clearElementSelection();
+        this.selectElementAdd(element);
+        this.emitElementSelection();
         this.onSelectionChanged?.([]);
     }
 

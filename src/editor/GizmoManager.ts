@@ -11,7 +11,7 @@ import SceneManager from './SceneManager';
 export default class GizmoManager {
     private controls: TransformControls;
     private activeNodes: WorldNode[] = [];
-    private activeElement: WorldElement | null = null;
+    private activeElements: WorldElement[] = [];
     private helper: THREE.Object3D = new THREE.Object3D();
     private helperLastPosition: THREE.Vector3 = new THREE.Vector3();
 
@@ -31,7 +31,7 @@ export default class GizmoManager {
 
     public attach(nodes: WorldNode[]): void {
         this.activeNodes = nodes;
-        this.activeElement = null;
+        this.activeElements = [];
 
         if (nodes.length === 0) {
             this.controls.detach();
@@ -53,43 +53,23 @@ export default class GizmoManager {
     }
 
     public attachElement(element: WorldElement | null): void {
-        this.activeNodes = [];
-        this.activeElement = element;
+        this.attachElements(element ? [element] : []);
+    }
 
-        if (!element) {
+    public attachElements(elements: WorldElement[]): void {
+        this.activeNodes = [];
+        this.activeElements = elements;
+
+        if (elements.length === 0) {
             this.controls.detach();
             return;
         }
 
-        const nodes = element.getChildWorldNodes();
-        let center = new THREE.Vector3();
-        if (nodes.length > 0) {
-            for (const node of nodes) {
-                const worldPos = new THREE.Vector3();
-                node.mesh.getWorldPosition(worldPos);
-                center.add(worldPos);
-            }
-            center.divideScalar(nodes.length);
-        } else {
-            const area = element.getOccupiedArea();
-            if (area.length > 0) {
-                let count = 0;
-                for (const tri of area) {
-                    center.x += tri.a.x + tri.b.x + tri.c.x;
-                    center.z += tri.a.y + tri.b.y + tri.c.y;
-                    count += 3;
-                }
-                if (count > 0) {
-                    center.x /= count;
-                    center.z /= count;
-                }
-                const meshWorld = new THREE.Vector3();
-                element.mesh.getWorldPosition(meshWorld);
-                center.y = meshWorld.y;
-            } else {
-                element.mesh.getWorldPosition(center);
-            }
+        const center = new THREE.Vector3();
+        for (const element of elements) {
+            center.add(this.getElementCenterWorld(element));
         }
+        center.divideScalar(elements.length);
 
         this.helper.position.copy(center);
         this.helperLastPosition.copy(center);
@@ -98,12 +78,12 @@ export default class GizmoManager {
 
     public detach(): void {
         this.activeNodes = [];
-        this.activeElement = null;
+        this.activeElements = [];
         this.controls.detach();
     }
 
     private onGizmoChange = (): void => {
-        if (this.activeNodes.length === 0 && !this.activeElement) return;
+        if (this.activeNodes.length === 0 && this.activeElements.length === 0) return;
 
         const delta = this.helper.position.clone().sub(this.helperLastPosition);
         if (delta.lengthSq() < 1e-12) return;
@@ -134,10 +114,48 @@ export default class GizmoManager {
             return;
         }
 
-        if (!this.activeElement) return;
-        this.activeElement.translate(delta);
+        if (this.activeElements.length === 0) return;
+        for (const element of this.activeElements) {
+            element.translate(delta);
+        }
         this.helperLastPosition.copy(this.helper.position);
     };
+
+    private getElementCenterWorld(element: WorldElement): THREE.Vector3 {
+        const nodes = element.getChildWorldNodes();
+        const center = new THREE.Vector3();
+
+        if (nodes.length > 0) {
+            for (const node of nodes) {
+                const worldPos = new THREE.Vector3();
+                node.mesh.getWorldPosition(worldPos);
+                center.add(worldPos);
+            }
+            center.divideScalar(nodes.length);
+            return center;
+        }
+
+        const area = element.getOccupiedArea();
+        if (area.length > 0) {
+            let count = 0;
+            for (const tri of area) {
+                center.x += tri.a.x + tri.b.x + tri.c.x;
+                center.z += tri.a.y + tri.b.y + tri.c.y;
+                count += 3;
+            }
+            if (count > 0) {
+                center.x /= count;
+                center.z /= count;
+            }
+            const meshWorld = new THREE.Vector3();
+            element.mesh.getWorldPosition(meshWorld);
+            center.y = meshWorld.y;
+            return center;
+        }
+
+        element.mesh.getWorldPosition(center);
+        return center;
+    }
 
     public get isDragging(): boolean {
         return this.controls.dragging;
