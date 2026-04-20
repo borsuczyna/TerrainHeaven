@@ -30,6 +30,17 @@ export default class SceneManager {
         this.update();
     }
 
+    public getElements(): WorldElement[] {
+        return this.elements;
+    }
+
+    public clearElements(): void {
+        for (const el of this.elements) {
+            this.instance.remove(el.mesh);
+        }
+        this.elements = [];
+    }
+
     public addMesh(mesh: THREE.Mesh): void {
         this.instance.add(mesh);
     }

@@ -26,6 +26,7 @@ export default class UVEditorPanel {
     private scaleHandleSize = 10;
 
     public onChange: (() => void) | null = null;
+    public onHide: (() => void) | null = null;
 
     constructor() {
         // Build DOM
@@ -35,6 +36,7 @@ export default class UVEditorPanel {
             <div class="uv-header">
                 <span class="uv-title">UV Editor</span>
                 <select class="uv-group-select"></select>
+                <button class="uv-close">&times;</button>
             </div>
             <canvas class="uv-canvas"></canvas>
             <div class="uv-footer">
@@ -53,6 +55,8 @@ export default class UVEditorPanel {
             this.draw();
         });
 
+        this.container.querySelector('.uv-close')!.addEventListener('click', () => this.hide());
+
         this.canvas.addEventListener('mousedown', this.onMouseDown);
         this.canvas.addEventListener('mousemove', this.onMouseMove);
         window.addEventListener('mouseup', this.onMouseUp);
@@ -64,6 +68,7 @@ export default class UVEditorPanel {
         header.style.cursor = 'move';
         header.addEventListener('mousedown', (e) => {
             if ((e.target as HTMLElement).tagName === 'SELECT') return;
+            if ((e.target as HTMLElement).tagName === 'BUTTON') return;
             e.preventDefault();
             const startX = e.clientX;
             const startY = e.clientY;
@@ -119,6 +124,7 @@ export default class UVEditorPanel {
         this.container.classList.remove('visible');
         this.element = null;
         this.textureImage = null;
+        this.onHide?.();
     }
 
     public get visible(): boolean {

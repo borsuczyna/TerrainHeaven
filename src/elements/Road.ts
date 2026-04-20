@@ -24,6 +24,14 @@ export default class Road extends WorldElement {
     private _divisions: number = 0;
     private curvePointA: WorldNode | null = null;
     private curvePointB: WorldNode | null = null;
+
+    public getCurvePointAPosition(): THREE.Vector3 | null {
+        return this.curvePointA ? this.curvePointA.mesh.position.clone() : null;
+    }
+
+    public getCurvePointBPosition(): THREE.Vector3 | null {
+        return this.curvePointB ? this.curvePointB.mesh.position.clone() : null;
+    }
     private curveLineA: THREE.Line | null = null;
     private curveLineB: THREE.Line | null = null;
     private laneLines: THREE.Line[] = [];

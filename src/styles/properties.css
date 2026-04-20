@@ -1,0 +1,186 @@
+/* Properties Panel - Blender style */
+#properties-panel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 280px;
+    height: 100vh;
+    background: #2b2b2b;
+    border-left: 1px solid #1a1a1a;
+    color: #ccc;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 12px;
+    z-index: 10;
+    overflow-y: auto;
+    display: none;
+}
+
+#properties-panel.visible {
+    display: block;
+}
+
+#properties-panel .panel-header {
+    background: #333;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #ddd;
+    border-bottom: 1px solid #1a1a1a;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#properties-panel .panel-header .icon {
+    font-size: 14px;
+}
+
+#properties-panel .section {
+    border-bottom: 1px solid #1a1a1a;
+}
+
+#properties-panel .section-header {
+    background: #353535;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #aaa;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#properties-panel .section-header:hover {
+    background: #3a3a3a;
+}
+
+#properties-panel .section-header .arrow {
+    font-size: 8px;
+    transition: transform 0.15s;
+}
+
+#properties-panel .section-header .arrow.collapsed {
+    transform: rotate(-90deg);
+}
+
+#properties-panel .section-body {
+    padding: 6px 12px;
+}
+
+#properties-panel .section-body.hidden {
+    display: none;
+}
+
+#properties-panel .prop-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+    gap: 4px;
+}
+
+#properties-panel .prop-label {
+    width: 60px;
+    flex-shrink: 0;
+    color: #999;
+    font-size: 11px;
+}
+
+#properties-panel .prop-fields {
+    display: flex;
+    flex: 1;
+    gap: 2px;
+}
+
+#properties-panel .prop-field {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    background: #1a1a1a;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#properties-panel .prop-field .axis-label {
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #666;
+    background: #222;
+    line-height: 24px;
+}
+
+#properties-panel .prop-field .axis-label.x { color: #e05555; }
+#properties-panel .prop-field .axis-label.y { color: #55b855; }
+#properties-panel .prop-field .axis-label.z { color: #5588dd; }
+
+#properties-panel .prop-field input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #ccc;
+    font-size: 11px;
+    padding: 4px 4px;
+    outline: none;
+    font-family: inherit;
+}
+
+#properties-panel .prop-field input:focus {
+    background: #252525;
+}
+
+#properties-panel .prop-field-single {
+    flex: 1;
+    background: #1a1a1a;
+    border-radius: 3px;
+}
+
+#properties-panel .prop-field-single input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #ccc;
+    font-size: 11px;
+    padding: 4px 6px;
+    outline: none;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+#properties-panel .prop-field-single input:focus {
+    background: #252525;
+}
+
+#properties-panel .prop-button {
+    width: 100%;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    background: #3a6ea5;
+    color: #eee;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 4px;
+}
+
+#properties-panel .prop-button:hover {
+    background: #4a8ec5;
+}
+
+#properties-panel select {
+    width: 100%;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 3px;
+    color: #ccc;
+    font-size: 11px;
+    padding: 3px 4px;
+    box-sizing: border-box;
+}
+
+#properties-panel select:focus {
+    background: #252525;
+}

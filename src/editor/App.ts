@@ -12,6 +12,9 @@ import WireframeManager from "./WireframeManager";
 import TextureBrowser from "./TextureBrowser";
 import UVEditorPanel from "./UVEditorPanel";
 import UVTool from "./UVTool";
+import ProjectSettings from "./ProjectSettings";
+import SettingsPanel from "./SettingsPanel";
+import ProjectSerializer from "./ProjectSerializer";
 import * as THREE from "three";
 import type WorldNode from "../elements/WorldNode";
 import type WorldElement from "../elements/WorldElement";
@@ -25,6 +28,9 @@ export default class App {
     public readonly gizmo: GizmoManager;
     public readonly properties: PropertiesPanel;
     public readonly toolManager: ToolManager;
+    public readonly projectSettings: ProjectSettings;
+    private settingsPanel: SettingsPanel;
+    private serializer: ProjectSerializer;
     private lastTime = 0;
 
     constructor() {
@@ -33,6 +39,10 @@ export default class App {
         this.scene = new SceneManager();
         this.properties = new PropertiesPanel();
         this.toolManager = new ToolManager();
+        this.projectSettings = new ProjectSettings(this.renderer, this.scene);
+        this.projectSettings.setCamera(this.camera.instance);
+        this.settingsPanel = new SettingsPanel(this.projectSettings);
+        this.serializer = new ProjectSerializer(this.scene, this.projectSettings);
 
         this.selection = new SelectionManager(this.camera.instance, this.scene.instance);
         this.gizmo = new GizmoManager(this.camera.instance, this.renderer.instance.domElement, this.scene.instance);
@@ -86,9 +96,54 @@ export default class App {
 
         const textureBrowser = new TextureBrowser();
         const btnTextures = document.getElementById('btn-textures')!;
+        textureBrowser.onHide = () => btnTextures.classList.remove('active');
         btnTextures.addEventListener('click', () => {
             textureBrowser.toggle();
-            btnTextures.classList.toggle('active');
+            btnTextures.classList.toggle('active', textureBrowser.isVisible);
+        });
+
+        const btnSettings = document.getElementById('btn-settings')!;
+        btnSettings.addEventListener('click', () => {
+            if (this.settingsPanel.isVisible) {
+                this.settingsPanel.hide();
+                btnSettings.classList.remove('active');
+            } else {
+                this.settingsPanel.show();
+                btnSettings.classList.add('active');
+            }
+        });
+
+        document.getElementById('btn-save')!.addEventListener('click', () => {
+            const json = this.serializer.save();
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'project.santown';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('btn-load')!.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.santown,.json';
+            input.addEventListener('change', () => {
+                const file = input.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        this.serializer.load(reader.result as string);
+                        this.properties.hide();
+                        this.selection.clearSelection();
+                    } catch (e) {
+                        console.error('Failed to load project:', e);
+                    }
+                };
+                reader.readAsText(file);
+            });
+            input.click();
         });
 
         // Drag-and-drop textures onto 3D elements
@@ -184,6 +239,7 @@ export default class App {
         const delta = (time - this.lastTime) / 1000;
         this.lastTime = time;
 
+        this.projectSettings.update();
         this.scene.update();
         this.renderer.render(this.scene.instance, this.camera.instance);
         this.camera.update(delta);

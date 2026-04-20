@@ -11,6 +11,8 @@ export default class TextureBrowser {
     private dictNames: string[];
     private searchTerm = '';
 
+    public onHide: (() => void) | null = null;
+
     constructor() {
         this.dictNames = Object.keys(textureData);
 
@@ -46,6 +48,8 @@ export default class TextureBrowser {
         this.container.appendChild(this.listContainer);
     }
 
+    public get isVisible(): boolean { return this.visible; }
+
     public toggle(): void {
         if (this.visible) {
             this.hide();
@@ -64,6 +68,7 @@ export default class TextureBrowser {
     public hide(): void {
         this.visible = false;
         this.container.classList.remove('visible');
+        this.onHide?.();
     }
 
     private render(): void {

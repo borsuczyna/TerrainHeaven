@@ -34,11 +34,8 @@ export default class SelectionManager {
     private onMouseDown = (e: MouseEvent): void => {
         if (e.button !== 0) return;
 
-        // Ignore clicks on UI
-        if ((e.target as HTMLElement).closest('#toolbar')) return;
-        if ((e.target as HTMLElement).closest('#properties-panel')) return;
-        if ((e.target as HTMLElement).closest('#texture-browser')) return;
-        if ((e.target as HTMLElement).closest('#uv-editor')) return;
+        // Ignore clicks on any UI element (only respond to canvas)
+        if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
 
         // Delegate to active tool first
         const activeTool = this.toolManager?.getActive();
