@@ -2,9 +2,9 @@
 #properties-panel {
     position: fixed;
     right: 0;
-    top: 0;
+    top: 44px;
     width: 280px;
-    height: 100vh;
+    height: calc(100vh - 44px);
     background: #2b2b2b;
     border-left: 1px solid #1a1a1a;
     color: #ccc;

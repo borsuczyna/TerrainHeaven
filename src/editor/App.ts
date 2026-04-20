@@ -15,13 +15,12 @@ import { container } from 'tsyringe';
 import TextureBrowser from "./TextureBrowser";
 import UVTool from "./UVTool";
 import ProjectSettings from "./ProjectSettings";
-import SettingsPanel from "./SettingsPanel";
-import ProjectSerializer from "./ProjectSerializer";
 import CopyManager from "./CopyManager";
 import * as THREE from "three";
 import type WorldNode from "../elements/WorldNode";
 import type WorldElement from "../elements/WorldElement";
 import type { PropertyDefinition } from "./Properties";
+import HeaderManager from "./HeaderManager";
 
 @injectable()
 export default class App {
@@ -34,13 +33,12 @@ export default class App {
     public readonly toolManager: ToolManager;
     public readonly projectSettings: ProjectSettings;
     public readonly copyManager: CopyManager;
-    private settingsPanel: SettingsPanel;
-    private serializer: ProjectSerializer;
     private textureBrowser: TextureBrowser;
     private roadTool: RoadTool;
     private intersectionTool: IntersectionTool;
     private terrainTool: TerrainTool;
     private uvTool: UVTool;
+    private headerManager: HeaderManager;
     private lastTime = 0;
 
     constructor(
@@ -53,13 +51,12 @@ export default class App {
         @inject(ToolManager) toolManager: ToolManager,
         @inject(ProjectSettings) projectSettings: ProjectSettings,
         @inject(CopyManager) copyManager: CopyManager,
-        @inject(SettingsPanel) settingsPanel: SettingsPanel,
-        @inject(ProjectSerializer) serializer: ProjectSerializer,
         @inject(TextureBrowser) textureBrowser: TextureBrowser,
         @inject(RoadTool) roadTool: RoadTool,
         @inject(IntersectionTool) intersectionTool: IntersectionTool,
         @inject(TerrainTool) terrainTool: TerrainTool,
         @inject(UVTool) uvTool: UVTool,
+        @inject(HeaderManager) headerManager: HeaderManager,
     ) {
         this.renderer = renderer;
         this.camera = camera;
@@ -70,13 +67,12 @@ export default class App {
         this.toolManager = toolManager;
         this.projectSettings = projectSettings;
         this.copyManager = copyManager;
-        this.settingsPanel = settingsPanel;
-        this.serializer = serializer;
         this.textureBrowser = textureBrowser;
         this.roadTool = roadTool;
         this.intersectionTool = intersectionTool;
         this.terrainTool = terrainTool;
         this.uvTool = uvTool;
+        this.headerManager = headerManager;
 
         // Post-construction wiring
         this.properties.copyManager = this.copyManager;
@@ -127,6 +123,7 @@ export default class App {
         };
 
         this.setupTools();
+        this.headerManager.init();
         this.bindEvents();
         this.animate = this.animate.bind(this);
         requestAnimationFrame(this.animate);
@@ -139,11 +136,26 @@ export default class App {
             deactivate() {},
         };
 
-        this.toolManager.register(selectTool, document.getElementById('btn-select') as HTMLButtonElement);
-        this.toolManager.register(this.roadTool, document.getElementById('btn-road') as HTMLButtonElement);
-        this.toolManager.register(this.intersectionTool, document.getElementById('btn-intersection') as HTMLButtonElement);
-        this.toolManager.register(this.terrainTool, document.getElementById('btn-terrain') as HTMLButtonElement);
-        this.toolManager.register(this.uvTool, document.getElementById('btn-uv') as HTMLButtonElement);
+        this.toolManager.registerTool(selectTool);
+        this.toolManager.registerTool(this.roadTool);
+        this.toolManager.registerTool(this.intersectionTool);
+        this.toolManager.registerTool(this.terrainTool);
+        this.toolManager.registerTool(this.uvTool);
+
+        this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'Q');
+        this.toolManager.registerSwitcher(
+            'road-switcher',
+            document.getElementById('btn-road') as HTMLButtonElement,
+            ['road', 'intersection'],
+            'road',
+            {
+                road: { label: 'Road Tool', icon: 'route' },
+                intersection: { label: 'Intersection Tool', icon: 'git-fork' },
+            },
+            'R',
+        );
+        this.toolManager.bindButton('terrain', document.getElementById('btn-terrain') as HTMLButtonElement, 'Terrain Tool', 'T');
+        this.toolManager.bindButton('uv', document.getElementById('btn-uv') as HTMLButtonElement, 'UV Mapper', 'U');
         this.toolManager.setActive('select');
 
         const btnWireframe = document.getElementById('btn-wireframe')!;
@@ -157,50 +169,6 @@ export default class App {
         btnTextures.addEventListener('click', () => {
             this.textureBrowser.toggle();
             btnTextures.classList.toggle('active', this.textureBrowser.isVisible);
-        });
-
-        const btnSettings = document.getElementById('btn-settings')!;
-        btnSettings.addEventListener('click', () => {
-            if (this.settingsPanel.isVisible) {
-                this.settingsPanel.hide();
-                btnSettings.classList.remove('active');
-            } else {
-                this.settingsPanel.show();
-                btnSettings.classList.add('active');
-            }
-        });
-
-        document.getElementById('btn-save')!.addEventListener('click', () => {
-            const json = this.serializer.save();
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'project.santown';
-            a.click();
-            URL.revokeObjectURL(url);
-        });
-
-        document.getElementById('btn-load')!.addEventListener('click', () => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.santown,.json';
-            input.addEventListener('change', () => {
-                const file = input.files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                    try {
-                        this.serializer.load(reader.result as string);
-                        this.properties.hide();
-                        this.selection.clearSelection();
-                    } catch (e) {
-                        console.error('Failed to load project:', e);
-                    }
-                };
-                reader.readAsText(file);
-            });
-            input.click();
         });
 
         // Drag-and-drop textures onto 3D elements
@@ -257,6 +225,17 @@ export default class App {
         window.addEventListener('keydown', (e) => {
             // Ignore shortcuts when typing in inputs
             if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'SELECT') return;
+
+            // Handle only one tool-switch action per physical key press.
+            if (e.repeat) return;
+
+            if (!e.ctrlKey && !e.metaKey) {
+                if (this.toolManager.handleShortcut(e.key)) {
+                    this.renderer.instance.domElement.focus();
+                    e.preventDefault();
+                    return;
+                }
+            }
 
             if (e.ctrlKey || e.metaKey) {
                 if (e.key === 'c' || e.key === 'C') {

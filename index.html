@@ -7,18 +7,21 @@
     <title>SanTown</title>
   </head>
   <body>
-    <canvas id="editor"></canvas>
+    <canvas id="editor" tabindex="0"></canvas>
+    <header id="header-toolbar">
+      <div class="header-actions">
+        <button id="header-save" class="header-btn" type="button">Save</button>
+        <button id="header-load" class="header-btn" type="button">Load</button>
+        <button id="header-settings" class="header-btn" type="button">Settings</button>
+      </div>
+    </header>
     <div id="toolbar">
-      <button id="btn-select" title="Select" class="active"><i data-lucide="mouse-pointer-2"></i></button>
-      <button id="btn-road" title="Add Road"><i data-lucide="route"></i></button>
-      <button id="btn-intersection" title="Add Intersection"><i data-lucide="git-fork"></i></button>
-      <button id="btn-terrain" title="Add Terrain"><i data-lucide="mountain"></i></button>
-      <button id="btn-wireframe" title="Wireframe"><i data-lucide="grid-3x3"></i></button>
-      <button id="btn-uv" title="UV Tool"><i data-lucide="scan"></i></button>
-      <button id="btn-textures" title="Textures"><i data-lucide="image"></i></button>
-      <button id="btn-settings" title="Settings"><i data-lucide="settings"></i></button>
-      <button id="btn-save" title="Save Project"><i data-lucide="save"></i></button>
-      <button id="btn-load" title="Load Project"><i data-lucide="folder-open"></i></button>
+      <button id="btn-select" data-tooltip="Select" class="active"><i data-lucide="mouse-pointer-2"></i></button>
+      <button id="btn-road" data-tooltip="Road / Intersection" data-switcher="road" ><i data-lucide="route"></i></button>
+      <button id="btn-terrain" data-tooltip="Terrain Tool"><i data-lucide="mountain"></i></button>
+      <button id="btn-uv" data-tooltip="UV Mapper"><i data-lucide="scan"></i></button>
+      <button id="btn-textures" data-tooltip="Texture Browser"><i data-lucide="image"></i></button>
+      <button id="btn-wireframe" data-tooltip="Wireframe"><i data-lucide="grid-3x3"></i></button>
     </div>
     <div id="properties-panel"></div>
     <script type="module" src="/src/main.ts"></script>
