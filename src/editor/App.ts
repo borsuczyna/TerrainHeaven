@@ -1,4 +1,4 @@
-import { injectable, inject } from 'tsyringe';
+﻿import { injectable, inject } from 'tsyringe';
 import Camera from "./Camera";
 import Renderer from "./Renderer";
 import SceneManager from "./SceneManager";

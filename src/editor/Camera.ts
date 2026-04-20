@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
 import type GizmoManager from './GizmoManager';
 import ToolManager from './ToolManager';
