@@ -1,7 +1,7 @@
 # TODO
 [x] Moving WorldElement's with gizmo (it should move child nodes too)
 [x] Should be possible to move camera when mouse is clicked on WorldElement
-[ ] Intersection cut out on terrain is incorrect
+[x] Intersection cut out on terrain is incorrect
 [x] Should be possible to select more than one WorldElement at once to move it
 [x] When two nodes or WorldElements are selected at once, don't show properties editing, only show options like Merge nodes etc
 [ ] Rework toolbar:
