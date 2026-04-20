@@ -1,18 +1,27 @@
 import * as THREE from 'three';
+import { singleton, inject } from 'tsyringe';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type WorldNode from '../elements/WorldNode';
+import Camera from './Camera';
+import Renderer from './Renderer';
+import SceneManager from './SceneManager';
 
+@singleton()
 export default class GizmoManager {
     private controls: TransformControls;
     private activeNodes: WorldNode[] = [];
     private helper: THREE.Object3D = new THREE.Object3D();
 
-    constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, scene: THREE.Scene) {
-        this.controls = new TransformControls(camera, domElement);
+    constructor(
+        @inject(Camera) camera: Camera,
+        @inject(Renderer) renderer: Renderer,
+        @inject(SceneManager) scene: SceneManager,
+    ) {
+        this.controls = new TransformControls(camera.instance, renderer.domElement);
         this.controls.setMode('translate');
         this.controls.setSize(0.8);
-        scene.add(this.helper);
-        scene.add(this.controls.getHelper());
+        scene.instance.add(this.helper);
+        scene.instance.add(this.controls.getHelper());
 
         this.controls.addEventListener('change', this.onGizmoChange);
     }

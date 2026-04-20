@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { singleton } from 'tsyringe';
 
+@singleton()
 class WireframeManager {
     private meshes: Set<THREE.Mesh> = new Set();
     private enabled: boolean = false;
@@ -47,4 +49,4 @@ class WireframeManager {
     }
 }
 
-export default new WireframeManager();
+export default WireframeManager;

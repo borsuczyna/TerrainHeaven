@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import { singleton } from 'tsyringe';
 import type WorldElement from '../elements/WorldElement';
 import type { UVTransform } from '../elements/WorldElement';
 
+@singleton()
 export default class UVEditorPanel {
     private container: HTMLElement;
     private canvas: HTMLCanvasElement;

@@ -1,8 +1,10 @@
 import * as THREE from 'three';
+import { singleton } from 'tsyringe';
 import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertySelect, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
 import type CopyManager from './CopyManager';
 
+@singleton()
 export default class PropertiesPanel {
     private container: HTMLElement;
     private element: WorldElement | null = null;

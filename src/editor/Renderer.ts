@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { singleton } from 'tsyringe';
 
+@singleton()
 export default class Renderer {
     public readonly instance: THREE.WebGLRenderer;
 

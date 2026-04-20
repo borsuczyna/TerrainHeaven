@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { container } from 'tsyringe';
 import type Triangle from './Vertex';
 import WorldNode from './WorldNode';
 import WireframeManager from '../editor/WireframeManager';
@@ -38,7 +39,7 @@ export default abstract class WorldElement {
     public textureRotations: Map<string, number> = new Map();
 
     constructor() {
-        WireframeManager.register(this.mesh);
+        container.resolve(WireframeManager).register(this.mesh);
         this.mesh.userData.worldElement = this;
     }
 
@@ -278,7 +279,7 @@ export default abstract class WorldElement {
                 this.applyTextureRotation(info.name, tex);
                 mat.map = tex;
             }
-            mat.wireframe = WireframeManager.isEnabled();
+            mat.wireframe = container.resolve(WireframeManager).isEnabled();
             materials.push(mat);
         }
 

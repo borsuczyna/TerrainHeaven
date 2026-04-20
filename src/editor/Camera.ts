@@ -1,35 +1,28 @@
 import * as THREE from 'three';
+import { singleton } from 'tsyringe';
 import type SelectionManager from './SelectionManager';
 import type ToolManager from './ToolManager';
 
+@singleton()
 export default class Camera {
     public readonly instance: THREE.PerspectiveCamera;
     public selectionManager: SelectionManager | null = null;
     public toolManager: ToolManager | null = null;
 
     private keys = new Set<string>();
-    private moveSpeed: number;
-    private lookSpeed: number;
+    private moveSpeed: number = 5;
+    private lookSpeed: number = 0.002;
     private pitch = -0.2;
     private yaw = -Math.PI / 2;
     private isDragging = false;
 
-    constructor(
-        fov = 75,
-        near = 0.1,
-        far = 1000,
-        moveSpeed = 5,
-        lookSpeed = 0.002
-    ) {
+    constructor() {
         this.instance = new THREE.PerspectiveCamera(
-            fov,
+            75,
             window.innerWidth / window.innerHeight,
-            near,
-            far
+            0.1,
+            1000,
         );
-
-        this.moveSpeed = moveSpeed;
-        this.lookSpeed = lookSpeed;
 
         this.instance.position.set(0, 5, 0);
 

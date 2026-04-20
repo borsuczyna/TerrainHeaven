@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type WorldElement from '../elements/WorldElement';
+import { singleton } from 'tsyringe';
 
+@singleton()
 export default class SceneManager {
     public readonly instance: THREE.Scene = new THREE.Scene();
     private elements: WorldElement[] = [];

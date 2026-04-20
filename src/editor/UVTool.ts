@@ -1,21 +1,29 @@
 import * as THREE from 'three';
+import { singleton, inject } from 'tsyringe';
 import type { Tool } from './ToolManager';
-import type UVEditorPanel from './UVEditorPanel';
+import SceneManager from './SceneManager';
+import Camera from './Camera';
+import UVEditorPanel from './UVEditorPanel';
 import type WorldElement from '../elements/WorldElement';
 
+@singleton()
 export default class UVTool implements Tool {
     public readonly name = 'uv';
     public blocksCamera = false;
 
-    private camera: THREE.PerspectiveCamera;
     private scene: THREE.Scene;
+    private camera: THREE.PerspectiveCamera;
     private uvEditor: UVEditorPanel;
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
 
-    constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera, uvEditor: UVEditorPanel) {
-        this.scene = scene;
-        this.camera = camera;
+    constructor(
+        @inject(SceneManager) scene: SceneManager,
+        @inject(Camera) camera: Camera,
+        @inject(UVEditorPanel) uvEditor: UVEditorPanel,
+    ) {
+        this.scene = scene.instance;
+        this.camera = camera.instance;
         this.uvEditor = uvEditor;
     }
 

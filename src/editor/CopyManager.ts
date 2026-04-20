@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { singleton } from 'tsyringe';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import type WorldElement from '../elements/WorldElement';
@@ -7,6 +8,7 @@ import type { PropertyDefinition } from './Properties';
 
 export type CopyMode = 'element' | 'properties';
 
+@singleton()
 export default class CopyManager {
     private mode: CopyMode | null = null;
     private sourceType: string | null = null;

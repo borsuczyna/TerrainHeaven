@@ -1,8 +1,11 @@
 import * as THREE from 'three';
+import { singleton, inject } from 'tsyringe';
 import type { Tool } from './ToolManager';
-import type SceneManager from './SceneManager';
+import SceneManager from './SceneManager';
+import Camera from './Camera';
 import Intersection from '../elements/Intersection';
 
+@singleton()
 export default class IntersectionTool implements Tool {
     public readonly name = 'intersection';
     public readonly blocksCamera = true;
@@ -12,9 +15,12 @@ export default class IntersectionTool implements Tool {
     private mouse = new THREE.Vector2();
     private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-    constructor(scene: SceneManager, camera: THREE.PerspectiveCamera) {
+    constructor(
+        @inject(SceneManager) scene: SceneManager,
+        @inject(Camera) camera: Camera,
+    ) {
         this.scene = scene;
-        this.camera = camera;
+        this.camera = camera.instance;
     }
 
     activate(): void {}

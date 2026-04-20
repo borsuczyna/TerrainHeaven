@@ -1,9 +1,12 @@
 import * as THREE from 'three';
+import { singleton, inject } from 'tsyringe';
 import type { Tool } from './ToolManager';
-import type SceneManager from './SceneManager';
+import SceneManager from './SceneManager';
+import Camera from './Camera';
 import Road from '../elements/Road';
 import type WorldNode from '../elements/WorldNode';
 
+@singleton()
 export default class RoadTool implements Tool {
     public readonly name = 'road';
     public readonly blocksCamera = true;
@@ -16,9 +19,12 @@ export default class RoadTool implements Tool {
     private dragging = false;
     private previewRoad: Road | null = null;
 
-    constructor(scene: SceneManager, camera: THREE.PerspectiveCamera) {
+    constructor(
+        @inject(SceneManager) scene: SceneManager,
+        @inject(Camera) camera: Camera,
+    ) {
         this.scene = scene;
-        this.camera = camera;
+        this.camera = camera.instance;
     }
 
     activate(): void {
@@ -122,7 +128,7 @@ export default class RoadTool implements Tool {
             const parentElement = this.startNode.parent;
             const nodeIndex = parentElement.getNodeIndex(this.startNode);
             if (nodeIndex >= 0 && !parentElement.isConnected(nodeIndex)) {
-                this.previewRoad.connectWith(0, parentElement, nodeIndex);
+                this.previewRoad.connect(0, parentElement, nodeIndex);
             }
         }
 
@@ -168,7 +174,7 @@ export default class RoadTool implements Tool {
             const parentElement = hitNode.parent;
             const nodeIndex = parentElement.getNodeIndex(hitNode);
             if (nodeIndex >= 0 && !parentElement.isConnected(nodeIndex)) {
-                this.previewRoad.connectWith(1, parentElement, nodeIndex);
+                this.previewRoad.connect(1, parentElement, nodeIndex);
             }
         }
 

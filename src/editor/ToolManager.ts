@@ -1,3 +1,5 @@
+import { singleton } from 'tsyringe';
+
 export interface Tool {
     name: string;
     blocksCamera?: boolean;
@@ -7,6 +9,7 @@ export interface Tool {
     onMouseUp?(e: MouseEvent): void;
 }
 
+@singleton()
 export default class ToolManager {
     private tools: Map<string, Tool> = new Map();
     private activeTool: Tool | null = null;

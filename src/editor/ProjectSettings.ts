@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import type Renderer from './Renderer';
-import type SceneManager from './SceneManager';
+import { singleton, inject } from 'tsyringe';
+import Renderer from './Renderer';
+import SceneManager from './SceneManager';
 
 export interface ProjectSettingsData {
     skyColor: string;
@@ -8,6 +9,7 @@ export interface ProjectSettingsData {
     hour: number;
 }
 
+@singleton()
 export default class ProjectSettings {
     private renderer: Renderer;
     private scene: SceneManager;
@@ -21,7 +23,10 @@ export default class ProjectSettings {
     public dayNightCycle: boolean = false;
     public hour: number = 12;
 
-    constructor(renderer: Renderer, scene: SceneManager) {
+    constructor(
+        @inject(Renderer) renderer: Renderer,
+        @inject(SceneManager) scene: SceneManager,
+    ) {
         this.renderer = renderer;
         this.scene = scene;
 

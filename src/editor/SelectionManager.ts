@@ -1,9 +1,13 @@
 import * as THREE from 'three';
+import { singleton, inject } from 'tsyringe';
 import type WorldNode from '../elements/WorldNode';
 import type WorldElement from '../elements/WorldElement';
+import Camera from './Camera';
+import SceneManager from './SceneManager';
 import type GizmoManager from './GizmoManager';
 import type ToolManager from './ToolManager';
 
+@singleton()
 export default class SelectionManager {
     private selected: Set<WorldNode> = new Set();
     private selectedElement: WorldElement | null = null;
@@ -24,9 +28,12 @@ export default class SelectionManager {
     public onSelectionChanged: ((nodes: WorldNode[]) => void) | null = null;
     public onElementSelected: ((element: WorldElement | null) => void) | null = null;
 
-    constructor(camera: THREE.PerspectiveCamera, scene: THREE.Scene) {
-        this.camera = camera;
-        this.scene = scene;
+    constructor(
+        @inject(Camera) camera: Camera,
+        @inject(SceneManager) scene: SceneManager,
+    ) {
+        this.camera = camera.instance;
+        this.scene = scene.instance;
 
         window.addEventListener('mousedown', this.onMouseDown, { capture: true });
     }

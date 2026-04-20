@@ -1,10 +1,12 @@
-import type ProjectSettings from './ProjectSettings';
+import { singleton, inject } from 'tsyringe';
+import ProjectSettings from './ProjectSettings';
 
+@singleton()
 export default class SettingsPanel {
     private container: HTMLElement;
     private settings: ProjectSettings;
 
-    constructor(settings: ProjectSettings) {
+    constructor(@inject(ProjectSettings) settings: ProjectSettings) {
         this.settings = settings;
         this.container = document.createElement('div');
         this.container.id = 'settings-panel';

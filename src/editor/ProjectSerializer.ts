@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import type SceneManager from './SceneManager';
+import { singleton, inject } from 'tsyringe';
+import SceneManager from './SceneManager';
 import type { ProjectSettingsData } from './ProjectSettings';
-import type ProjectSettings from './ProjectSettings';
+import ProjectSettings from './ProjectSettings';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import type WorldElement from '../elements/WorldElement';
@@ -44,11 +45,15 @@ interface ProjectData {
     connections: ConnectionData[];
 }
 
+@singleton()
 export default class ProjectSerializer {
     private scene: SceneManager;
     private settings: ProjectSettings;
 
-    constructor(scene: SceneManager, settings: ProjectSettings) {
+    constructor(
+        @inject(SceneManager) scene: SceneManager,
+        @inject(ProjectSettings) settings: ProjectSettings,
+    ) {
         this.scene = scene;
         this.settings = settings;
     }
@@ -68,8 +73,9 @@ export default class ProjectSerializer {
 
             for (const groupName of el.getGroupNames()) {
                 const tex = el.getGroupTexture(groupName);
-                if (tex?.image?.src) {
-                    textures[groupName] = tex.image.src;
+                const src = tex?.image instanceof HTMLImageElement ? tex.image.src : undefined;
+                if (src) {
+                    textures[groupName] = src;
                 }
                 const rot = el.textureRotations.get(groupName);
                 if (rot) textureRotations[groupName] = rot;

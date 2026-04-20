@@ -1,3 +1,4 @@
+import { injectable, inject } from 'tsyringe';
 import Camera from "./Camera";
 import Renderer from "./Renderer";
 import SceneManager from "./SceneManager";
@@ -9,8 +10,8 @@ import type { Tool } from "./ToolManager";
 import RoadTool from "./RoadTool";
 import IntersectionTool from "./IntersectionTool";
 import WireframeManager from "./WireframeManager";
+import { container } from 'tsyringe';
 import TextureBrowser from "./TextureBrowser";
-import UVEditorPanel from "./UVEditorPanel";
 import UVTool from "./UVTool";
 import ProjectSettings from "./ProjectSettings";
 import SettingsPanel from "./SettingsPanel";
@@ -21,6 +22,7 @@ import type WorldNode from "../elements/WorldNode";
 import type WorldElement from "../elements/WorldElement";
 import type { PropertyDefinition } from "./Properties";
 
+@injectable()
 export default class App {
     public readonly renderer: Renderer;
     public readonly camera: Camera;
@@ -33,23 +35,48 @@ export default class App {
     public readonly copyManager: CopyManager;
     private settingsPanel: SettingsPanel;
     private serializer: ProjectSerializer;
+    private textureBrowser: TextureBrowser;
+    private roadTool: RoadTool;
+    private intersectionTool: IntersectionTool;
+    private uvTool: UVTool;
     private lastTime = 0;
 
-    constructor() {
-        this.renderer = new Renderer();
-        this.camera = new Camera();
-        this.scene = new SceneManager();
-        this.copyManager = new CopyManager();
-        this.properties = new PropertiesPanel();
-        this.properties.copyManager = this.copyManager;
-        this.toolManager = new ToolManager();
-        this.projectSettings = new ProjectSettings(this.renderer, this.scene);
-        this.projectSettings.setCamera(this.camera.instance);
-        this.settingsPanel = new SettingsPanel(this.projectSettings);
-        this.serializer = new ProjectSerializer(this.scene, this.projectSettings);
+    constructor(
+        @inject(Renderer) renderer: Renderer,
+        @inject(Camera) camera: Camera,
+        @inject(SceneManager) scene: SceneManager,
+        @inject(SelectionManager) selection: SelectionManager,
+        @inject(GizmoManager) gizmo: GizmoManager,
+        @inject(PropertiesPanel) properties: PropertiesPanel,
+        @inject(ToolManager) toolManager: ToolManager,
+        @inject(ProjectSettings) projectSettings: ProjectSettings,
+        @inject(CopyManager) copyManager: CopyManager,
+        @inject(SettingsPanel) settingsPanel: SettingsPanel,
+        @inject(ProjectSerializer) serializer: ProjectSerializer,
+        @inject(TextureBrowser) textureBrowser: TextureBrowser,
+        @inject(RoadTool) roadTool: RoadTool,
+        @inject(IntersectionTool) intersectionTool: IntersectionTool,
+        @inject(UVTool) uvTool: UVTool,
+    ) {
+        this.renderer = renderer;
+        this.camera = camera;
+        this.scene = scene;
+        this.selection = selection;
+        this.gizmo = gizmo;
+        this.properties = properties;
+        this.toolManager = toolManager;
+        this.projectSettings = projectSettings;
+        this.copyManager = copyManager;
+        this.settingsPanel = settingsPanel;
+        this.serializer = serializer;
+        this.textureBrowser = textureBrowser;
+        this.roadTool = roadTool;
+        this.intersectionTool = intersectionTool;
+        this.uvTool = uvTool;
 
-        this.selection = new SelectionManager(this.camera.instance, this.scene.instance);
-        this.gizmo = new GizmoManager(this.camera.instance, this.renderer.instance.domElement, this.scene.instance);
+        // Post-construction wiring
+        this.properties.copyManager = this.copyManager;
+        this.projectSettings.setCamera(this.camera.instance);
         this.selection.gizmo = this.gizmo;
         this.selection.toolManager = this.toolManager;
         this.camera.selectionManager = this.selection;
@@ -81,29 +108,23 @@ export default class App {
             deactivate() {},
         };
 
-        const roadTool = new RoadTool(this.scene, this.camera.instance);
-        const intersectionTool = new IntersectionTool(this.scene, this.camera.instance);
-        const uvEditor = new UVEditorPanel();
-        const uvTool = new UVTool(this.scene.instance, this.camera.instance, uvEditor);
-
         this.toolManager.register(selectTool, document.getElementById('btn-select') as HTMLButtonElement);
-        this.toolManager.register(roadTool, document.getElementById('btn-road') as HTMLButtonElement);
-        this.toolManager.register(intersectionTool, document.getElementById('btn-intersection') as HTMLButtonElement);
-        this.toolManager.register(uvTool, document.getElementById('btn-uv') as HTMLButtonElement);
+        this.toolManager.register(this.roadTool, document.getElementById('btn-road') as HTMLButtonElement);
+        this.toolManager.register(this.intersectionTool, document.getElementById('btn-intersection') as HTMLButtonElement);
+        this.toolManager.register(this.uvTool, document.getElementById('btn-uv') as HTMLButtonElement);
         this.toolManager.setActive('select');
 
         const btnWireframe = document.getElementById('btn-wireframe')!;
         btnWireframe.addEventListener('click', () => {
-            const active = WireframeManager.toggle();
+            const active = container.resolve(WireframeManager).toggle();
             btnWireframe.classList.toggle('active', active);
         });
 
-        const textureBrowser = new TextureBrowser();
         const btnTextures = document.getElementById('btn-textures')!;
-        textureBrowser.onHide = () => btnTextures.classList.remove('active');
+        this.textureBrowser.onHide = () => btnTextures.classList.remove('active');
         btnTextures.addEventListener('click', () => {
-            textureBrowser.toggle();
-            btnTextures.classList.toggle('active', textureBrowser.isVisible);
+            this.textureBrowser.toggle();
+            btnTextures.classList.toggle('active', this.textureBrowser.isVisible);
         });
 
         const btnSettings = document.getElementById('btn-settings')!;
