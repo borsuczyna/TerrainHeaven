@@ -15,6 +15,7 @@ import UVTool from "./UVTool";
 import ProjectSettings from "./ProjectSettings";
 import SettingsPanel from "./SettingsPanel";
 import ProjectSerializer from "./ProjectSerializer";
+import CopyManager from "./CopyManager";
 import * as THREE from "three";
 import type WorldNode from "../elements/WorldNode";
 import type WorldElement from "../elements/WorldElement";
@@ -29,6 +30,7 @@ export default class App {
     public readonly properties: PropertiesPanel;
     public readonly toolManager: ToolManager;
     public readonly projectSettings: ProjectSettings;
+    public readonly copyManager: CopyManager;
     private settingsPanel: SettingsPanel;
     private serializer: ProjectSerializer;
     private lastTime = 0;
@@ -37,7 +39,9 @@ export default class App {
         this.renderer = new Renderer();
         this.camera = new Camera();
         this.scene = new SceneManager();
+        this.copyManager = new CopyManager();
         this.properties = new PropertiesPanel();
+        this.properties.copyManager = this.copyManager;
         this.toolManager = new ToolManager();
         this.projectSettings = new ProjectSettings(this.renderer, this.scene);
         this.projectSettings.setCamera(this.camera.instance);
@@ -195,6 +199,34 @@ export default class App {
         window.addEventListener('resize', () => {
             this.renderer.resize();
             this.camera.resize();
+        });
+
+        window.addEventListener('keydown', (e) => {
+            // Ignore shortcuts when typing in inputs
+            if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'SELECT') return;
+
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'c' || e.key === 'C') {
+                    const el = this.selection.getSelectedElement();
+                    if (el) {
+                        e.preventDefault();
+                        this.copyManager.copyElement(el);
+                    }
+                } else if (e.key === 'v' || e.key === 'V') {
+                    e.preventDefault();
+                    const selectedEl = this.selection.getSelectedElement();
+                    if (this.copyManager.canPastePropertiesOnto(selectedEl!)) {
+                        // Properties-copy mode + same type selected → apply in-place
+                        this.copyManager.pastePropertiesOnto(selectedEl!);
+                    } else if (this.copyManager.canPasteElement()) {
+                        // Element-copy mode → spawn in front of camera
+                        const newEl = this.copyManager.pasteElement(this.camera.instance, this.scene);
+                        if (newEl) {
+                            this.selection.selectElement(newEl);
+                        }
+                    }
+                }
+            }
         });
     }
 

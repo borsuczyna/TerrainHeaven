@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertySelect, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
+import type CopyManager from './CopyManager';
 
 export default class PropertiesPanel {
     private container: HTMLElement;
     private element: WorldElement | null = null;
     private refreshInterval: number | null = null;
     private customDef: PropertyDefinition | null = null;
+    public copyManager: CopyManager | null = null;
 
     constructor() {
         this.container = document.getElementById('properties-panel')!;
@@ -57,7 +59,7 @@ export default class PropertiesPanel {
         const def = this.customDef ?? this.element?.getProperties();
         if (!def) return;
 
-        let html = `<div class="panel-header"><span class="icon">${def.icon}</span>${def.title}</div>`;
+        let html = `<div class="panel-header"><span class="icon">${def.icon}</span><span class="panel-title">${def.title}</span><button class="panel-menu-btn" title="Options">&#8943;</button><div class="panel-menu" style="display:none"></div></div>`;
 
         for (const section of def.sections) {
             html += `<div class="section">`;
@@ -74,6 +76,7 @@ export default class PropertiesPanel {
 
         this.container.innerHTML = html;
         this.bindEvents(def);
+        this.bindMenuEvents(def);
     }
 
     private renderProperty(prop: SectionItem, sectionLabel: string): string {
@@ -141,6 +144,50 @@ export default class PropertiesPanel {
         }
 
         return '';
+    }
+
+    private bindMenuEvents(def: PropertyDefinition): void {
+        const btn = this.container.querySelector('.panel-menu-btn') as HTMLElement;
+        const menu = this.container.querySelector('.panel-menu') as HTMLElement;
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = menu.style.display !== 'none';
+            menu.style.display = isOpen ? 'none' : 'block';
+
+            if (!isOpen) {
+                const canPaste = this.element !== null && (this.copyManager?.canPastePropertiesOnto(this.element) ?? false);
+
+                menu.innerHTML = `
+                    <div class="panel-menu-item" data-action="copy">Copy properties</div>
+                    <div class="panel-menu-item${canPaste ? '' : ' disabled'}" data-action="paste">Paste properties</div>
+                `;
+
+                menu.querySelectorAll('.panel-menu-item').forEach(item => {
+                    item.addEventListener('click', (ev) => {
+                        ev.stopPropagation();
+                        const action = (item as HTMLElement).dataset.action;
+                        if (action === 'copy') this.doCopyProperties();
+                        else if (action === 'paste' && canPaste) this.doPasteProperties();
+                        menu.style.display = 'none';
+                    });
+                });
+            }
+        });
+
+        document.addEventListener('click', () => {
+            menu.style.display = 'none';
+        }, { once: true, capture: true });
+    }
+
+    private doCopyProperties(): void {
+        if (!this.element) return;
+        this.copyManager?.copyProperties(this.element);
+    }
+
+    private doPasteProperties(): void {
+        if (!this.element || !this.copyManager) return;
+        this.copyManager.pastePropertiesOnto(this.element);
     }
 
     private bindEvents(def: PropertyDefinition): void {

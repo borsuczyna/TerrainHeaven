@@ -139,6 +139,21 @@ export default class SelectionManager {
         return [...this.selected];
     }
 
+    public getSelectedElement(): WorldElement | null {
+        return this.selectedElement;
+    }
+
+    public selectElement(element: WorldElement): void {
+        this.clearSelection();
+        if (this.selectedElement) {
+            this.selectedElement.setSelected(false);
+        }
+        this.selectedElement = element;
+        this.selectedElement.setSelected(true);
+        this.onElementSelected?.(this.selectedElement);
+        this.onSelectionChanged?.([]);
+    }
+
     public dispose(): void {
         window.removeEventListener('mousedown', this.onMouseDown, { capture: true });
     }
