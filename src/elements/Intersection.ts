@@ -118,33 +118,24 @@ export default class Intersection extends WorldElement {
     }
 
     public override getOccupiedArea(): OccupiedTriangle[] {
-        const center = this.getCenter();
-        const up = new THREE.Vector3(0, 1, 0);
-        const points: THREE.Vector2[] = [];
+        const projected: OccupiedTriangle[] = [];
+        const groups = this.getGeometry();
 
-        for (let i = 0; i < this.nodeCount; i++) {
-            const node = this.getNode(i).mesh.position;
-            const dir = new THREE.Vector3().subVectors(node, center);
-            if (dir.lengthSq() < 1e-6) continue;
-            dir.normalize();
-            const basisRight = new THREE.Vector3().crossVectors(dir, up).normalize();
-            const base = node.clone().sub(basisRight.multiplyScalar(this.getResolvedHalfWidth(i)));
-            const extra = this.edgeType === 'sidewalk' ? this.getResolvedSidewalkWidth(i) : 0;
-            if (extra > 0) {
-                base.add(dir.clone().multiplyScalar(extra));
+        const triArea2D = (a: THREE.Vector2, b: THREE.Vector2, c: THREE.Vector2): number => {
+            return Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
+        };
+
+        for (const group of groups) {
+            for (const tri of group.triangles) {
+                const a = new THREE.Vector2(tri.a.x, tri.a.z);
+                const b = new THREE.Vector2(tri.b.x, tri.b.z);
+                const c = new THREE.Vector2(tri.c.x, tri.c.z);
+                if (triArea2D(a, b, c) < 1e-8) continue;
+                projected.push({ a, b, c });
             }
-            points.push(new THREE.Vector2(base.x, base.z));
         }
 
-        const triangles: OccupiedTriangle[] = [];
-        if (points.length < 3) return triangles;
-
-        const c2 = new THREE.Vector2(center.x, center.z);
-        for (let i = 0; i < points.length; i++) {
-            const next = (i + 1) % points.length;
-            triangles.push({ a: c2.clone(), b: points[i].clone(), c: points[next].clone() });
-        }
-        return triangles;
+        return projected;
     }
 
     public override serialize(id: number): ElementData {

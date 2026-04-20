@@ -9,6 +9,9 @@ type MultiPolygon = number[][][][];
 
 @singleton()
 export default class BooleanManager {
+    private static readonly SNAP = 1e6;
+    private static readonly MIN_AREA = 1e-8;
+
     public cutTerrainSurface(terrain: Terrain, elements: WorldElement[]): OccupiedTriangle[] {
         const terrainOccupied = terrain.getOccupiedArea();
         const terrainArea = this.toMultiPolygon(terrainOccupied);
@@ -34,26 +37,63 @@ export default class BooleanManager {
             return this.triangulateMultiPolygon(terrainArea);
         }
 
-        const difference = (polygonClipping as any).difference(terrainArea, cutters) as MultiPolygon | null;
-        return this.triangulateMultiPolygon(difference ?? []);
+        try {
+            const difference = (polygonClipping as any).difference(terrainArea, cutters) as MultiPolygon | null;
+            return this.triangulateMultiPolygon(difference ?? []);
+        } catch {
+            // Fallback: keep terrain intact instead of crashing boolean operations.
+            return this.triangulateMultiPolygon(terrainArea);
+        }
     }
 
     private toMultiPolygon(triangles: OccupiedTriangle[]): MultiPolygon {
-        let result: MultiPolygon = [];
+        const polygons: MultiPolygon[] = [];
         for (const tri of triangles) {
+            const a = this.snapPoint(tri.a.x, tri.a.y);
+            const b = this.snapPoint(tri.b.x, tri.b.y);
+            const c = this.snapPoint(tri.c.x, tri.c.y);
+            if (this.triangleArea(a, b, c) < BooleanManager.MIN_AREA) continue;
+
             const polygon: MultiPolygon = [[[
-                [tri.a.x, tri.a.y],
-                [tri.b.x, tri.b.y],
-                [tri.c.x, tri.c.y],
-                [tri.a.x, tri.a.y],
+                a,
+                b,
+                c,
+                a,
             ]]];
-            if (result.length === 0) {
-                result = polygon;
-            } else {
-                result = ((polygonClipping as any).union(result, polygon) as MultiPolygon | null) ?? result;
+            polygons.push(polygon);
+        }
+
+        if (polygons.length === 0) return [];
+
+        let result = polygons[0];
+        const chunkSize = 32;
+
+        for (let i = 1; i < polygons.length; i += chunkSize) {
+            const chunk = polygons.slice(i, i + chunkSize);
+            try {
+                result = ((polygonClipping as any).union(result, ...chunk) as MultiPolygon | null) ?? result;
+            } catch {
+                // Fallback: attempt one-by-one and ignore pathological sliver polygons.
+                for (const poly of chunk) {
+                    try {
+                        result = ((polygonClipping as any).union(result, poly) as MultiPolygon | null) ?? result;
+                    } catch {
+                        // Ignore invalid polygon fragments.
+                    }
+                }
             }
         }
+
         return result;
+    }
+
+    private snapPoint(x: number, y: number): [number, number] {
+        const s = BooleanManager.SNAP;
+        return [Math.round(x * s) / s, Math.round(y * s) / s];
+    }
+
+    private triangleArea(a: [number, number], b: [number, number], c: [number, number]): number {
+        return Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) * 0.5;
     }
 
     private triangulateMultiPolygon(multi: MultiPolygon): OccupiedTriangle[] {
