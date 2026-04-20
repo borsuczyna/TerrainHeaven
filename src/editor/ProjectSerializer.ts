@@ -5,6 +5,7 @@ import type { ProjectSettingsData } from './ProjectSettings';
 import ProjectSettings from './ProjectSettings';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
+import Terrain from '../elements/Terrain.ts';
 import type WorldElement from '../elements/WorldElement';
 import type { ElementData } from '../elements/WorldElement';
 
@@ -92,6 +93,8 @@ export default class ProjectSerializer {
                 el = Road.deserialize(ed);
             } else if (ed.type === 'intersection') {
                 el = Intersection.deserialize(ed);
+            } else if (ed.type === 'terrain') {
+                el = Terrain.deserialize(ed);
             }
             if (!el) continue;
             this.loadTextures(el, ed.textures, ed.textureRotations);

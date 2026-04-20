@@ -111,11 +111,11 @@ export default class ProjectSettings {
         this.directionalLight.color.copy(sunColor);
 
         // Ambient color matches sky
-        const skyColor = this.computeSkyColor(elevation, warmth);
+        const skyColor = this.computeSkyColor(elevation);
         this.ambientLight.color.copy(skyColor);
 
         // Sky color based on time of day
-        const bgColor = this.computeSkyColor(elevation, warmth);
+        const bgColor = this.computeSkyColor(elevation);
         this.renderer.instance.setClearColor(bgColor);
         this.scene.instance.background = bgColor;
 
@@ -131,7 +131,7 @@ export default class ProjectSettings {
         this.positionCelestials();
     }
 
-    private computeSkyColor(elevation: number, warmth: number): THREE.Color {
+    private computeSkyColor(elevation: number): THREE.Color {
         if (elevation > 0.15) {
             // Daytime: blue sky, lighter near horizon
             const dayBlue = new THREE.Color().setHSL(0.58, 0.6, 0.55 + 0.15 * elevation);

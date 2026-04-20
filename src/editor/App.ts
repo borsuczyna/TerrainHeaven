@@ -9,6 +9,7 @@ import ToolManager from "./ToolManager";
 import type { Tool } from "./ToolManager";
 import RoadTool from "./RoadTool";
 import IntersectionTool from "./IntersectionTool";
+import TerrainTool from "./TerrainTool";
 import WireframeManager from "./WireframeManager";
 import { container } from 'tsyringe';
 import TextureBrowser from "./TextureBrowser";
@@ -38,6 +39,7 @@ export default class App {
     private textureBrowser: TextureBrowser;
     private roadTool: RoadTool;
     private intersectionTool: IntersectionTool;
+    private terrainTool: TerrainTool;
     private uvTool: UVTool;
     private lastTime = 0;
 
@@ -56,6 +58,7 @@ export default class App {
         @inject(TextureBrowser) textureBrowser: TextureBrowser,
         @inject(RoadTool) roadTool: RoadTool,
         @inject(IntersectionTool) intersectionTool: IntersectionTool,
+        @inject(TerrainTool) terrainTool: TerrainTool,
         @inject(UVTool) uvTool: UVTool,
     ) {
         this.renderer = renderer;
@@ -72,6 +75,7 @@ export default class App {
         this.textureBrowser = textureBrowser;
         this.roadTool = roadTool;
         this.intersectionTool = intersectionTool;
+        this.terrainTool = terrainTool;
         this.uvTool = uvTool;
 
         // Post-construction wiring
@@ -83,7 +87,11 @@ export default class App {
         this.camera.toolManager = this.toolManager;
 
         this.selection.onSelectionChanged = (nodes) => {
-            this.gizmo.attach(nodes);
+            if (nodes.length > 0) {
+                this.gizmo.attach(nodes);
+            } else {
+                this.gizmo.attachElement(this.selection.getSelectedElement());
+            }
             this.checkMerge(nodes);
         };
 
@@ -111,6 +119,7 @@ export default class App {
         this.toolManager.register(selectTool, document.getElementById('btn-select') as HTMLButtonElement);
         this.toolManager.register(this.roadTool, document.getElementById('btn-road') as HTMLButtonElement);
         this.toolManager.register(this.intersectionTool, document.getElementById('btn-intersection') as HTMLButtonElement);
+        this.toolManager.register(this.terrainTool, document.getElementById('btn-terrain') as HTMLButtonElement);
         this.toolManager.register(this.uvTool, document.getElementById('btn-uv') as HTMLButtonElement);
         this.toolManager.setActive('select');
 

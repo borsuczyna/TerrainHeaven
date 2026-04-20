@@ -78,7 +78,7 @@ export default class PropertiesPanel {
 
         this.container.innerHTML = html;
         this.bindEvents(def);
-        this.bindMenuEvents(def);
+        this.bindMenuEvents();
     }
 
     private renderProperty(prop: SectionItem, sectionLabel: string): string {
@@ -148,7 +148,7 @@ export default class PropertiesPanel {
         return '';
     }
 
-    private bindMenuEvents(def: PropertyDefinition): void {
+    private bindMenuEvents(): void {
         const btn = this.container.querySelector('.panel-menu-btn') as HTMLElement;
         const menu = this.container.querySelector('.panel-menu') as HTMLElement;
 

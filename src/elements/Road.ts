@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -200,6 +200,48 @@ export default class Road extends WorldElement {
         this.updateCurveLines();
         this.update();
         otherRoad.update();
+    }
+
+    public override getOccupiedArea(): OccupiedTriangle[] {
+        const edge = this.computeEdgeData();
+        const triangles: OccupiedTriangle[] = [];
+        const swStart = this.getResolvedSidewalkWidth(0);
+        const swEnd = this.getResolvedSidewalkWidth(1);
+
+        for (let i = 0; i < edge.points.length - 1; i++) {
+            const tCurr = i / (edge.points.length - 1);
+            const tNext = (i + 1) / (edge.points.length - 1);
+            const swCurr = swStart + (swEnd - swStart) * tCurr;
+            const swNext = swStart + (swEnd - swStart) * tNext;
+            const extraCurr = this.edgeType === 'sidewalk' ? swCurr : 0;
+            const extraNext = this.edgeType === 'sidewalk' ? swNext : 0;
+
+            const hwCurr = edge.halfWidths[i] + extraCurr;
+            const hwNext = edge.halfWidths[i + 1] + extraNext;
+
+            const curr = edge.points[i];
+            const next = edge.points[i + 1];
+            const rightCurr = edge.rightVecs[i];
+            const rightNext = edge.rightVecs[i + 1];
+
+            const bl = curr.clone().sub(rightCurr.clone().multiplyScalar(hwCurr));
+            const br = curr.clone().add(rightCurr.clone().multiplyScalar(hwCurr));
+            const tl = next.clone().sub(rightNext.clone().multiplyScalar(hwNext));
+            const tr = next.clone().add(rightNext.clone().multiplyScalar(hwNext));
+
+            triangles.push({
+                a: new THREE.Vector2(bl.x, bl.z),
+                b: new THREE.Vector2(br.x, br.z),
+                c: new THREE.Vector2(tr.x, tr.z),
+            });
+            triangles.push({
+                a: new THREE.Vector2(bl.x, bl.z),
+                b: new THREE.Vector2(tr.x, tr.z),
+                c: new THREE.Vector2(tl.x, tl.z),
+            });
+        }
+
+        return triangles;
     }
 
     public override serialize(id: number): ElementData {

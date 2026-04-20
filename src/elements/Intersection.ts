@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis, type GeometryGroup, type UVTransform, type ElementData } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type UVTransform, type ElementData, type OccupiedTriangle } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -115,6 +115,36 @@ export default class Intersection extends WorldElement {
         this.connect(thisNodeIndex, other, otherNodeIndex);
         this.update();
         other.update();
+    }
+
+    public override getOccupiedArea(): OccupiedTriangle[] {
+        const center = this.getCenter();
+        const up = new THREE.Vector3(0, 1, 0);
+        const points: THREE.Vector2[] = [];
+
+        for (let i = 0; i < this.nodeCount; i++) {
+            const node = this.getNode(i).mesh.position;
+            const dir = new THREE.Vector3().subVectors(node, center);
+            if (dir.lengthSq() < 1e-6) continue;
+            dir.normalize();
+            const basisRight = new THREE.Vector3().crossVectors(dir, up).normalize();
+            const base = node.clone().sub(basisRight.multiplyScalar(this.getResolvedHalfWidth(i)));
+            const extra = this.edgeType === 'sidewalk' ? this.getResolvedSidewalkWidth(i) : 0;
+            if (extra > 0) {
+                base.add(dir.clone().multiplyScalar(extra));
+            }
+            points.push(new THREE.Vector2(base.x, base.z));
+        }
+
+        const triangles: OccupiedTriangle[] = [];
+        if (points.length < 3) return triangles;
+
+        const c2 = new THREE.Vector2(center.x, center.z);
+        for (let i = 0; i < points.length; i++) {
+            const next = (i + 1) % points.length;
+            triangles.push({ a: c2.clone(), b: points[i].clone(), c: points[next].clone() });
+        }
+        return triangles;
     }
 
     public override serialize(id: number): ElementData {

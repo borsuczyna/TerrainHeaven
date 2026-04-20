@@ -24,8 +24,14 @@ export interface UVTransform {
     scaleY: number;
 }
 
+export interface OccupiedTriangle {
+    a: THREE.Vector2;
+    b: THREE.Vector2;
+    c: THREE.Vector2;
+}
+
 export interface ElementData {
-    type: 'road' | 'intersection';
+    type: 'road' | 'intersection' | 'terrain';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
@@ -47,6 +53,9 @@ export interface ElementData {
     roadTexHeight?: number;
     roadTexOffsetX?: number;
     roadTexOffsetY?: number;
+    // Terrain-specific
+    terrainWidth?: number;
+    terrainHeight?: number;
 }
 
 interface Connection {
@@ -70,6 +79,15 @@ export default abstract class WorldElement {
 
     public getNode(index: number): WorldNode {
         return this.nodes[index];
+    }
+
+    public getChildWorldNodes(): WorldNode[] {
+        const out: WorldNode[] = [];
+        this.mesh.traverse((obj) => {
+            const node = obj.userData.worldNode as WorldNode | undefined;
+            if (node) out.push(node);
+        });
+        return out;
     }
 
     public getNodeIndex(node: WorldNode): number {
@@ -132,6 +150,8 @@ export default abstract class WorldElement {
 
     public abstract getProperties(): PropertyDefinition;
 
+    public abstract getOccupiedArea(): OccupiedTriangle[];
+
     public abstract serialize(id: number): ElementData;
 
     protected collectTextureMaps(): { textures: Record<string, string>; textureRotations: Record<string, number> } {
@@ -192,6 +212,43 @@ export default abstract class WorldElement {
                 m.emissive.setHex(0x000000);
                 m.emissiveIntensity = 1;
             }
+        }
+    }
+
+    public translate(delta: THREE.Vector3): void {
+        const childNodes = this.getChildWorldNodes();
+        if (childNodes.length === 0) {
+            this.mesh.position.add(delta);
+            this.update();
+            return;
+        }
+
+        const moved = new Set<WorldNode>();
+        const touched = new Set<WorldElement>();
+        for (const node of childNodes) {
+            if (moved.has(node)) continue;
+            moved.add(node);
+
+            const worldPos = new THREE.Vector3();
+            node.mesh.getWorldPosition(worldPos);
+            worldPos.add(delta);
+
+            if (node.mesh.parent) {
+                node.mesh.position.copy(node.mesh.parent.worldToLocal(worldPos));
+            } else {
+                node.mesh.position.copy(worldPos);
+            }
+
+            if (node.parent) touched.add(node.parent);
+        }
+
+        if (touched.size === 0) {
+            this.update();
+            return;
+        }
+
+        for (const element of touched) {
+            element.update();
         }
     }
 

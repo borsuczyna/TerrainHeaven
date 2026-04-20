@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { singleton } from 'tsyringe';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
+import Terrain from '../elements/Terrain.ts';
 import type WorldElement from '../elements/WorldElement';
 import type SceneManager from './SceneManager';
 import type { PropertyDefinition } from './Properties';
@@ -22,6 +23,10 @@ export default class CopyManager {
     // Intersection-specific
     private intersectionNodeCount: number | null = null;
 
+    // Terrain-specific
+    private terrainWidth: number | null = null;
+    private terrainHeight: number | null = null;
+
     /** Copy the full element (Ctrl+C). On paste, spawns a new instance in front of the camera. */
     public copyElement(element: WorldElement): void {
         this.mode = 'element';
@@ -35,10 +40,20 @@ export default class CopyManager {
             this.roadLength = a.distanceTo(b);
             this.roadDirection = new THREE.Vector3().subVectors(b, a).normalize();
             this.intersectionNodeCount = null;
+            this.terrainWidth = null;
+            this.terrainHeight = null;
         } else if (element instanceof Intersection) {
             this.intersectionNodeCount = element.nodeCount;
             this.roadLength = null;
             this.roadDirection = null;
+            this.terrainWidth = null;
+            this.terrainHeight = null;
+        } else if (element instanceof Terrain) {
+            this.terrainWidth = element.width;
+            this.terrainHeight = element.height;
+            this.roadLength = null;
+            this.roadDirection = null;
+            this.intersectionNodeCount = null;
         }
     }
 
@@ -51,6 +66,8 @@ export default class CopyManager {
         this.roadLength = null;
         this.roadDirection = null;
         this.intersectionNodeCount = null;
+        this.terrainWidth = null;
+        this.terrainHeight = null;
     }
 
     public get hasCopy(): boolean {
@@ -107,6 +124,8 @@ export default class CopyManager {
             newEl = new Road(posA, posB);
         } else if (this.sourceType === 'Intersection' && this.intersectionNodeCount !== null) {
             newEl = new Intersection(spawnCenter, this.intersectionNodeCount);
+        } else if (this.sourceType === 'Terrain' && this.terrainWidth !== null && this.terrainHeight !== null) {
+            newEl = new Terrain(spawnCenter, this.terrainWidth, this.terrainHeight);
         }
 
         if (!newEl) return null;
