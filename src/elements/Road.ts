@@ -17,6 +17,8 @@ export default class Road extends WorldElement {
     public edgeType: EdgeType = 'none';
     public sidewalkWidth: number = 1;
     public curbHeight: number = 0.15;
+    public roadTexStretch: number = 1;
+    public sidewalkTexStretch: number = 1;
 
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
@@ -293,6 +295,14 @@ export default class Road extends WorldElement {
                         set: (v: string) => { self.setTextureRotation('road', Number(v)); },
                     },
                     {
+                        type: 'number' as const,
+                        label: 'Road Stretch',
+                        get: () => self.roadTexStretch,
+                        set: (v: number) => { self.roadTexStretch = Math.max(0.1, v); self.update(); },
+                        min: 0.1,
+                        step: 0.1,
+                    },
+                    {
                         type: 'select' as const,
                         label: 'Sidewalk Rot.',
                         options: [
@@ -303,6 +313,14 @@ export default class Road extends WorldElement {
                         ],
                         get: () => String(self.textureRotations.get('sidewalk') ?? 0),
                         set: (v: string) => { self.setTextureRotation('sidewalk', Number(v)); },
+                    },
+                    {
+                        type: 'number' as const,
+                        label: 'Sidewalk Stretch',
+                        get: () => self.sidewalkTexStretch,
+                        set: (v: number) => { self.sidewalkTexStretch = Math.max(0.1, v); self.update(); },
+                        min: 0.1,
+                        step: 0.1,
                     },
                 ],
             },
@@ -381,7 +399,7 @@ export default class Road extends WorldElement {
 
         const leftTotal = leftCumDist[leftCumDist.length - 1];
         const rightTotal = rightCumDist[rightCumDist.length - 1];
-        const maxEdgeLen = Math.max(leftTotal, rightTotal, 0.001);
+        const maxEdgeLen = Math.min(leftTotal, rightTotal);
 
         // Normalize so both edges end at maxEdgeLen
         for (let i = 0; i < leftCumDist.length; i++) {
@@ -427,13 +445,13 @@ export default class Road extends WorldElement {
             const vTR = leftCumDist[i + 1] + (rightCumDist[i + 1] - leftCumDist[i + 1]) * laneRightFrac;
 
             const invert = laneIndex % 2 === 1;
-            const maxV = edge.maxEdgeLen;
+            const maxV = edge.maxEdgeLen * 2;
             const uL = invert ? 1 : 0;
             const uR = invert ? 0 : 1;
-            const fvBL = invert ? maxV - vBL : vBL;
-            const fvBR = invert ? maxV - vBR : vBR;
-            const fvTL = invert ? maxV - vTL : vTL;
-            const fvTR = invert ? maxV - vTR : vTR;
+            const fvBL = (invert ? maxV - vBL : vBL) * this.roadTexStretch;
+            const fvBR = (invert ? maxV - vBR : vBR) * this.roadTexStretch;
+            const fvTL = (invert ? maxV - vTL : vTL) * this.roadTexStretch;
+            const fvTR = (invert ? maxV - vTR : vTR) * this.roadTexStretch;
 
             triangles.push(new Triangle(bl, br, tr,
                 new THREE.Vector2(uL, fvBL),
@@ -487,8 +505,8 @@ export default class Road extends WorldElement {
             const outerNextUp = outerNext.clone().add(upNext);
 
             // V along length — use the edge cumDist on the side of the road
-            const vCurr = side > 0 ? rightCumDist[i] : leftCumDist[i];
-            const vNext = side > 0 ? rightCumDist[i + 1] : leftCumDist[i + 1];
+            const vCurr = (side > 0 ? rightCumDist[i] : leftCumDist[i]) * this.sidewalkTexStretch;
+            const vNext = (side > 0 ? rightCumDist[i + 1] : leftCumDist[i + 1]) * this.sidewalkTexStretch;
 
             // Curb face (vertical wall): U = 0 at bottom, 1 at top
             if (side > 0) {
