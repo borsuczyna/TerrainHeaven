@@ -92,7 +92,30 @@ export default class App {
             } else {
                 this.gizmo.attachElements(this.selection.getSelectedElements());
             }
-            this.checkMerge(nodes);
+
+            const selectedElements = this.selection.getSelectedElements();
+            const isMultiSelection = nodes.length >= 2 || selectedElements.length >= 2;
+            if (isMultiSelection) {
+                const actions = this.getSelectionActions(nodes, selectedElements);
+                if (actions) {
+                    this.properties.showCustom(actions);
+                } else {
+                    this.properties.hide();
+                }
+                return;
+            }
+
+            if (selectedElements.length === 1) {
+                this.properties.show(selectedElements[0]);
+                return;
+            }
+
+            if (nodes.length === 1 && nodes[0].parent) {
+                this.properties.show(nodes[0].parent);
+                return;
+            }
+
+            this.properties.hide();
         };
 
         this.selection.onElementSelected = (element) => {
@@ -260,41 +283,54 @@ export default class App {
         });
     }
 
-    private checkMerge(nodes: WorldNode[]): void {
-        if (nodes.length !== 2) return;
-        const [a, b] = nodes;
-        if (!a.parent || !b.parent) return;
-        if (a.parent === b.parent) return;
-        const idxA = a.parent.getNodeIndex(a);
-        const idxB = b.parent.getNodeIndex(b);
-        if (idxA < 0 || idxB < 0) return;
-        if (a.parent.isConnected(idxA) || b.parent.isConnected(idxB)) return;
+    private getSelectionActions(nodes: WorldNode[], selectedElements: WorldElement[]): PropertyDefinition | null {
+        const actions: { type: 'button'; label: string; onClick: () => void }[] = [];
 
-        const def: PropertyDefinition = {
+        if (nodes.length === 2) {
+            actions.push({
+                type: 'button',
+                label: 'Merge Nodes',
+                onClick: () => {
+                    const [a, b] = nodes;
+                    if (!a.parent || !b.parent) return;
+                    if (a.parent === b.parent) return;
+                    const idxA = a.parent.getNodeIndex(a);
+                    const idxB = b.parent.getNodeIndex(b);
+                    if (idxA < 0 || idxB < 0) return;
+                    if (a.parent.isConnected(idxA) || b.parent.isConnected(idxB)) return;
+
+                    const parentA = a.parent;
+                    const parentB = b.parent;
+                    parentA.connect(idxA, parentB, idxB);
+                    parentA.update();
+                    parentB.update();
+                    this.selection.clearSelection();
+                    this.properties.hide();
+                },
+            });
+        }
+
+        if (nodes.length >= 2 || selectedElements.length >= 2) {
+            actions.push({
+                type: 'button',
+                label: 'Clear Selection',
+                onClick: () => {
+                    this.selection.clearSelection();
+                    this.properties.hide();
+                },
+            });
+        }
+
+        if (actions.length === 0) return null;
+
+        return {
             title: 'Selection',
             icon: '&#9654;',
             sections: [{
                 label: 'Actions',
-                properties: [{
-                    type: 'button' as const,
-                    label: 'Merge Nodes',
-                    onClick: () => {
-                        const parentA = a.parent!;
-                        const parentB = b.parent!;
-                        const idxA = parentA.getNodeIndex(a);
-                        const idxB = parentB.getNodeIndex(b);
-                        if (idxA >= 0 && idxB >= 0) {
-                            parentA.connect(idxA, parentB, idxB);
-                            parentA.update();
-                            parentB.update();
-                        }
-                        this.selection.clearSelection();
-                        this.properties.hide();
-                    },
-                }],
+                properties: actions,
             }],
         };
-        this.properties.showCustom(def);
     }
 
     private animate(time: number): void {

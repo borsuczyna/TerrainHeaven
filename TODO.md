@@ -3,4 +3,17 @@
 [x] Should be possible to move camera when mouse is clicked on WorldElement
 [ ] Intersection cut out on terrain is incorrect
 [x] Should be possible to select more than one WorldElement at once to move it
-[ ] When two nodes or WorldElements are selected at once, don't show properties editing, only show options like Merge nodes etc
+[x] When two nodes or WorldElements are selected at once, don't show properties editing, only show options like Merge nodes etc
+[ ] Rework toolbar:
+- Add top (header) toolbar with options like in photoshop, text not icons: (move from left toolbar)
+  - Save
+  - Load
+  - Settings
+- Modify left toolbar:
+  - Select tool (keep current)
+  - Road tool (when right clicked show on right other options: intersection)
+  - Move intersection tool to switch between road tool
+  - UV Mapper (keep current)
+  - Texture Browser (keep current)
+  - Wireframe (keep current)
+Make sure code is perfect, so you need to refactor a little bit ToolManager and need to make new HeaderManager
