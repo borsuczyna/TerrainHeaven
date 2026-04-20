@@ -1,5 +1,5 @@
 import { singleton } from 'tsyringe';
-import textureData from '../data/textures.json';
+import textureData from '../../data/textures.json';
 
 const BASE_URL = 'https://files.prineside.com/gtasa_samp_game_texture//png/';
 

@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
-import type { Tool } from './ToolManager';
-import SceneManager from './SceneManager';
-import Camera from './Camera';
-import Intersection from '../elements/Intersection';
+import type { Tool } from '../ToolManager';
+import SceneManager from '../SceneManager';
+import Camera from '../Camera';
+import Intersection from '../../elements/Intersection';
 
 @singleton()
 export default class IntersectionTool implements Tool {

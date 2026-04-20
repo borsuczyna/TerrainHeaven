@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { singleton, inject } from 'tsyringe';
+import { singleton, inject, delay } from 'tsyringe';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type WorldNode from '../elements/WorldNode';
 import type WorldElement from '../elements/WorldElement';
@@ -16,7 +16,7 @@ export default class GizmoManager {
     private helperLastPosition: THREE.Vector3 = new THREE.Vector3();
 
     constructor(
-        @inject(Camera) camera: Camera,
+        @inject(delay(() => Camera)) camera: Camera,
         @inject(Renderer) renderer: Renderer,
         @inject(SceneManager) scene: SceneManager,
     ) {

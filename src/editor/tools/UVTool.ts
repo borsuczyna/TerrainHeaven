@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
-import type { Tool } from './ToolManager';
-import SceneManager from './SceneManager';
-import Camera from './Camera';
-import UVEditorPanel from './UVEditorPanel';
-import type WorldElement from '../elements/WorldElement';
+import type { Tool } from '../ToolManager';
+import SceneManager from '../SceneManager';
+import Camera from '../Camera';
+import UVEditorPanel from '../panels/UVEditorPanel';
+import type WorldElement from '../../elements/WorldElement';
 
 @singleton()
 export default class UVTool implements Tool {

@@ -1,5 +1,5 @@
 import { singleton, inject } from 'tsyringe';
-import ProjectSettings from './ProjectSettings';
+import ProjectSettings from '../ProjectSettings';
 
 @singleton()
 export default class SettingsPanel {

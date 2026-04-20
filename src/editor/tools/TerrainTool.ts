@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
-import type { Tool } from './ToolManager';
-import SceneManager from './SceneManager';
-import Camera from './Camera';
-import Terrain from '../elements/Terrain.ts';
+import type { Tool } from '../ToolManager.ts';
+import SceneManager from '../SceneManager.ts';
+import Camera from '../Camera.ts';
+import Terrain from '../../elements/Terrain.ts';
 
 @singleton()
 export default class TerrainTool implements Tool {

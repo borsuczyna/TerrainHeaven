@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { singleton } from 'tsyringe';
+import { singleton, inject } from 'tsyringe';
 import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertySelect, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
-import type CopyManager from './CopyManager';
+import CopyManager from './CopyManager';
 
 @singleton()
 export default class PropertiesPanel {
@@ -10,9 +10,10 @@ export default class PropertiesPanel {
     private element: WorldElement | null = null;
     private refreshInterval: number | null = null;
     private customDef: PropertyDefinition | null = null;
-    public copyManager: CopyManager | null = null;
+    private readonly copyManager: CopyManager;
 
-    constructor() {
+    constructor(@inject(CopyManager) copyManager: CopyManager) {
+        this.copyManager = copyManager;
         this.container = document.getElementById('properties-panel')!;
     }
 
@@ -158,7 +159,7 @@ export default class PropertiesPanel {
             menu.style.display = isOpen ? 'none' : 'block';
 
             if (!isOpen) {
-                const canPaste = this.element !== null && (this.copyManager?.canPastePropertiesOnto(this.element) ?? false);
+                const canPaste = this.element !== null && this.copyManager.canPastePropertiesOnto(this.element);
 
                 menu.innerHTML = `
                     <div class="panel-menu-item" data-action="copy">Copy properties</div>
@@ -184,11 +185,11 @@ export default class PropertiesPanel {
 
     private doCopyProperties(): void {
         if (!this.element) return;
-        this.copyManager?.copyProperties(this.element);
+        this.copyManager.copyProperties(this.element);
     }
 
     private doPasteProperties(): void {
-        if (!this.element || !this.copyManager) return;
+        if (!this.element) return;
         this.copyManager.pastePropertiesOnto(this.element);
     }
 

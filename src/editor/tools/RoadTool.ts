@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
-import type { Tool } from './ToolManager';
-import SceneManager from './SceneManager';
-import Camera from './Camera';
-import Road from '../elements/Road';
-import type WorldNode from '../elements/WorldNode';
+import type { Tool } from '../ToolManager';
+import SceneManager from '../SceneManager';
+import Camera from '../Camera';
+import Road from '../../elements/Road';
+import type WorldNode from '../../elements/WorldNode';
 
 @singleton()
 export default class RoadTool implements Tool {

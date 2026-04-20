@@ -1,8 +1,7 @@
 import { singleton, inject } from 'tsyringe';
-import SettingsPanel from './SettingsPanel';
+import SettingsPanel from './panels/SettingsPanel';
 import ProjectSerializer from './ProjectSerializer';
 import SelectionManager from './SelectionManager';
-import PropertiesPanel from './PropertiesPanel';
 
 @singleton()
 export default class HeaderManager {
@@ -10,7 +9,6 @@ export default class HeaderManager {
         @inject(SettingsPanel) private readonly settingsPanel: SettingsPanel,
         @inject(ProjectSerializer) private readonly serializer: ProjectSerializer,
         @inject(SelectionManager) private readonly selection: SelectionManager,
-        @inject(PropertiesPanel) private readonly properties: PropertiesPanel,
     ) {}
 
     public init(): void {
@@ -43,7 +41,6 @@ export default class HeaderManager {
                 reader.onload = () => {
                     try {
                         this.serializer.load(reader.result as string);
-                        this.properties.hide();
                         this.selection.clearSelection();
                     } catch (e) {
                         console.error('Failed to load project:', e);

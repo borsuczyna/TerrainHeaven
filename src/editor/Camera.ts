@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { singleton } from 'tsyringe';
-import type SelectionManager from './SelectionManager';
-import type ToolManager from './ToolManager';
+import { singleton, inject } from 'tsyringe';
+import type GizmoManager from './GizmoManager';
+import ToolManager from './ToolManager';
 
 @singleton()
 export default class Camera {
     public readonly instance: THREE.PerspectiveCamera;
-    public selectionManager: SelectionManager | null = null;
-    public toolManager: ToolManager | null = null;
+    private readonly toolManager: ToolManager;
+    private gizmo: GizmoManager | null = null;
 
     private keys = new Set<string>();
     private moveSpeed: number = 5;
@@ -16,7 +16,8 @@ export default class Camera {
     private yaw = -Math.PI / 2;
     private isDragging = false;
 
-    constructor() {
+    constructor(@inject(ToolManager) toolManager: ToolManager) {
+        this.toolManager = toolManager;
         this.instance = new THREE.PerspectiveCamera(
             75,
             window.innerWidth / window.innerHeight,
@@ -50,10 +51,14 @@ export default class Camera {
     private onMouseDown = (e: MouseEvent): void => {
         if (e.button !== 0) return;
         if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
-        if (this.toolManager?.getActive()?.blocksCamera) return;
-        if (this.selectionManager?.gizmo?.isDragging) return;
+        if (this.toolManager.getActive()?.blocksCamera) return;
+        if (this.gizmo?.isDragging) return;
         this.isDragging = true;
     };
+
+    public setGizmoManager(gizmo: GizmoManager): void {
+        this.gizmo = gizmo;
+    }
 
     private onMouseUp = (e: MouseEvent): void => {
         if (e.button !== 0) return;

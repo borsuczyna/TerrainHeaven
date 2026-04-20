@@ -13,7 +13,9 @@ export default class SceneManager {
     }
 
     private setupGrid(): void {
-        const gridHelper = new THREE.GridHelper(100, 100, 0x444444, 0x333333);
+        const gridHelper = new THREE.GridHelper(100, 100, 0x888888, 0x555555);
+        (gridHelper.material as THREE.Material).transparent = true;
+        (gridHelper.material as THREE.Material).opacity = 0.2;
         this.instance.add(gridHelper);
     }
 

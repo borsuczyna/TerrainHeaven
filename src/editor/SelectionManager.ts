@@ -4,8 +4,11 @@ import type WorldNode from '../elements/WorldNode';
 import type WorldElement from '../elements/WorldElement';
 import Camera from './Camera';
 import SceneManager from './SceneManager';
-import type GizmoManager from './GizmoManager';
-import type ToolManager from './ToolManager';
+import type { PropertyDefinition } from './Properties';
+import GizmoManager from './GizmoManager';
+import ToolManager from './ToolManager';
+import PropertiesPanel from './PropertiesPanel';
+import CopyManager from './CopyManager';
 
 @singleton()
 export default class SelectionManager {
@@ -13,10 +16,14 @@ export default class SelectionManager {
     private selectedElements: Set<WorldElement> = new Set();
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
+    private cameraController: Camera;
+    private sceneManager: SceneManager;
     private camera: THREE.PerspectiveCamera;
     private scene: THREE.Scene;
-    public gizmo: GizmoManager | null = null;
-    public toolManager: ToolManager | null = null;
+    private gizmo: GizmoManager;
+    private toolManager: ToolManager;
+    private properties: PropertiesPanel;
+    private copyManager: CopyManager;
     private _nodeWasHit = false;
 
     public get nodeWasHit(): boolean {
@@ -26,16 +33,26 @@ export default class SelectionManager {
     }
 
     public onSelectionChanged: ((nodes: WorldNode[]) => void) | null = null;
-    public onElementSelected: ((element: WorldElement | null) => void) | null = null;
 
     constructor(
         @inject(Camera) camera: Camera,
         @inject(SceneManager) scene: SceneManager,
+        @inject(GizmoManager) gizmo: GizmoManager,
+        @inject(ToolManager) toolManager: ToolManager,
+        @inject(PropertiesPanel) properties: PropertiesPanel,
+        @inject(CopyManager) copyManager: CopyManager,
     ) {
+        this.cameraController = camera;
+        this.sceneManager = scene;
         this.camera = camera.instance;
         this.scene = scene.instance;
+        this.gizmo = gizmo;
+        this.toolManager = toolManager;
+        this.properties = properties;
+        this.copyManager = copyManager;
 
         window.addEventListener('mousedown', this.onMouseDown, { capture: true });
+        window.addEventListener('keydown', this.onKeyDown);
     }
 
     private onMouseDown = (e: MouseEvent): void => {
@@ -45,11 +62,11 @@ export default class SelectionManager {
         if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
 
         // Delegate to active tool first
-        const activeTool = this.toolManager?.getActive();
+        const activeTool = this.toolManager.getActive();
         if (activeTool?.name !== 'select' && activeTool?.onMouseDown?.(e)) return;
 
         // Ignore when gizmo is being used
-        if (this.gizmo?.isDragging) return;
+        if (this.gizmo.isDragging) return;
 
         this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -101,12 +118,12 @@ export default class SelectionManager {
                     this.selectAdd(hitNode);
                 }
             } else {
-                this.clearSelection();
+                this.clearNodeSelection();
                 this.selectAdd(hitNode);
             }
         } else if (hitElement) {
             this._nodeWasHit = true;
-            this.clearSelection();
+            this.clearNodeSelection();
             if (ctrlHeld) {
                 if (this.selectedElements.has(hitElement)) {
                     this.deselectElement(hitElement);
@@ -118,12 +135,43 @@ export default class SelectionManager {
                 this.selectElementAdd(hitElement);
             }
         } else if (!ctrlHeld) {
-            this.clearSelection();
+            this.clearNodeSelection();
             this.clearElementSelection();
         }
 
-        this.emitElementSelection();
-        this.onSelectionChanged?.(this.getSelected());
+        this.emitSelectionChanged();
+    };
+
+    private onKeyDown = (e: KeyboardEvent): void => {
+        const target = e.target as HTMLElement | null;
+        const tagName = target?.tagName;
+        if (tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA') return;
+        if (e.repeat) return;
+        if (!e.ctrlKey && !e.metaKey) return;
+
+        if (e.key === 'c' || e.key === 'C') {
+            const element = this.getSelectedElement();
+            if (!element) return;
+            e.preventDefault();
+            this.copyManager.copyElement(element);
+            return;
+        }
+
+        if (e.key === 'v' || e.key === 'V') {
+            e.preventDefault();
+            const selectedElement = this.getSelectedElement();
+            if (selectedElement && this.copyManager.canPastePropertiesOnto(selectedElement)) {
+                this.copyManager.pastePropertiesOnto(selectedElement);
+                return;
+            }
+
+            if (this.copyManager.canPasteElement()) {
+                const newElement = this.copyManager.pasteElement(this.cameraController.instance, this.sceneManager);
+                if (newElement) {
+                    this.selectElement(newElement);
+                }
+            }
+        }
     };
 
     private selectAdd(node: WorldNode): void {
@@ -136,11 +184,17 @@ export default class SelectionManager {
         node.setSelected(false);
     }
 
-    public clearSelection(): void {
+    private clearNodeSelection(): void {
         for (const node of this.selected) {
             node.setSelected(false);
         }
         this.selected.clear();
+    }
+
+    public clearSelection(): void {
+        this.clearNodeSelection();
+        this.clearElementSelection();
+        this.emitSelectionChanged();
     }
 
     private selectElementAdd(element: WorldElement): void {
@@ -161,12 +215,98 @@ export default class SelectionManager {
         this.selectedElements.clear();
     }
 
-    private emitElementSelection(): void {
-        if (this.selectedElements.size === 1) {
-            this.onElementSelected?.([...this.selectedElements][0]);
+    private emitSelectionChanged(): void {
+        const nodes = this.getSelected();
+        const selectedElements = this.getSelectedElements();
+
+        if (nodes.length > 0) {
+            this.gizmo.attach(nodes);
         } else {
-            this.onElementSelected?.(null);
+            this.gizmo.attachElements(selectedElements);
         }
+
+        this.syncPropertiesPanel(nodes, selectedElements);
+        this.onSelectionChanged?.(nodes);
+    }
+
+    private syncPropertiesPanel(nodes: WorldNode[], selectedElements: WorldElement[]): void {
+        const content = this.getSelectionPresentation(nodes, selectedElements);
+        if (!content) {
+            this.properties.hide();
+            return;
+        }
+
+        if ('sections' in content) {
+            this.properties.showCustom(content);
+            return;
+        }
+
+        this.properties.show(content);
+    }
+
+    private getSelectionPresentation(nodes: WorldNode[], selectedElements: WorldElement[]): WorldElement | PropertyDefinition | null {
+        const isMultiSelection = nodes.length >= 2 || selectedElements.length >= 2;
+        if (isMultiSelection) {
+            return this.getSelectionActions(nodes, selectedElements);
+        }
+
+        if (selectedElements.length === 1) {
+            return selectedElements[0];
+        }
+
+        if (nodes.length === 1 && nodes[0].parent) {
+            return nodes[0].parent;
+        }
+
+        return null;
+    }
+
+    private getSelectionActions(nodes: WorldNode[], selectedElements: WorldElement[]): PropertyDefinition | null {
+        const actions: { type: 'button'; label: string; onClick: () => void }[] = [];
+
+        if (nodes.length === 2) {
+            actions.push({
+                type: 'button',
+                label: 'Merge Nodes',
+                onClick: () => {
+                    const [a, b] = nodes;
+                    if (!a.parent || !b.parent) return;
+                    if (a.parent === b.parent) return;
+                    const idxA = a.parent.getNodeIndex(a);
+                    const idxB = b.parent.getNodeIndex(b);
+                    if (idxA < 0 || idxB < 0) return;
+                    if (a.parent.isConnected(idxA) || b.parent.isConnected(idxB)) return;
+
+                    const parentA = a.parent;
+                    const parentB = b.parent;
+                    parentA.connect(idxA, parentB, idxB);
+                    parentA.update();
+                    parentB.update();
+                    this.clearSelection();
+                },
+            });
+        }
+
+        if (nodes.length >= 2 || selectedElements.length >= 2) {
+            actions.push({
+                type: 'button',
+                label: 'Clear Selection',
+                onClick: () => {
+                    this.clearSelection();
+                },
+            });
+        }
+
+        if (actions.length === 0) return null;
+
+        return {
+            title: 'Selection',
+            icon: '&#9654;',
+            sections: [{
+                label: 'Actions',
+                properties: actions,
+            }],
+        };
     }
 
     public getSelected(): WorldNode[] {
@@ -182,14 +322,14 @@ export default class SelectionManager {
     }
 
     public selectElement(element: WorldElement): void {
-        this.clearSelection();
+        this.clearNodeSelection();
         this.clearElementSelection();
         this.selectElementAdd(element);
-        this.emitElementSelection();
-        this.onSelectionChanged?.([]);
+        this.emitSelectionChanged();
     }
 
     public dispose(): void {
         window.removeEventListener('mousedown', this.onMouseDown, { capture: true });
+        window.removeEventListener('keydown', this.onKeyDown);
     }
 }
