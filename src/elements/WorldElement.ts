@@ -71,6 +71,7 @@ export default abstract class WorldElement {
     private groupNames: string[] = [];
     private groupTextures: Map<string, THREE.Texture> = new Map();
     public textureRotations: Map<string, number> = new Map();
+    private isSelected: boolean = false;
 
     constructor() {
         container.resolve(WireframeManager).register(this.mesh);
@@ -201,18 +202,39 @@ export default abstract class WorldElement {
     }
 
     public setSelected(selected: boolean): void {
+        this.isSelected = selected;
         const mats = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
         for (const mat of mats) {
-            const m = mat as THREE.MeshStandardMaterial;
-            if (!m?.emissive) continue;
-            if (selected) {
-                m.emissive.setHex(0x0044ff);
-                m.emissiveIntensity = 0.5;
-            } else {
-                m.emissive.setHex(0x000000);
-                m.emissiveIntensity = 1;
-            }
+            this.applySelectionMaterialState(mat as THREE.MeshStandardMaterial);
         }
+    }
+
+    private applySelectionMaterialState(material: THREE.MeshStandardMaterial): void {
+        if (!material) return;
+
+        const baseColor = this.getBaseMaterialColor(material);
+        if (this.isSelected) {
+            material.color.copy(baseColor).lerp(new THREE.Color(0x4d8dff), 0.45);
+            material.emissive.setHex(0x173d91);
+            material.emissiveIntensity = 0.35;
+        } else {
+            material.color.copy(baseColor);
+            material.emissive.setHex(0x000000);
+            material.emissiveIntensity = 0;
+        }
+
+        material.needsUpdate = true;
+    }
+
+    private getBaseMaterialColor(material: THREE.MeshStandardMaterial): THREE.Color {
+        const storedBase = material.userData.baseColor;
+        if (storedBase instanceof THREE.Color) {
+            return storedBase;
+        }
+
+        const baseColor = material.color.clone();
+        material.userData.baseColor = baseColor;
+        return baseColor;
     }
 
     public translate(delta: THREE.Vector3): void {
@@ -371,12 +393,14 @@ export default abstract class WorldElement {
             geometry.addGroup(info.start, info.count, i);
             this.groupNames.push(info.name);
             const mat = new THREE.MeshStandardMaterial();
+            mat.userData.baseColor = mat.color.clone();
             const tex = this.groupTextures.get(info.name);
             if (tex) {
                 this.applyTextureRotation(info.name, tex);
                 mat.map = tex;
             }
             mat.wireframe = container.resolve(WireframeManager).isEnabled();
+            this.applySelectionMaterialState(mat);
             materials.push(mat);
         }
 
