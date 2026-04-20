@@ -20,6 +20,7 @@ interface ElementData {
     edgeType?: string;
     sidewalkWidth?: number;
     curbHeight?: number;
+    roadCrown?: number;
     curvePointA?: { x: number; y: number; z: number } | null;
     curvePointB?: { x: number; y: number; z: number } | null;
     // Intersection-specific
@@ -105,6 +106,7 @@ export default class ProjectSerializer {
                     edgeType: el.edgeType,
                     sidewalkWidth: el.sidewalkWidth,
                     curbHeight: el.curbHeight,
+                    roadCrown: el.roadCrown,
                     curvePointA,
                     curvePointB,
                 });
@@ -179,6 +181,7 @@ export default class ProjectSerializer {
                 road.edgeType = (ed.edgeType as 'none' | 'sidewalk') ?? 'none';
                 road.sidewalkWidth = ed.sidewalkWidth ?? 1;
                 road.curbHeight = ed.curbHeight ?? 0.15;
+                road.roadCrown = ed.roadCrown ?? 0;
 
                 if (ed.divisions && ed.divisions > 0) {
                     road.divisions = ed.divisions;

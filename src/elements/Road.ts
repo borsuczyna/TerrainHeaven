@@ -19,6 +19,7 @@ export default class Road extends WorldElement {
     public curbHeight: number = 0.15;
     public roadTexStretch: number = 1;
     public sidewalkTexStretch: number = 1;
+    public roadCrown: number = 0;
 
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
@@ -186,6 +187,14 @@ export default class Road extends WorldElement {
         return { forward, right, up };
     }
 
+    private getEndCrown(nodeIndex: number): number {
+        const conn = this.connections.get(nodeIndex);
+        if (!conn) return this.roadCrown;
+        if (!(conn.element instanceof Road)) return 0;
+        // Average both crowns so each road produces the same junction height
+        return (this.roadCrown + conn.element.roadCrown) / 2;
+    }
+
     public connectWith(thisNodeIndex: number, otherRoad: Road, otherNodeIndex: number = 0): void {
         this.connect(thisNodeIndex, otherRoad, otherNodeIndex);
         this.updateCurveLines();
@@ -243,6 +252,14 @@ export default class Road extends WorldElement {
                         set: (v: number) => { self.divisions = Math.max(0, Math.round(v)); self.update(); },
                         min: 0,
                         step: 1,
+                    },
+                    {
+                        type: 'number' as const,
+                        label: 'Crown',
+                        get: () => self.roadCrown,
+                        set: (v: number) => { self.roadCrown = v; self.update(); },
+                        min: 0,
+                        step: 0.01,
                     },
                 ],
             },
@@ -418,6 +435,11 @@ export default class Road extends WorldElement {
 
         const laneLeftFrac = laneIndex / this.lanes;
         const laneRightFrac = (laneIndex + 1) / this.lanes;
+        const crownA = this.getEndCrown(0);
+        const crownB = this.getEndCrown(1);
+        const crownAtT = (t: number): number => t < 0.5
+            ? crownA + (this.roadCrown - crownA) * t * 2
+            : this.roadCrown + (crownB - this.roadCrown) * (t - 0.5) * 2;
 
         for (let i = 0; i < points.length - 1; i++) {
             const curr = points[i];
@@ -432,10 +454,14 @@ export default class Road extends WorldElement {
             const nextLeft = rightNext.clone().multiplyScalar(-hwNext + 2 * hwNext * laneLeftFrac);
             const nextRight = rightNext.clone().multiplyScalar(-hwNext + 2 * hwNext * laneRightFrac);
 
-            const bl = curr.clone().add(currLeft);
-            const br = curr.clone().add(currRight);
-            const tl = next.clone().add(nextLeft);
-            const tr = next.clone().add(nextRight);
+            const crown = (f: number, ti: number) => new THREE.Vector3(0, crownAtT(ti) * (1 - Math.abs(2 * f - 1)), 0);
+
+            const tCurr = i / (points.length - 1);
+            const tNext = (i + 1) / (points.length - 1);
+            const bl = curr.clone().add(currLeft).add(crown(laneLeftFrac, tCurr));
+            const br = curr.clone().add(currRight).add(crown(laneRightFrac, tCurr));
+            const tl = next.clone().add(nextLeft).add(crown(laneLeftFrac, tNext));
+            const tr = next.clone().add(nextRight).add(crown(laneRightFrac, tNext));
 
             // UV: U = 0..1 per lane (full texture width per lane), V along length (edge-length proportional)
             // Every second lane is inverted (180° rotated)
