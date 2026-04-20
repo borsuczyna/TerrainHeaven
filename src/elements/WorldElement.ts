@@ -278,6 +278,7 @@ export default abstract class WorldElement {
                 this.applyTextureRotation(info.name, tex);
                 mat.map = tex;
             }
+            mat.wireframe = WireframeManager.isEnabled();
             materials.push(mat);
         }
 

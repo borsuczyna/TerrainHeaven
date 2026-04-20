@@ -7,7 +7,12 @@ class WireframeManager {
     public register(mesh: THREE.Mesh): void {
         this.meshes.add(mesh);
         if (this.enabled) {
-            (mesh.material as THREE.MeshStandardMaterial).wireframe = true;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of materials) {
+                if (mat instanceof THREE.MeshStandardMaterial) {
+                    mat.wireframe = true;
+                }
+            }
         }
     }
 
@@ -26,10 +31,17 @@ class WireframeManager {
         this.apply();
     }
 
+    public isEnabled(): boolean {
+        return this.enabled;
+    }
+
     private apply(): void {
         for (const mesh of this.meshes) {
-            if (mesh.material instanceof THREE.Material) {
-                (mesh.material as THREE.MeshStandardMaterial).wireframe = this.enabled;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of materials) {
+                if (mat instanceof THREE.MeshStandardMaterial) {
+                    mat.wireframe = this.enabled;
+                }
             }
         }
     }
