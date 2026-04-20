@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis, type GeometryGroup } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -200,6 +200,52 @@ export default class Road extends WorldElement {
         this.updateCurveLines();
         this.update();
         otherRoad.update();
+    }
+
+    public override serialize(id: number): ElementData {
+        const { textures, textureRotations } = this.collectTextureMaps();
+        const nodes = [
+            { x: this.getNode(0).mesh.position.x, y: this.getNode(0).mesh.position.y, z: this.getNode(0).mesh.position.z },
+            { x: this.getNode(1).mesh.position.x, y: this.getNode(1).mesh.position.y, z: this.getNode(1).mesh.position.z },
+        ];
+        let curvePointA: { x: number; y: number; z: number } | null = null;
+        let curvePointB: { x: number; y: number; z: number } | null = null;
+        if (this.divisions > 0) {
+            const cpA = this.getCurvePointAPosition();
+            const cpB = this.getCurvePointBPosition();
+            if (cpA) curvePointA = { x: cpA.x, y: cpA.y, z: cpA.z };
+            if (cpB) curvePointB = { x: cpB.x, y: cpB.y, z: cpB.z };
+        }
+        return {
+            type: 'road', id, nodes, textures, textureRotations,
+            width: this.width,
+            lanes: this.lanes,
+            divisions: this.divisions,
+            edgeType: this.edgeType,
+            sidewalkWidth: this.sidewalkWidth,
+            curbHeight: this.curbHeight,
+            roadCrown: this.roadCrown,
+            curvePointA,
+            curvePointB,
+        };
+    }
+
+    public static deserialize(ed: ElementData): Road {
+        const posA = new THREE.Vector3(ed.nodes[0].x, ed.nodes[0].y, ed.nodes[0].z);
+        const posB = new THREE.Vector3(ed.nodes[1].x, ed.nodes[1].y, ed.nodes[1].z);
+        const road = new Road(posA, posB);
+        road.width = ed.width ?? 3;
+        road.lanes = ed.lanes ?? 2;
+        road.edgeType = (ed.edgeType as 'none' | 'sidewalk') ?? 'none';
+        road.sidewalkWidth = ed.sidewalkWidth ?? 1;
+        road.curbHeight = ed.curbHeight ?? 0.15;
+        road.roadCrown = ed.roadCrown ?? 0;
+        if (ed.divisions && ed.divisions > 0) {
+            road.divisions = ed.divisions;
+            if (ed.curvePointA) road.setCurvePointA(new THREE.Vector3(ed.curvePointA.x, ed.curvePointA.y, ed.curvePointA.z));
+            if (ed.curvePointB) road.setCurvePointB(new THREE.Vector3(ed.curvePointB.x, ed.curvePointB.y, ed.curvePointB.z));
+        }
+        return road;
     }
 
     public getProperties(): PropertyDefinition {

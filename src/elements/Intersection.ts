@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis, type GeometryGroup, type UVTransform } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type UVTransform, type ElementData } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -115,6 +115,49 @@ export default class Intersection extends WorldElement {
         this.connect(thisNodeIndex, other, otherNodeIndex);
         this.update();
         other.update();
+    }
+
+    public override serialize(id: number): ElementData {
+        const { textures, textureRotations } = this.collectTextureMaps();
+        const nodes = [];
+        for (let i = 0; i < this.nodeCount; i++) {
+            const p = this.getNode(i).mesh.position;
+            nodes.push({ x: p.x, y: p.y, z: p.z });
+        }
+        return {
+            type: 'intersection', id, nodes, textures, textureRotations,
+            width: this.width,
+            length: this.length,
+            nodeCount: this.nodeCount,
+            edgeType: this.edgeType,
+            sidewalkWidth: this.sidewalkWidth,
+            curbHeight: this.curbHeight,
+            roadTexWidth: this.roadTexWidth,
+            roadTexHeight: this.roadTexHeight,
+            roadTexOffsetX: this.roadTexOffsetX,
+            roadTexOffsetY: this.roadTexOffsetY,
+        };
+    }
+
+    public static deserialize(ed: ElementData): Intersection {
+        const center = new THREE.Vector3();
+        for (const n of ed.nodes) center.add(new THREE.Vector3(n.x, n.y, n.z));
+        center.divideScalar(ed.nodes.length);
+        const intersection = new Intersection(center, ed.nodeCount ?? 4);
+        intersection.width = ed.width ?? 3;
+        intersection.length = ed.length ?? 3;
+        intersection.edgeType = (ed.edgeType as 'none' | 'sidewalk') ?? 'none';
+        intersection.sidewalkWidth = ed.sidewalkWidth ?? 1;
+        intersection.curbHeight = ed.curbHeight ?? 0.15;
+        intersection.roadTexWidth = ed.roadTexWidth ?? 3;
+        intersection.roadTexHeight = ed.roadTexHeight ?? 3;
+        intersection.roadTexOffsetX = ed.roadTexOffsetX ?? 0;
+        intersection.roadTexOffsetY = ed.roadTexOffsetY ?? 0;
+        for (let i = 0; i < ed.nodes.length; i++) {
+            const n = ed.nodes[i];
+            intersection.getNode(i).update(new THREE.Vector3(n.x, n.y, n.z));
+        }
+        return intersection;
     }
 
     public getProperties(): PropertyDefinition {

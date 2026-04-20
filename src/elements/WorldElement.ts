@@ -24,6 +24,31 @@ export interface UVTransform {
     scaleY: number;
 }
 
+export interface ElementData {
+    type: 'road' | 'intersection';
+    id: number;
+    nodes: { x: number; y: number; z: number }[];
+    textures: Record<string, string>;
+    textureRotations: Record<string, number>;
+    // Road-specific
+    width?: number;
+    lanes?: number;
+    divisions?: number;
+    edgeType?: string;
+    sidewalkWidth?: number;
+    curbHeight?: number;
+    roadCrown?: number;
+    curvePointA?: { x: number; y: number; z: number } | null;
+    curvePointB?: { x: number; y: number; z: number } | null;
+    // Intersection-specific
+    length?: number;
+    nodeCount?: number;
+    roadTexWidth?: number;
+    roadTexHeight?: number;
+    roadTexOffsetX?: number;
+    roadTexOffsetY?: number;
+}
+
 interface Connection {
     element: WorldElement;
     nodeIndex: number;
@@ -106,6 +131,21 @@ export default abstract class WorldElement {
     public abstract getNodeBasis(index: number): NodeBasis;
 
     public abstract getProperties(): PropertyDefinition;
+
+    public abstract serialize(id: number): ElementData;
+
+    protected collectTextureMaps(): { textures: Record<string, string>; textureRotations: Record<string, number> } {
+        const textures: Record<string, string> = {};
+        const textureRotations: Record<string, number> = {};
+        for (const groupName of this.getGroupNames()) {
+            const tex = this.getGroupTexture(groupName);
+            const src = tex?.image instanceof HTMLImageElement ? tex.image.src : undefined;
+            if (src) textures[groupName] = src;
+            const rot = this.textureRotations.get(groupName);
+            if (rot) textureRotations[groupName] = rot;
+        }
+        return { textures, textureRotations };
+    }
 
     /** Override to return group names that support UV editing */
     public getUVGroups(): string[] { return []; }
