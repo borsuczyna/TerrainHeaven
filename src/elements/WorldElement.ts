@@ -274,6 +274,40 @@ export default abstract class WorldElement {
         }
     }
 
+    public canRotate(): boolean {
+        return this.getChildWorldNodes().length > 0;
+    }
+
+    public rotateAround(pivot: THREE.Vector3, deltaRotation: THREE.Quaternion): void {
+        const childNodes = this.getChildWorldNodes();
+        if (childNodes.length === 0) {
+            return;
+        }
+
+        const moved = new Set<WorldNode>();
+        const touched = new Set<WorldElement>();
+        for (const node of childNodes) {
+            if (moved.has(node)) continue;
+            moved.add(node);
+
+            const worldPos = new THREE.Vector3();
+            node.mesh.getWorldPosition(worldPos);
+            worldPos.sub(pivot).applyQuaternion(deltaRotation).add(pivot);
+
+            if (node.mesh.parent) {
+                node.mesh.position.copy(node.mesh.parent.worldToLocal(worldPos));
+            } else {
+                node.mesh.position.copy(worldPos);
+            }
+
+            if (node.parent) touched.add(node.parent);
+        }
+
+        for (const element of touched) {
+            element.update();
+        }
+    }
+
     public getResolvedNodeBasis(index: number): NodeBasis {
         const basis = this.getNodeBasis(index);
         const conn = this.connections.get(index);

@@ -9,6 +9,7 @@ import LeftToolbarManager from "./LeftToolbarManager";
 import TextureDropManager from "./TextureDropManager";
 import ProjectSettings from "./ProjectSettings";
 import HeaderManager from "./HeaderManager";
+import TransformToolbarManager from "./TransformToolbarManager";
 
 @injectable()
 export default class App {
@@ -22,6 +23,7 @@ export default class App {
     private headerManager: HeaderManager;
     private leftToolbarManager: LeftToolbarManager;
     private textureDropManager: TextureDropManager;
+    private transformToolbarManager: TransformToolbarManager;
     private lastTime = 0;
 
     constructor(
@@ -35,6 +37,7 @@ export default class App {
         @inject(LeftToolbarManager) leftToolbarManager: LeftToolbarManager,
         @inject(TextureDropManager) textureDropManager: TextureDropManager,
         @inject(HeaderManager) headerManager: HeaderManager,
+        @inject(TransformToolbarManager) transformToolbarManager: TransformToolbarManager,
     ) {
         this.renderer = renderer;
         this.camera = camera;
@@ -46,6 +49,7 @@ export default class App {
         this.leftToolbarManager = leftToolbarManager;
         this.textureDropManager = textureDropManager;
         this.headerManager = headerManager;
+        this.transformToolbarManager = transformToolbarManager;
 
         // Post-construction wiring
         this.projectSettings.setCamera(this.camera.instance);
@@ -54,6 +58,7 @@ export default class App {
         this.leftToolbarManager.init();
         this.textureDropManager.init();
         this.headerManager.init();
+        this.transformToolbarManager.init();
         this.bindEvents();
         this.animate = this.animate.bind(this);
         requestAnimationFrame(this.animate);
@@ -73,6 +78,12 @@ export default class App {
             if (e.repeat) return;
 
             if (!e.ctrlKey && !e.metaKey) {
+                if (this.toolManager.getActive()?.name === 'select' && this.gizmo.handleShortcut(e.key)) {
+                    this.renderer.instance.domElement.focus();
+                    e.preventDefault();
+                    return;
+                }
+
                 if (this.toolManager.handleShortcut(e.key)) {
                     this.renderer.instance.domElement.focus();
                     e.preventDefault();

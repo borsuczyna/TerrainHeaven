@@ -7,6 +7,12 @@ import Camera from './Camera';
 import Renderer from './Renderer';
 import SceneManager from './SceneManager';
 
+export interface GizmoModeState {
+    desired: 'translate' | 'rotate';
+    effective: 'translate' | 'rotate';
+    canRotate: boolean;
+}
+
 @singleton()
 export default class GizmoManager {
     private controls: TransformControls;
@@ -14,6 +20,12 @@ export default class GizmoManager {
     private activeElements: WorldElement[] = [];
     private helper: THREE.Object3D = new THREE.Object3D();
     private helperLastPosition: THREE.Vector3 = new THREE.Vector3();
+    private helperLastQuaternion: THREE.Quaternion = new THREE.Quaternion();
+    private desiredMode: 'translate' | 'rotate' = 'translate';
+    private effectiveMode: 'translate' | 'rotate' = 'translate';
+    private isApplyingInternalRotation = false;
+    private readonly rotationSpeed = 0.3;
+    public onModeStateChanged: ((state: GizmoModeState) => void) | null = null;
 
     constructor(
         @inject(delay(() => Camera)) camera: Camera,
@@ -48,7 +60,9 @@ export default class GizmoManager {
         center.divideScalar(nodes.length);
 
         this.helper.position.copy(center);
-        this.helperLastPosition.copy(center);
+        this.resetHelperRotation();
+        this.syncHelperState();
+        this.updateControlMode();
         this.controls.attach(this.helper);
     }
 
@@ -72,18 +86,58 @@ export default class GizmoManager {
         center.divideScalar(elements.length);
 
         this.helper.position.copy(center);
-        this.helperLastPosition.copy(center);
+        this.resetHelperRotation();
+        this.syncHelperState();
+        this.updateControlMode();
         this.controls.attach(this.helper);
     }
 
     public detach(): void {
         this.activeNodes = [];
         this.activeElements = [];
+        this.updateControlMode();
         this.controls.detach();
     }
 
+    public handleShortcut(key: string): boolean {
+        const normalized = key.toUpperCase();
+        if (normalized === 'G') {
+            this.setMode('translate');
+            return true;
+        }
+
+        if (normalized === 'E') {
+            this.setMode('rotate');
+            return true;
+        }
+
+        return false;
+    }
+
+    public setMode(mode: 'translate' | 'rotate'): void {
+        if (mode === 'rotate' && !this.canRotateSelection()) return;
+        this.desiredMode = mode;
+        this.updateControlMode();
+        this.resetHelperRotation();
+        this.syncHelperState();
+    }
+
+    public getModeState(): GizmoModeState {
+        return {
+            desired: this.desiredMode,
+            effective: this.effectiveMode,
+            canRotate: this.canRotateSelection(),
+        };
+    }
+
     private onGizmoChange = (): void => {
+        if (this.isApplyingInternalRotation) return;
         if (this.activeNodes.length === 0 && this.activeElements.length === 0) return;
+
+        if (this.effectiveMode === 'rotate') {
+            this.rotateActiveElements();
+            return;
+        }
 
         const delta = this.helper.position.clone().sub(this.helperLastPosition);
         if (delta.lengthSq() < 1e-12) return;
@@ -114,12 +168,127 @@ export default class GizmoManager {
             return;
         }
 
-        if (this.activeElements.length === 0) return;
-        for (const element of this.activeElements) {
-            element.translate(delta);
-        }
+        this.translateActiveElements(delta);
         this.helperLastPosition.copy(this.helper.position);
     };
+
+    private translateActiveElements(delta: THREE.Vector3): void {
+        if (this.activeElements.length === 0) return;
+
+        const movedNodes = new Set<WorldNode>();
+        const touched = new Set<WorldElement>();
+        for (const element of this.activeElements) {
+            const childNodes = element.getChildWorldNodes();
+            if (childNodes.length === 0) {
+                element.translate(delta);
+                continue;
+            }
+
+            for (const node of childNodes) {
+                if (movedNodes.has(node)) continue;
+                movedNodes.add(node);
+
+                const worldPos = new THREE.Vector3();
+                node.mesh.getWorldPosition(worldPos);
+                worldPos.add(delta);
+
+                if (node.mesh.parent) {
+                    node.mesh.position.copy(node.mesh.parent.worldToLocal(worldPos));
+                } else {
+                    node.mesh.position.copy(worldPos);
+                }
+
+                if (node.parent) touched.add(node.parent);
+            }
+        }
+
+        for (const element of touched) {
+            element.update();
+        }
+    }
+
+    private rotateActiveElements(): void {
+        if (this.activeElements.length === 0) return;
+
+        const rawDelta = this.helper.quaternion.clone().multiply(this.helperLastQuaternion.clone().invert()).normalize();
+        const quaternionDot = Math.abs(rawDelta.dot(new THREE.Quaternion()));
+        if (1 - quaternionDot < 1e-8) return;
+
+        const clampedW = THREE.MathUtils.clamp(rawDelta.w, -1, 1);
+        const halfAngle = Math.acos(clampedW);
+        const axisLength = Math.sqrt(Math.max(1 - clampedW * clampedW, 0));
+        const axis = axisLength > 1e-6
+            ? new THREE.Vector3(rawDelta.x / axisLength, rawDelta.y / axisLength, rawDelta.z / axisLength)
+            : new THREE.Vector3(0, 1, 0);
+        const scaledAngle = halfAngle * 2 * this.rotationSpeed;
+        if (Math.abs(scaledAngle) < 1e-8) return;
+
+        const deltaRotation = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), scaledAngle);
+        const appliedQuaternion = this.helperLastQuaternion.clone().multiply(deltaRotation);
+        const pivot = this.helper.position.clone();
+        const movedNodes = new Set<WorldNode>();
+        const touched = new Set<WorldElement>();
+
+        this.isApplyingInternalRotation = true;
+        this.helper.quaternion.copy(appliedQuaternion);
+        this.helper.updateMatrixWorld(true);
+        this.isApplyingInternalRotation = false;
+
+        for (const element of this.activeElements) {
+            if (!element.canRotate()) continue;
+
+            for (const node of element.getChildWorldNodes()) {
+                if (movedNodes.has(node)) continue;
+                movedNodes.add(node);
+
+                const worldPos = new THREE.Vector3();
+                node.mesh.getWorldPosition(worldPos);
+                worldPos.sub(pivot).applyQuaternion(deltaRotation).add(pivot);
+
+                if (node.mesh.parent) {
+                    node.mesh.position.copy(node.mesh.parent.worldToLocal(worldPos));
+                } else {
+                    node.mesh.position.copy(worldPos);
+                }
+
+                if (node.parent) touched.add(node.parent);
+            }
+        }
+
+        for (const element of touched) {
+            element.update();
+        }
+
+        this.helperLastQuaternion.copy(appliedQuaternion);
+    }
+
+    private updateControlMode(): void {
+        const canRotateSelection = this.canRotateSelection();
+
+        this.effectiveMode = this.desiredMode === 'rotate' && canRotateSelection ? 'rotate' : 'translate';
+        this.controls.setMode(this.effectiveMode);
+        this.controls.setSpace('world');
+        this.controls.showX = this.effectiveMode === 'translate';
+        this.controls.showY = true;
+        this.controls.showZ = this.effectiveMode === 'translate';
+        this.onModeStateChanged?.(this.getModeState());
+    }
+
+    private canRotateSelection(): boolean {
+        return this.activeNodes.length === 0 &&
+            this.activeElements.length > 0 &&
+            this.activeElements.every((element) => element.canRotate());
+    }
+
+    private resetHelperRotation(): void {
+        this.helper.rotation.set(0, 0, 0);
+        this.helper.quaternion.identity();
+    }
+
+    private syncHelperState(): void {
+        this.helperLastPosition.copy(this.helper.position);
+        this.helperLastQuaternion.copy(this.helper.quaternion);
+    }
 
     private getElementCenterWorld(element: WorldElement): THREE.Vector3 {
         const nodes = element.getChildWorldNodes();

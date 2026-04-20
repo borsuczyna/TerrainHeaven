@@ -57,6 +57,105 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+#transform-toolbar {
+    position: fixed;
+    right: 12px;
+    top: 56px;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    background: rgba(24, 24, 26, 0.88);
+    border-radius: 10px;
+    padding: 8px;
+    z-index: 15;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#transform-toolbar.properties-open {
+    right: 292px;
+}
+
+#transform-toolbar button {
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #c9cfd8;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+#transform-toolbar button svg {
+    width: 18px;
+    height: 18px;
+}
+
+#transform-toolbar button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+#transform-toolbar button.active {
+    background: rgba(100, 180, 255, 0.42);
+    color: #fff;
+}
+
+#transform-toolbar button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+#transform-toolbar button[data-tooltip]::after,
+#transform-toolbar button[data-tooltip]::before {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+
+#transform-toolbar button[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    background: #2e2e2e;
+    border: 1px solid #1a1a1a;
+    color: #ddd;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    padding: 5px 8px;
+    border-radius: 4px;
+    z-index: 50;
+}
+
+#transform-toolbar button[data-tooltip]::before {
+    content: '';
+    position: absolute;
+    right: 14px;
+    top: calc(100% + 5px);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 5px solid #2e2e2e;
+    z-index: 50;
+}
+
+#transform-toolbar button[data-tooltip]:hover::after,
+#transform-toolbar button[data-tooltip]:hover::before {
+    opacity: 1;
+}
+
+@media (max-width: 900px) {
+    #transform-toolbar {
+        right: 12px;
+    }
+}
+
 #toolbar button {
     width: 38px;
     height: 38px;

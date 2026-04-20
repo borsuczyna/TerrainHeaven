@@ -33,7 +33,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.terrainTool);
         this.toolManager.registerTool(this.uvTool);
 
-        this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'Q');
+        this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
             'road-switcher',
             document.getElementById('btn-road') as HTMLButtonElement,
