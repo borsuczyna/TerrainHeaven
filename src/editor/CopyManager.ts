@@ -50,7 +50,7 @@ export default class CopyManager {
             this.terrainHeight = null;
         } else if (element instanceof Terrain) {
             this.terrainWidth = element.width;
-            this.terrainHeight = element.height;
+            this.terrainHeight = element.length;
             this.roadLength = null;
             this.roadDirection = null;
             this.intersectionNodeCount = null;

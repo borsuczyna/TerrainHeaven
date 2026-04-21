@@ -9,15 +9,15 @@ import SceneManager from '../editor/SceneManager';
 export default class Terrain extends WorldElement {
     public center: THREE.Vector3;
     public width: number;
-    public height: number;
+    public length: number;
     public gridEnabled: boolean = false;
     public gridSize: number = 1;
 
-    constructor(center: THREE.Vector3, width: number = 20, height: number = 20) {
+    constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
         super();
         this.center = center.clone();
         this.width = width;
-        this.height = height;
+        this.length = length;
     }
 
     public override update(): void {
@@ -45,7 +45,7 @@ export default class Terrain extends WorldElement {
 
     public override getOccupiedArea(): OccupiedTriangle[] {
         const hw = this.width / 2;
-        const hh = this.height / 2;
+        const hh = this.length / 2;
         const bl = new THREE.Vector3(this.center.x - hw, this.center.y, this.center.z - hh);
         const br = new THREE.Vector3(this.center.x + hw, this.center.y, this.center.z - hh);
         const tr = new THREE.Vector3(this.center.x + hw, this.center.y, this.center.z + hh);
@@ -66,7 +66,7 @@ export default class Terrain extends WorldElement {
             textures,
             textureRotations,
             terrainWidth: this.width,
-            terrainHeight: this.height,
+            terrainLength: this.length,
             terrainGridEnabled: this.gridEnabled,
             terrainGridSize: this.gridSize,
         };
@@ -77,7 +77,7 @@ export default class Terrain extends WorldElement {
         const terrain = new Terrain(
             new THREE.Vector3(n.x, n.y, n.z),
             ed.terrainWidth ?? 20,
-            ed.terrainHeight ?? 20,
+            ed.terrainLength ?? 20,
         );
         terrain.gridEnabled = ed.terrainGridEnabled ?? false;
         terrain.gridSize = Math.max(0.01, ed.terrainGridSize ?? 1);
@@ -115,18 +115,20 @@ export default class Terrain extends WorldElement {
                                 self.width = Math.max(0.1, v);
                                 self.update();
                             },
-                            min: 0.1,
+                            min: 10,
+                            max: 50,
                             step: 0.1,
                         },
                         {
                             type: 'number',
-                            label: 'Height',
-                            get: () => self.height,
+                            label: 'Length',
+                            get: () => self.length,
                             set: (v: number) => {
-                                self.height = Math.max(0.1, v);
+                                self.length = Math.max(0.1, v);
                                 self.update();
                             },
-                            min: 0.1,
+                            min: 10,
+                            max: 50,
                             step: 0.1,
                         },
                         {
@@ -136,10 +138,11 @@ export default class Terrain extends WorldElement {
                             set: (v: boolean) => {
                                 self.gridEnabled = v;
                                 self.update();
+                                self.onPropertiesChanged?.();
                             },
                         },
-                        {
-                            type: 'number',
+                        ...(self.gridEnabled ? [{
+                            type: 'number' as const,
                             label: 'Grid Size',
                             get: () => self.gridSize,
                             set: (v: number) => {
@@ -148,7 +151,7 @@ export default class Terrain extends WorldElement {
                             },
                             min: 0.5,
                             step: 0.1,
-                        },
+                        }] : []),
                     ],
                 },
             ],
@@ -165,15 +168,15 @@ export default class Terrain extends WorldElement {
 
         const triangles: Triangle[] = [];
         const w = Math.max(0.0001, this.width);
-        const h = Math.max(0.0001, this.height);
+        const l = Math.max(0.0001, this.length);
         for (const tri of area) {
             const a = tri.a.clone();
             const b = tri.b.clone();
             const c = tri.c.clone();
 
-            const uvA = new THREE.Vector2((tri.a.x - this.center.x) / w + 0.5, (tri.a.z - this.center.z) / h + 0.5);
-            const uvB = new THREE.Vector2((tri.b.x - this.center.x) / w + 0.5, (tri.b.z - this.center.z) / h + 0.5);
-            const uvC = new THREE.Vector2((tri.c.x - this.center.x) / w + 0.5, (tri.c.z - this.center.z) / h + 0.5);
+            const uvA = new THREE.Vector2((tri.a.x - this.center.x) / w + 0.5, (tri.a.z - this.center.z) / l + 0.5);
+            const uvB = new THREE.Vector2((tri.b.x - this.center.x) / w + 0.5, (tri.b.z - this.center.z) / l + 0.5);
+            const uvC = new THREE.Vector2((tri.c.x - this.center.x) / w + 0.5, (tri.c.z - this.center.z) / l + 0.5);
             triangles.push(new Triangle(a, b, c, uvA, uvB, uvC));
         }
 
@@ -199,9 +202,9 @@ export default class Terrain extends WorldElement {
     } {
         const cellSize = Math.max(0.01, this.gridSize);
         const startX = this.center.x - this.width / 2;
-        const startZ = this.center.z - this.height / 2;
+        const startZ = this.center.z - this.length / 2;
         const endX = startX + this.width;
-        const endZ = startZ + this.height;
+        const endZ = startZ + this.length;
         const padding = cellSize * 1;
         const regular: OccupiedTriangle[] = [];
         const filler: OccupiedTriangle[] = [];

@@ -55,7 +55,7 @@ export interface ElementData {
     roadTexOffsetY?: number;
     // Terrain-specific
     terrainWidth?: number;
-    terrainHeight?: number;
+    terrainLength?: number;
     terrainGridEnabled?: boolean;
     terrainGridSize?: number;
 }

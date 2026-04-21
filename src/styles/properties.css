@@ -214,6 +214,57 @@
     background: #252525;
 }
 
+#properties-panel .prop-row[data-prop-type="boolean"] .prop-field-single {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 4px 6px;
+    min-height: 24px;
+    background: transparent;
+}
+
+#properties-panel .prop-row[data-prop-type="boolean"] .prop-field-single input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    background: linear-gradient(180deg, #262626 0%, #1c1c1c 100%);
+    cursor: pointer;
+    position: relative;
+    flex: 0 0 auto;
+}
+
+#properties-panel .prop-row[data-prop-type="boolean"] .prop-field-single input:hover {
+    border-color: #5d5d5d;
+    background: linear-gradient(180deg, #2c2c2c 0%, #202020 100%);
+}
+
+#properties-panel .prop-row[data-prop-type="boolean"] .prop-field-single input:focus {
+    background: linear-gradient(180deg, #2c2c2c 0%, #202020 100%);
+    box-shadow: 0 0 0 1px #6b92c9;
+}
+
+#properties-panel .prop-row[data-prop-type="boolean"] .prop-field-single input:checked {
+    border-color: #6b92c9;
+    background: linear-gradient(180deg, #3a6ea5 0%, #2d5b8f 100%);
+}
+
+#properties-panel .prop-row[data-prop-type="boolean"] .prop-field-single input:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid #f2f6fb;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
 #properties-panel .prop-button {
     width: 100%;
     padding: 6px 12px;
