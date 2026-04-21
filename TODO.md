@@ -42,3 +42,5 @@ Make sure code is perfect, so you need to refactor a little bit ToolManager and 
 [ ] Parenting system - add on left top (below translate and rotate) elements list, it should be possible to create groups, when group is selected it should be possible to move all elements together
 
 [ ] Del or backspace to delete (only for WorldElements)
+
+[ ] Add box selection and change camera movement to right button
