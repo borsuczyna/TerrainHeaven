@@ -38,3 +38,7 @@ Make sure code is perfect, so you need to refactor a little bit ToolManager and 
 [ ] Snapping to grid and WorldElement's cutout edges
 
 [ ] New terrain cutout types, now we have only point, add tool to create cutout mesh, when clicked add point, when two clicked make it a line, when thee or more use it same as WorldElement cutout
+
+[ ] Parenting system - add on left top (below translate and rotate) elements list, it should be possible to create groups, when group is selected it should be possible to move all elements together
+
+[ ] Del or backspace to delete (only for WorldElements)
