@@ -20,4 +20,4 @@ Make sure code is perfect, so you need to refactor a little bit ToolManager and 
 [x] Add shortcuts for tools (visible on tooltip too) clicking same shortcut when tool is active should go to next tool if this tool has right click different tools
 [x] Selected WorldElement's should change color (blueish kinda) remember to keep wireframe working
 [x] Add rotation gizmo for WorldElement (it should rotate also child nodes)
-[ ] Add transparent history on bottom right, possible to fold (only header visible when folded), add CTRL + Z/Y, implement it everywhere in the project, make HistoryManager for it
+[x] Add transparent history on bottom right, possible to fold (only header visible when folded), add CTRL + Z/Y, implement it everywhere in the project, make HistoryManager for it

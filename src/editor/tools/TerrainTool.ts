@@ -4,6 +4,7 @@ import type { Tool } from '../ToolManager.ts';
 import SceneManager from '../SceneManager.ts';
 import Camera from '../Camera.ts';
 import Terrain from '../../elements/Terrain.ts';
+import HistoryManager from '../HistoryManager.ts';
 
 @singleton()
 export default class TerrainTool implements Tool {
@@ -18,6 +19,7 @@ export default class TerrainTool implements Tool {
     constructor(
         @inject(SceneManager) scene: SceneManager,
         @inject(Camera) camera: Camera,
+        @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
         this.scene = scene;
         this.camera = camera.instance;
@@ -40,6 +42,7 @@ export default class TerrainTool implements Tool {
 
         const terrain = new Terrain(target, 30, 30);
         this.scene.add(terrain);
+        this.history.record('Add Terrain');
         return true;
     }
 }

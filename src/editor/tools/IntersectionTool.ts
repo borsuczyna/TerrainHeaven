@@ -4,6 +4,7 @@ import type { Tool } from '../ToolManager';
 import SceneManager from '../SceneManager';
 import Camera from '../Camera';
 import Intersection from '../../elements/Intersection';
+import HistoryManager from '../HistoryManager';
 
 @singleton()
 export default class IntersectionTool implements Tool {
@@ -18,6 +19,7 @@ export default class IntersectionTool implements Tool {
     constructor(
         @inject(SceneManager) scene: SceneManager,
         @inject(Camera) camera: Camera,
+        @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
         this.scene = scene;
         this.camera = camera.instance;
@@ -40,6 +42,7 @@ export default class IntersectionTool implements Tool {
 
         const intersection = new Intersection(target, 4);
         this.scene.add(intersection);
+        this.history.record('Add Intersection');
         return true;
     }
 }

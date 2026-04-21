@@ -3,6 +3,7 @@ import { singleton, inject } from 'tsyringe';
 import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertySelect, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
 import CopyManager from './CopyManager';
+import HistoryManager from './HistoryManager';
 
 @singleton()
 export default class PropertiesPanel {
@@ -11,9 +12,14 @@ export default class PropertiesPanel {
     private refreshInterval: number | null = null;
     private customDef: PropertyDefinition | null = null;
     private readonly copyManager: CopyManager;
+    private readonly history: HistoryManager;
 
-    constructor(@inject(CopyManager) copyManager: CopyManager) {
+    constructor(
+        @inject(CopyManager) copyManager: CopyManager,
+        @inject(HistoryManager) history: HistoryManager,
+    ) {
         this.copyManager = copyManager;
+        this.history = history;
         this.container = document.getElementById('properties-panel')!;
     }
 
@@ -171,7 +177,10 @@ export default class PropertiesPanel {
                         ev.stopPropagation();
                         const action = (item as HTMLElement).dataset.action;
                         if (action === 'copy') this.doCopyProperties();
-                        else if (action === 'paste' && canPaste) this.doPasteProperties();
+                        else if (action === 'paste' && canPaste) {
+                            this.doPasteProperties();
+                            this.history.record('Paste Properties');
+                        }
                         menu.style.display = 'none';
                     });
                 });
@@ -215,6 +224,7 @@ export default class PropertiesPanel {
 
             if (prop.type === 'vector3') {
                 const inputs = row.querySelectorAll('input');
+                const historyLabel = `Edit ${prop.label}`;
                 const commit = () => {
                     const x = parseFloat((inputs[0] as HTMLInputElement).value) || 0;
                     const y = parseFloat((inputs[1] as HTMLInputElement).value) || 0;
@@ -222,34 +232,58 @@ export default class PropertiesPanel {
                     (prop as PropertyVector3).set(new THREE.Vector3(x, y, z));
                 };
                 inputs.forEach(input => {
+                    input.addEventListener('focus', () => this.beginHistory(row as HTMLElement, historyLabel));
                     input.addEventListener('change', commit);
+                    input.addEventListener('change', () => this.endHistory(row as HTMLElement, historyLabel));
+                    input.addEventListener('blur', () => this.endHistory(row as HTMLElement, historyLabel));
                 });
             }
 
             if (prop.type === 'number') {
                 const input = row.querySelector('input')!;
+                const historyLabel = `Edit ${prop.label}`;
                 const commitNumber = () => {
                     const v = parseFloat(input.value) || 0;
                     (prop as PropertyNumber).set(v);
                 };
+                input.addEventListener('focus', () => this.beginHistory(row as HTMLElement, historyLabel));
                 input.addEventListener('change', commitNumber);
                 input.addEventListener('input', commitNumber);
+                input.addEventListener('change', () => this.endHistory(row as HTMLElement, historyLabel));
+                input.addEventListener('blur', () => this.endHistory(row as HTMLElement, historyLabel));
             }
 
             if (prop.type === 'button') {
                 const btn = row.querySelector('button')!;
                 btn.addEventListener('click', () => {
+                    this.history.beginAction(prop.label);
                     (prop as PropertyButton).onClick();
+                    this.history.endAction(prop.label);
                 });
             }
 
             if (prop.type === 'select') {
                 const select = row.querySelector('select')!;
                 select.addEventListener('change', () => {
+                    const historyLabel = `Edit ${prop.label}`;
+                    this.history.beginAction(historyLabel);
                     (prop as PropertySelect).set(select.value);
+                    this.history.endAction(historyLabel);
                 });
             }
         }
+    }
+
+    private beginHistory(row: HTMLElement, label: string): void {
+        if (row.dataset.historyPending === 'true') return;
+        row.dataset.historyPending = 'true';
+        this.history.beginAction(label);
+    }
+
+    private endHistory(row: HTMLElement, label: string): void {
+        if (row.dataset.historyPending !== 'true') return;
+        delete row.dataset.historyPending;
+        this.history.endAction(label);
     }
 
     private refreshValues(): void {

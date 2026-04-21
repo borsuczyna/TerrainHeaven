@@ -9,6 +9,7 @@ import GizmoManager from './GizmoManager';
 import ToolManager from './ToolManager';
 import PropertiesPanel from './PropertiesPanel';
 import CopyManager from './CopyManager';
+import HistoryManager from './HistoryManager';
 
 @singleton()
 export default class SelectionManager {
@@ -24,6 +25,7 @@ export default class SelectionManager {
     private toolManager: ToolManager;
     private properties: PropertiesPanel;
     private copyManager: CopyManager;
+    private history: HistoryManager;
     private _nodeWasHit = false;
 
     public get nodeWasHit(): boolean {
@@ -41,6 +43,7 @@ export default class SelectionManager {
         @inject(ToolManager) toolManager: ToolManager,
         @inject(PropertiesPanel) properties: PropertiesPanel,
         @inject(CopyManager) copyManager: CopyManager,
+        @inject(HistoryManager) history: HistoryManager,
     ) {
         this.cameraController = camera;
         this.sceneManager = scene;
@@ -50,9 +53,11 @@ export default class SelectionManager {
         this.toolManager = toolManager;
         this.properties = properties;
         this.copyManager = copyManager;
+        this.history = history;
 
         window.addEventListener('mousedown', this.onMouseDown, { capture: true });
         window.addEventListener('keydown', this.onKeyDown);
+        window.addEventListener('history-restored', this.onHistoryRestored);
     }
 
     private onMouseDown = (e: MouseEvent): void => {
@@ -162,6 +167,7 @@ export default class SelectionManager {
             const selectedElement = this.getSelectedElement();
             if (selectedElement && this.copyManager.canPastePropertiesOnto(selectedElement)) {
                 this.copyManager.pastePropertiesOnto(selectedElement);
+                this.history.record('Paste Properties');
                 return;
             }
 
@@ -169,9 +175,32 @@ export default class SelectionManager {
                 const newElement = this.copyManager.pasteElement(this.cameraController.instance, this.sceneManager);
                 if (newElement) {
                     this.selectElement(newElement);
+                    this.history.record('Paste Element');
                 }
             }
+
+            return;
         }
+
+        if (e.key === 'z' || e.key === 'Z') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                this.history.redo();
+            } else {
+                this.history.undo();
+            }
+            return;
+        }
+
+        if (e.key === 'y' || e.key === 'Y') {
+            e.preventDefault();
+            this.history.redo();
+        }
+    };
+
+    private onHistoryRestored = (): void => {
+        this.clearSelection();
+        this.emitSelectionChanged();
     };
 
     private selectAdd(node: WorldNode): void {
@@ -331,5 +360,6 @@ export default class SelectionManager {
     public dispose(): void {
         window.removeEventListener('mousedown', this.onMouseDown, { capture: true });
         window.removeEventListener('keydown', this.onKeyDown);
+        window.removeEventListener('history-restored', this.onHistoryRestored);
     }
 }

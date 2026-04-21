@@ -10,6 +10,7 @@ import TextureDropManager from "./TextureDropManager";
 import ProjectSettings from "./ProjectSettings";
 import HeaderManager from "./HeaderManager";
 import TransformToolbarManager from "./TransformToolbarManager";
+import HistoryManager from './HistoryManager';
 
 @injectable()
 export default class App {
@@ -20,6 +21,7 @@ export default class App {
     public readonly gizmo: GizmoManager;
     public readonly toolManager: ToolManager;
     public readonly projectSettings: ProjectSettings;
+    public readonly history: HistoryManager;
     private headerManager: HeaderManager;
     private leftToolbarManager: LeftToolbarManager;
     private textureDropManager: TextureDropManager;
@@ -34,6 +36,7 @@ export default class App {
         @inject(GizmoManager) gizmo: GizmoManager,
         @inject(ToolManager) toolManager: ToolManager,
         @inject(ProjectSettings) projectSettings: ProjectSettings,
+        @inject(HistoryManager) history: HistoryManager,
         @inject(LeftToolbarManager) leftToolbarManager: LeftToolbarManager,
         @inject(TextureDropManager) textureDropManager: TextureDropManager,
         @inject(HeaderManager) headerManager: HeaderManager,
@@ -46,6 +49,7 @@ export default class App {
         this.gizmo = gizmo;
         this.toolManager = toolManager;
         this.projectSettings = projectSettings;
+        this.history = history;
         this.leftToolbarManager = leftToolbarManager;
         this.textureDropManager = textureDropManager;
         this.headerManager = headerManager;
@@ -59,6 +63,7 @@ export default class App {
         this.textureDropManager.init();
         this.headerManager.init();
         this.transformToolbarManager.init();
+        this.history.init();
         this.bindEvents();
         this.animate = this.animate.bind(this);
         requestAnimationFrame(this.animate);

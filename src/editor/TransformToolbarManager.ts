@@ -19,7 +19,7 @@ export default class TransformToolbarManager {
         this.propertiesPanel = document.getElementById('properties-panel');
         if (!this.toolbar || !this.translateButton || !this.rotateButton) return;
 
-        this.translateButton.dataset.tooltip = 'Translate [G]';
+        this.translateButton.dataset.tooltip = 'Translate [W]';
         this.rotateButton.dataset.tooltip = 'Rotate [E]';
 
         this.translateButton.addEventListener('click', () => {

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { singleton } from 'tsyringe';
+import { singleton, inject } from 'tsyringe';
 import type WorldElement from '../../elements/WorldElement';
 import type { UVTransform } from '../../elements/WorldElement';
+import HistoryManager from '../HistoryManager';
 
 @singleton()
 export default class UVEditorPanel {
@@ -30,7 +31,7 @@ export default class UVEditorPanel {
     public onChange: (() => void) | null = null;
     public onHide: (() => void) | null = null;
 
-    constructor() {
+    constructor(@inject(HistoryManager) private readonly history: HistoryManager) {
         // Build DOM
         this.container = document.createElement('div');
         this.container.id = 'uv-editor';
@@ -92,6 +93,7 @@ export default class UVEditorPanel {
         });
 
         this.hide();
+        window.addEventListener('history-restored', this.onHistoryRestored);
     }
 
     public show(element: WorldElement): void {
@@ -424,6 +426,7 @@ export default class UVEditorPanel {
         this.dragStartTransform = { ...transform };
         this.dragStartX = mx;
         this.dragStartY = my;
+        this.history.beginAction('Edit UV Mapping');
 
         if (this.hitScaleHandle(mx, my)) {
             this.dragging = 'scale';
@@ -468,8 +471,13 @@ export default class UVEditorPanel {
     private onMouseUp = (): void => {
         if (this.dragging) {
             this.canvas.style.cursor = 'grab';
+            this.history.endAction('Edit UV Mapping');
         }
         this.dragging = null;
+    };
+
+    private onHistoryRestored = (): void => {
+        this.hide();
     };
 
     private onWheel = (e: WheelEvent): void => {

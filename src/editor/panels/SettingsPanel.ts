@@ -1,13 +1,20 @@
 import { singleton, inject } from 'tsyringe';
 import ProjectSettings from '../ProjectSettings';
+import HistoryManager from '../HistoryManager';
 
 @singleton()
 export default class SettingsPanel {
     private container: HTMLElement;
     private settings: ProjectSettings;
+    private history: HistoryManager;
+    private activeActionLabel: string | null = null;
 
-    constructor(@inject(ProjectSettings) settings: ProjectSettings) {
+    constructor(
+        @inject(ProjectSettings) settings: ProjectSettings,
+        @inject(HistoryManager) history: HistoryManager,
+    ) {
         this.settings = settings;
+        this.history = history;
         this.container = document.createElement('div');
         this.container.id = 'settings-panel';
         document.body.appendChild(this.container);
@@ -68,20 +75,42 @@ export default class SettingsPanel {
         this.container.querySelector('.sp-close')!.addEventListener('click', () => this.hide());
 
         this.container.querySelector('[data-prop="skyColor"]')!.addEventListener('input', (e) => {
+            this.beginAction('Change Sky Color');
             s.skyColor = (e.target as HTMLInputElement).value;
             s.apply();
         });
+        this.container.querySelector('[data-prop="skyColor"]')!.addEventListener('change', () => {
+            this.endAction('Change Sky Color');
+        });
 
         this.container.querySelector('[data-prop="dayNightCycle"]')!.addEventListener('change', (e) => {
+            this.history.beginAction('Toggle Day/Night Cycle');
             s.dayNightCycle = (e.target as HTMLInputElement).checked;
             s.apply();
             this.build();
+            this.history.endAction('Toggle Day/Night Cycle');
         });
 
         this.container.querySelector('[data-prop="hour"]')!.addEventListener('input', (e) => {
+            this.beginAction('Change Time Of Day');
             s.hour = parseFloat((e.target as HTMLInputElement).value);
             s.apply();
             (this.container.querySelector('.sp-hour-value') as HTMLElement).textContent = s.hour.toFixed(1);
         });
+        this.container.querySelector('[data-prop="hour"]')!.addEventListener('change', () => {
+            this.endAction('Change Time Of Day');
+        });
+    }
+
+    private beginAction(label: string): void {
+        if (this.activeActionLabel) return;
+        this.activeActionLabel = label;
+        this.history.beginAction(label);
+    }
+
+    private endAction(label: string): void {
+        if (this.activeActionLabel !== label) return;
+        this.activeActionLabel = null;
+        this.history.endAction(label);
     }
 }

@@ -6,6 +6,7 @@ import type WorldElement from '../elements/WorldElement';
 import Camera from './Camera';
 import Renderer from './Renderer';
 import SceneManager from './SceneManager';
+import HistoryManager from './HistoryManager';
 
 export interface GizmoModeState {
     desired: 'translate' | 'rotate';
@@ -31,6 +32,7 @@ export default class GizmoManager {
         @inject(delay(() => Camera)) camera: Camera,
         @inject(Renderer) renderer: Renderer,
         @inject(SceneManager) scene: SceneManager,
+        @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
         this.controls = new TransformControls(camera.instance, renderer.domElement);
         this.controls.setMode('translate');
@@ -39,6 +41,8 @@ export default class GizmoManager {
         scene.instance.add(this.controls.getHelper());
 
         this.controls.addEventListener('change', this.onGizmoChange);
+        this.controls.addEventListener('mouseDown', this.onGizmoMouseDown);
+        this.controls.addEventListener('mouseUp', this.onGizmoMouseUp);
     }
 
     public attach(nodes: WorldNode[]): void {
@@ -101,7 +105,7 @@ export default class GizmoManager {
 
     public handleShortcut(key: string): boolean {
         const normalized = key.toUpperCase();
-        if (normalized === 'G') {
+        if (normalized === 'W') {
             this.setMode('translate');
             return true;
         }
@@ -170,6 +174,15 @@ export default class GizmoManager {
 
         this.translateActiveElements(delta);
         this.helperLastPosition.copy(this.helper.position);
+    };
+
+    private onGizmoMouseDown = (): void => {
+        if (this.activeNodes.length === 0 && this.activeElements.length === 0) return;
+        this.history.beginAction(this.effectiveMode === 'rotate' ? 'Rotate Selection' : 'Move Selection');
+    };
+
+    private onGizmoMouseUp = (): void => {
+        this.history.endAction(this.effectiveMode === 'rotate' ? 'Rotate Selection' : 'Move Selection');
     };
 
     private translateActiveElements(delta: THREE.Vector3): void {
@@ -332,6 +345,8 @@ export default class GizmoManager {
 
     public dispose(): void {
         this.controls.removeEventListener('change', this.onGizmoChange);
+        this.controls.removeEventListener('mouseDown', this.onGizmoMouseDown);
+        this.controls.removeEventListener('mouseUp', this.onGizmoMouseUp);
         this.controls.dispose();
     }
 }

@@ -4,6 +4,7 @@ import Renderer from './Renderer';
 import Camera from './Camera';
 import SceneManager from './SceneManager';
 import type WorldElement from '../elements/WorldElement';
+import HistoryManager from './HistoryManager';
 
 @singleton()
 export default class TextureDropManager {
@@ -13,6 +14,7 @@ export default class TextureDropManager {
         @inject(Renderer) private readonly renderer: Renderer,
         @inject(Camera) private readonly camera: Camera,
         @inject(SceneManager) private readonly scene: SceneManager,
+        @inject(HistoryManager) private readonly history: HistoryManager,
     ) {}
 
     public init(): void {
@@ -54,6 +56,7 @@ export default class TextureDropManager {
                             tex.wrapT = THREE.RepeatWrapping;
                             tex.colorSpace = THREE.SRGBColorSpace;
                             el.setGroupTexture(groupName, tex);
+                            this.history.record('Apply Texture');
                         });
                     }
                     break;

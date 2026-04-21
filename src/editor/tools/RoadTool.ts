@@ -5,6 +5,7 @@ import SceneManager from '../SceneManager';
 import Camera from '../Camera';
 import Road from '../../elements/Road';
 import type WorldNode from '../../elements/WorldNode';
+import HistoryManager from '../HistoryManager';
 
 @singleton()
 export default class RoadTool implements Tool {
@@ -22,6 +23,7 @@ export default class RoadTool implements Tool {
     constructor(
         @inject(SceneManager) scene: SceneManager,
         @inject(Camera) camera: Camera,
+        @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
         this.scene = scene;
         this.camera = camera.instance;
@@ -178,6 +180,7 @@ export default class RoadTool implements Tool {
             }
         }
 
+        this.history.record('Add Road');
         this.reset();
     };
 }
