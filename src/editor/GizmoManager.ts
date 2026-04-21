@@ -163,7 +163,9 @@ export default class GizmoManager {
                     node.mesh.position.copy(worldPos);
                 }
 
-                if (node.parent) touched.add(node.parent);
+                for (const element of node.parent?.getAffectedElementsForNode(node) ?? []) {
+                    touched.add(element);
+                }
             }
             for (const element of touched) {
                 element.update();
@@ -191,7 +193,7 @@ export default class GizmoManager {
         const movedNodes = new Set<WorldNode>();
         const touched = new Set<WorldElement>();
         for (const element of this.activeElements) {
-            const childNodes = element.getChildWorldNodes();
+            const childNodes = element.getTransformWorldNodes();
             if (childNodes.length === 0) {
                 element.translate(delta);
                 continue;
@@ -211,7 +213,9 @@ export default class GizmoManager {
                     node.mesh.position.copy(worldPos);
                 }
 
-                if (node.parent) touched.add(node.parent);
+                for (const affectedElement of element.getAffectedElementsForNode(node)) {
+                    touched.add(affectedElement);
+                }
             }
         }
 
@@ -250,7 +254,7 @@ export default class GizmoManager {
         for (const element of this.activeElements) {
             if (!element.canRotate()) continue;
 
-            for (const node of element.getChildWorldNodes()) {
+            for (const node of element.getTransformWorldNodes()) {
                 if (movedNodes.has(node)) continue;
                 movedNodes.add(node);
 
@@ -264,7 +268,9 @@ export default class GizmoManager {
                     node.mesh.position.copy(worldPos);
                 }
 
-                if (node.parent) touched.add(node.parent);
+                for (const affectedElement of element.getAffectedElementsForNode(node)) {
+                    touched.add(affectedElement);
+                }
             }
         }
 
@@ -304,7 +310,7 @@ export default class GizmoManager {
     }
 
     private getElementCenterWorld(element: WorldElement): THREE.Vector3 {
-        const nodes = element.getChildWorldNodes();
+        const nodes = element.getTransformWorldNodes();
         const center = new THREE.Vector3();
 
         if (nodes.length > 0) {

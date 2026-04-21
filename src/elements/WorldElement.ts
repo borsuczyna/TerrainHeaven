@@ -91,6 +91,51 @@ export default abstract class WorldElement {
         return out;
     }
 
+    public getTransformWorldNodes(): WorldNode[] {
+        const out: WorldNode[] = [];
+        const seen = new Set<WorldNode>();
+
+        for (const node of this.nodes) {
+            if (!node || seen.has(node)) continue;
+            seen.add(node);
+            out.push(node);
+        }
+
+        for (const node of this.getChildWorldNodes()) {
+            if (seen.has(node)) continue;
+            seen.add(node);
+            out.push(node);
+        }
+
+        return out;
+    }
+
+    public getAffectedElementsForNode(node: WorldNode): WorldElement[] {
+        const affected = new Set<WorldElement>();
+
+        if (node.parent) {
+            affected.add(node.parent);
+        }
+
+        let referencesNode = false;
+        for (let index = 0; index < this.nodes.length; index++) {
+            if (this.nodes[index] !== node) continue;
+            referencesNode = true;
+            affected.add(this);
+
+            const connection = this.connections.get(index);
+            if (connection) {
+                affected.add(connection.element);
+            }
+        }
+
+        if (!referencesNode && node.parent === this) {
+            affected.add(this);
+        }
+
+        return [...affected];
+    }
+
     public getNodeIndex(node: WorldNode): number {
         return this.nodes.indexOf(node);
     }
@@ -238,7 +283,7 @@ export default abstract class WorldElement {
     }
 
     public translate(delta: THREE.Vector3): void {
-        const childNodes = this.getChildWorldNodes();
+        const childNodes = this.getTransformWorldNodes();
         if (childNodes.length === 0) {
             this.mesh.position.add(delta);
             this.update();
@@ -261,7 +306,9 @@ export default abstract class WorldElement {
                 node.mesh.position.copy(worldPos);
             }
 
-            if (node.parent) touched.add(node.parent);
+            for (const element of this.getAffectedElementsForNode(node)) {
+                touched.add(element);
+            }
         }
 
         if (touched.size === 0) {
@@ -275,11 +322,11 @@ export default abstract class WorldElement {
     }
 
     public canRotate(): boolean {
-        return this.getChildWorldNodes().length > 0;
+        return this.getTransformWorldNodes().length > 0;
     }
 
     public rotateAround(pivot: THREE.Vector3, deltaRotation: THREE.Quaternion): void {
-        const childNodes = this.getChildWorldNodes();
+        const childNodes = this.getTransformWorldNodes();
         if (childNodes.length === 0) {
             return;
         }
@@ -300,7 +347,9 @@ export default abstract class WorldElement {
                 node.mesh.position.copy(worldPos);
             }
 
-            if (node.parent) touched.add(node.parent);
+            for (const element of this.getAffectedElementsForNode(node)) {
+                touched.add(element);
+            }
         }
 
         for (const element of touched) {
