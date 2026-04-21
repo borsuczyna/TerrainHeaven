@@ -8,6 +8,7 @@ import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
 import type WorldElement from '../elements/WorldElement';
 import type { ElementData } from '../elements/WorldElement';
+import TerrainCutPointManager from './TerrainCutPointManager';
 
 interface ConnectionData {
     elementA: number;
@@ -21,6 +22,7 @@ interface ProjectData {
     settings: ProjectSettingsData;
     elements: ElementData[];
     connections: ConnectionData[];
+    terrainCutPoints?: { x: number; y: number; z: number }[];
 }
 
 @singleton()
@@ -31,6 +33,7 @@ export default class ProjectSerializer {
     constructor(
         @inject(SceneManager) scene: SceneManager,
         @inject(ProjectSettings) settings: ProjectSettings,
+        @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
     ) {
         this.scene = scene;
         this.settings = settings;
@@ -70,6 +73,7 @@ export default class ProjectSerializer {
             settings: this.settings.getData(),
             elements: elementDataList,
             connections,
+            terrainCutPoints: this.terrainCutPoints.serialize(),
         };
 
         return JSON.stringify(projectData, null, 2);
@@ -81,6 +85,7 @@ export default class ProjectSerializer {
 
         // Clear current scene
         this.scene.clearElements();
+        this.terrainCutPoints.clear();
 
         // Load settings
         this.settings.loadData(data.settings);
@@ -110,6 +115,8 @@ export default class ProjectSerializer {
                 elA.connect(conn.nodeA, elB, conn.nodeB);
             }
         }
+
+        this.terrainCutPoints.load(data.terrainCutPoints ?? []);
 
         // Update all
         this.scene.update();

@@ -4,6 +4,7 @@ import type { Tool } from './ToolManager';
 import RoadTool from './tools/RoadTool';
 import IntersectionTool from './tools/IntersectionTool';
 import TerrainTool from './tools/TerrainTool';
+import TerrainCutPointTool from './tools/TerrainCutPointTool';
 import UVTool from './tools/UVTool';
 import TextureBrowser from './panels/TextureBrowser';
 import WireframeManager from './WireframeManager';
@@ -15,6 +16,7 @@ export default class LeftToolbarManager {
         @inject(RoadTool) private readonly roadTool: RoadTool,
         @inject(IntersectionTool) private readonly intersectionTool: IntersectionTool,
         @inject(TerrainTool) private readonly terrainTool: TerrainTool,
+        @inject(TerrainCutPointTool) private readonly terrainCutPointTool: TerrainCutPointTool,
         @inject(UVTool) private readonly uvTool: UVTool,
         @inject(TextureBrowser) private readonly textureBrowser: TextureBrowser,
         @inject(WireframeManager) private readonly wireframeManager: WireframeManager,
@@ -31,6 +33,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.roadTool);
         this.toolManager.registerTool(this.intersectionTool);
         this.toolManager.registerTool(this.terrainTool);
+        this.toolManager.registerTool(this.terrainCutPointTool);
         this.toolManager.registerTool(this.uvTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
@@ -45,7 +48,17 @@ export default class LeftToolbarManager {
             },
             'R',
         );
-        this.toolManager.bindButton('terrain', document.getElementById('btn-terrain') as HTMLButtonElement, 'Terrain Tool', 'T');
+        this.toolManager.registerSwitcher(
+            'terrain-switcher',
+            document.getElementById('btn-terrain') as HTMLButtonElement,
+            ['terrain', 'terrain-cut-point'],
+            'terrain',
+            {
+                terrain: { label: 'Terrain Tool', icon: 'mountain' },
+                'terrain-cut-point': { label: 'Terrain Cut Point Tool', icon: 'plus' },
+            },
+            'T',
+        );
         this.toolManager.bindButton('uv', document.getElementById('btn-uv') as HTMLButtonElement, 'UV Mapper', 'U');
         this.toolManager.setActive('select');
 

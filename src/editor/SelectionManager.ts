@@ -10,6 +10,7 @@ import ToolManager from './ToolManager';
 import PropertiesPanel from './PropertiesPanel';
 import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
+import TerrainCutPointManager from './TerrainCutPointManager';
 
 @singleton()
 export default class SelectionManager {
@@ -44,6 +45,7 @@ export default class SelectionManager {
         @inject(PropertiesPanel) properties: PropertiesPanel,
         @inject(CopyManager) copyManager: CopyManager,
         @inject(HistoryManager) history: HistoryManager,
+        @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
     ) {
         this.cameraController = camera;
         this.sceneManager = scene;
@@ -285,6 +287,10 @@ export default class SelectionManager {
 
         if (nodes.length === 1 && nodes[0].parent) {
             return nodes[0].parent;
+        }
+
+        if (nodes.length === 1) {
+            return this.terrainCutPoints.getProperties(nodes[0]);
         }
 
         return null;

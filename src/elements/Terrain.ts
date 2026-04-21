@@ -5,6 +5,7 @@ import Triangle from './Vertex';
 import type { PropertyDefinition } from '../editor/Properties';
 import BooleanManager from '../editor/BooleanManager';
 import SceneManager from '../editor/SceneManager';
+import TerrainCutPointManager from '../editor/TerrainCutPointManager';
 
 export default class Terrain extends WorldElement {
     public center: THREE.Vector3;
@@ -85,7 +86,6 @@ export default class Terrain extends WorldElement {
     }
 
     public override getProperties(): PropertyDefinition {
-        const self = this;
         return {
             title: 'Terrain',
             icon: '&#9633;',
@@ -96,10 +96,10 @@ export default class Terrain extends WorldElement {
                         {
                             type: 'vector3',
                             label: 'Center',
-                            get: () => self.center.clone(),
+                            get: () => this.center.clone(),
                             set: (v: THREE.Vector3) => {
-                                self.center.copy(v);
-                                self.update();
+                                this.center.copy(v);
+                                this.update();
                             },
                         },
                     ],
@@ -110,10 +110,10 @@ export default class Terrain extends WorldElement {
                         {
                             type: 'number',
                             label: 'Width',
-                            get: () => self.width,
+                            get: () => this.width,
                             set: (v: number) => {
-                                self.width = Math.max(0.1, v);
-                                self.update();
+                                this.width = Math.max(0.1, v);
+                                this.update();
                             },
                             min: 10,
                             max: 50,
@@ -122,10 +122,10 @@ export default class Terrain extends WorldElement {
                         {
                             type: 'number',
                             label: 'Length',
-                            get: () => self.length,
+                            get: () => this.length,
                             set: (v: number) => {
-                                self.length = Math.max(0.1, v);
-                                self.update();
+                                this.length = Math.max(0.1, v);
+                                this.update();
                             },
                             min: 10,
                             max: 50,
@@ -134,20 +134,20 @@ export default class Terrain extends WorldElement {
                         {
                             type: 'boolean',
                             label: 'Enable Grid',
-                            get: () => self.gridEnabled,
+                            get: () => this.gridEnabled,
                             set: (v: boolean) => {
-                                self.gridEnabled = v;
-                                self.update();
-                                self.onPropertiesChanged?.();
+                                this.gridEnabled = v;
+                                this.update();
+                                this.onPropertiesChanged?.();
                             },
                         },
-                        ...(self.gridEnabled ? [{
+                        ...(this.gridEnabled ? [{
                             type: 'number' as const,
                             label: 'Grid Size',
-                            get: () => self.gridSize,
+                            get: () => this.gridSize,
                             set: (v: number) => {
-                                self.gridSize = Math.max(0.01, v);
-                                self.update();
+                                this.gridSize = Math.max(0.01, v);
+                                this.update();
                             },
                             min: 0.5,
                             step: 0.1,
@@ -165,11 +165,12 @@ export default class Terrain extends WorldElement {
         const area = !this.gridEnabled
             ? booleanManager.cutTerrainSurface(this, elements)
             : this.getGridOccupiedArea(booleanManager, booleanManager.getTerrainCutAreas(this, elements));
+        const refinedArea = this.applyCutPoints(area);
 
         const triangles: Triangle[] = [];
         const w = Math.max(0.0001, this.width);
         const l = Math.max(0.0001, this.length);
-        for (const tri of area) {
+        for (const tri of refinedArea) {
             const a = tri.a.clone();
             const b = tri.b.clone();
             const c = tri.c.clone();
@@ -181,6 +182,113 @@ export default class Terrain extends WorldElement {
         }
 
         return [{ name: 'terrain', triangles }];
+    }
+
+    private applyCutPoints(area: OccupiedTriangle[]): OccupiedTriangle[] {
+        const cutPoints = container.resolve(TerrainCutPointManager).getPoints();
+        if (cutPoints.length === 0 || area.length === 0) {
+            return area;
+        }
+
+        const refined = area.map((tri) => ({
+            a: tri.a.clone(),
+            b: tri.b.clone(),
+            c: tri.c.clone(),
+        }));
+
+        for (const node of cutPoints) {
+            const point = node.mesh.position.clone();
+            const insertion = this.findCutPointInsertion(refined, point);
+            if (!insertion) continue;
+
+            const tri = refined[insertion.index];
+            refined.splice(insertion.index, 1, ...this.splitTriangleWithPoint(tri, insertion.point));
+        }
+
+        return refined;
+    }
+
+    private findCutPointInsertion(
+        triangles: OccupiedTriangle[],
+        point: THREE.Vector3,
+    ): { index: number; point: THREE.Vector3 } | null {
+        for (let index = 0; index < triangles.length; index++) {
+            if (this.canInsertCutPoint(point, triangles[index])) {
+                return { index, point };
+            }
+        }
+
+        for (let index = 0; index < triangles.length; index++) {
+            const adjusted = this.getAdjustedEdgeInsertionPoint(point, triangles[index]);
+            if (adjusted) {
+                return { index, point: adjusted };
+            }
+        }
+
+        return null;
+    }
+
+    private canInsertCutPoint(point: THREE.Vector3, tri: OccupiedTriangle): boolean {
+        const barycentric = this.getBarycentricXZ(point, tri);
+        if (!barycentric) return false;
+        const edgeEpsilon = 1e-4;
+        return barycentric.u > edgeEpsilon && barycentric.v > edgeEpsilon && barycentric.w > edgeEpsilon;
+    }
+
+    private getAdjustedEdgeInsertionPoint(point: THREE.Vector3, tri: OccupiedTriangle): THREE.Vector3 | null {
+        const barycentric = this.getBarycentricXZ(point, tri);
+        if (!barycentric) return null;
+
+        const epsilon = 1e-4;
+        if (barycentric.u > epsilon && barycentric.v > epsilon && barycentric.w > epsilon) {
+            return point;
+        }
+
+        const centroid = tri.a.clone().add(tri.b).add(tri.c).multiplyScalar(1 / 3);
+        const adjusted = point.clone();
+        adjusted.x += (centroid.x - adjusted.x) * 1e-3;
+        adjusted.z += (centroid.z - adjusted.z) * 1e-3;
+
+        return this.canInsertCutPoint(adjusted, tri) ? adjusted : null;
+    }
+
+    private splitTriangleWithPoint(tri: OccupiedTriangle, point: THREE.Vector3): OccupiedTriangle[] {
+        const sourceSign = Math.sign(this.getSignedAreaXZ(tri.a, tri.b, tri.c)) || 1;
+        return [
+            this.orientTriangle({ a: tri.a.clone(), b: tri.b.clone(), c: point.clone() }, sourceSign),
+            this.orientTriangle({ a: tri.b.clone(), b: tri.c.clone(), c: point.clone() }, sourceSign),
+            this.orientTriangle({ a: tri.c.clone(), b: tri.a.clone(), c: point.clone() }, sourceSign),
+        ];
+    }
+
+    private orientTriangle(tri: OccupiedTriangle, expectedSign: number): OccupiedTriangle {
+        const sign = Math.sign(this.getSignedAreaXZ(tri.a, tri.b, tri.c)) || expectedSign;
+        if (sign === expectedSign) return tri;
+        return { a: tri.a, b: tri.c, c: tri.b };
+    }
+
+    private getSignedAreaXZ(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): number {
+        return ((b.x - a.x) * (c.z - a.z)) - ((b.z - a.z) * (c.x - a.x));
+    }
+
+    private getBarycentricXZ(point: THREE.Vector3, tri: OccupiedTriangle): { u: number; v: number; w: number } | null {
+        const ax = tri.a.x;
+        const az = tri.a.z;
+        const bx = tri.b.x;
+        const bz = tri.b.z;
+        const cx = tri.c.x;
+        const cz = tri.c.z;
+        const denominator = ((bz - cz) * (ax - cx)) + ((cx - bx) * (az - cz));
+        if (Math.abs(denominator) < 1e-8) return null;
+
+        const u = (((bz - cz) * (point.x - cx)) + ((cx - bx) * (point.z - cz))) / denominator;
+        const v = (((cz - az) * (point.x - cx)) + ((ax - cx) * (point.z - cz))) / denominator;
+        const w = 1 - u - v;
+        const epsilon = 1e-5;
+        if (u < -epsilon || v < -epsilon || w < -epsilon) return null;
+        if (u > 1 + epsilon || v > 1 + epsilon || w > 1 + epsilon) return null;
+
+        return { u, v, w };
     }
 
     private getGridOccupiedArea(booleanManager: BooleanManager, cutAreas: OccupiedTriangle[]): OccupiedTriangle[] {

@@ -26,6 +26,7 @@ export default class GizmoManager {
     private effectiveMode: 'translate' | 'rotate' = 'translate';
     private isApplyingInternalRotation = false;
     private readonly rotationSpeed = 0.3;
+    private readonly sceneManager: SceneManager;
     public onModeStateChanged: ((state: GizmoModeState) => void) | null = null;
 
     constructor(
@@ -34,6 +35,7 @@ export default class GizmoManager {
         @inject(SceneManager) scene: SceneManager,
         @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
+        this.sceneManager = scene;
         this.controls = new TransformControls(camera.instance, renderer.domElement);
         this.controls.setMode('translate');
         this.controls.setSize(0.8);
@@ -149,6 +151,7 @@ export default class GizmoManager {
         if (this.activeNodes.length > 0) {
             const moved = new Set<WorldNode>();
             const touched = new Set<WorldElement>();
+            let movedGlobalNode = false;
             for (const node of this.activeNodes) {
                 if (moved.has(node)) continue;
                 moved.add(node);
@@ -166,9 +169,15 @@ export default class GizmoManager {
                 for (const element of node.parent?.getAffectedElementsForNode(node) ?? []) {
                     touched.add(element);
                 }
+                if (!node.parent) {
+                    movedGlobalNode = true;
+                }
             }
             for (const element of touched) {
                 element.update();
+            }
+            if (movedGlobalNode) {
+                this.sceneManager.update();
             }
             this.helperLastPosition.copy(this.helper.position);
             return;
