@@ -121,17 +121,18 @@ export default class Intersection extends WorldElement {
         const projected: OccupiedTriangle[] = [];
         const groups = this.getGeometry();
 
-        const triArea2D = (a: THREE.Vector2, b: THREE.Vector2, c: THREE.Vector2): number => {
-            return Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * 0.5;
+        const triArea2D = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): number => {
+            return Math.abs((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x)) * 0.5;
         };
 
         for (const group of groups) {
             for (const tri of group.triangles) {
-                const a = new THREE.Vector2(tri.a.x, tri.a.z);
-                const b = new THREE.Vector2(tri.b.x, tri.b.z);
-                const c = new THREE.Vector2(tri.c.x, tri.c.z);
-                if (triArea2D(a, b, c) < 1e-8) continue;
-                projected.push({ a, b, c });
+                if (triArea2D(tri.a, tri.b, tri.c) < 1e-8) continue;
+                projected.push({
+                    a: tri.a.clone(),
+                    b: tri.b.clone(),
+                    c: tri.c.clone(),
+                });
             }
         }
 

@@ -10,6 +10,8 @@ export default class Terrain extends WorldElement {
     public center: THREE.Vector3;
     public width: number;
     public height: number;
+    public gridEnabled: boolean = false;
+    public gridSize: number = 1;
 
     constructor(center: THREE.Vector3, width: number = 20, height: number = 20) {
         super();
@@ -44,10 +46,10 @@ export default class Terrain extends WorldElement {
     public override getOccupiedArea(): OccupiedTriangle[] {
         const hw = this.width / 2;
         const hh = this.height / 2;
-        const bl = new THREE.Vector2(this.center.x - hw, this.center.z - hh);
-        const br = new THREE.Vector2(this.center.x + hw, this.center.z - hh);
-        const tr = new THREE.Vector2(this.center.x + hw, this.center.z + hh);
-        const tl = new THREE.Vector2(this.center.x - hw, this.center.z + hh);
+        const bl = new THREE.Vector3(this.center.x - hw, this.center.y, this.center.z - hh);
+        const br = new THREE.Vector3(this.center.x + hw, this.center.y, this.center.z - hh);
+        const tr = new THREE.Vector3(this.center.x + hw, this.center.y, this.center.z + hh);
+        const tl = new THREE.Vector3(this.center.x - hw, this.center.y, this.center.z + hh);
 
         return [
             { a: bl, b: br, c: tr },
@@ -65,16 +67,21 @@ export default class Terrain extends WorldElement {
             textureRotations,
             terrainWidth: this.width,
             terrainHeight: this.height,
+            terrainGridEnabled: this.gridEnabled,
+            terrainGridSize: this.gridSize,
         };
     }
 
     public static deserialize(ed: ElementData): Terrain {
         const n = ed.nodes[0] ?? { x: 0, y: 0, z: 0 };
-        return new Terrain(
+        const terrain = new Terrain(
             new THREE.Vector3(n.x, n.y, n.z),
             ed.terrainWidth ?? 20,
             ed.terrainHeight ?? 20,
         );
+        terrain.gridEnabled = ed.terrainGridEnabled ?? false;
+        terrain.gridSize = Math.max(0.01, ed.terrainGridSize ?? 1);
+        return terrain;
     }
 
     public override getProperties(): PropertyDefinition {
@@ -122,6 +129,26 @@ export default class Terrain extends WorldElement {
                             min: 0.1,
                             step: 0.1,
                         },
+                        {
+                            type: 'boolean',
+                            label: 'Enable Grid',
+                            get: () => self.gridEnabled,
+                            set: (v: boolean) => {
+                                self.gridEnabled = v;
+                                self.update();
+                            },
+                        },
+                        {
+                            type: 'number',
+                            label: 'Grid Size',
+                            get: () => self.gridSize,
+                            set: (v: number) => {
+                                self.gridSize = Math.max(0.01, v);
+                                self.update();
+                            },
+                            min: 0.5,
+                            step: 0.1,
+                        },
                     ],
                 },
             ],
@@ -131,22 +158,91 @@ export default class Terrain extends WorldElement {
     protected override getGeometry(): GeometryGroup[] {
         const scene = container.resolve(SceneManager);
         const booleanManager = container.resolve(BooleanManager);
-        const area = booleanManager.cutTerrainSurface(this, scene.getElements());
+        const elements = scene.getElements();
+        const area = !this.gridEnabled
+            ? booleanManager.cutTerrainSurface(this, elements)
+            : this.getGridOccupiedArea(booleanManager, booleanManager.getTerrainCutAreas(this, elements));
 
         const triangles: Triangle[] = [];
         const w = Math.max(0.0001, this.width);
         const h = Math.max(0.0001, this.height);
         for (const tri of area) {
-            const a = new THREE.Vector3(tri.a.x, this.center.y, tri.a.y);
-            const b = new THREE.Vector3(tri.b.x, this.center.y, tri.b.y);
-            const c = new THREE.Vector3(tri.c.x, this.center.y, tri.c.y);
+            const a = tri.a.clone();
+            const b = tri.b.clone();
+            const c = tri.c.clone();
 
-            const uvA = new THREE.Vector2((tri.a.x - this.center.x) / w + 0.5, (tri.a.y - this.center.z) / h + 0.5);
-            const uvB = new THREE.Vector2((tri.b.x - this.center.x) / w + 0.5, (tri.b.y - this.center.z) / h + 0.5);
-            const uvC = new THREE.Vector2((tri.c.x - this.center.x) / w + 0.5, (tri.c.y - this.center.z) / h + 0.5);
+            const uvA = new THREE.Vector2((tri.a.x - this.center.x) / w + 0.5, (tri.a.z - this.center.z) / h + 0.5);
+            const uvB = new THREE.Vector2((tri.b.x - this.center.x) / w + 0.5, (tri.b.z - this.center.z) / h + 0.5);
+            const uvC = new THREE.Vector2((tri.c.x - this.center.x) / w + 0.5, (tri.c.z - this.center.z) / h + 0.5);
             triangles.push(new Triangle(a, b, c, uvA, uvB, uvC));
         }
 
         return [{ name: 'terrain', triangles }];
+    }
+
+    private getGridOccupiedArea(booleanManager: BooleanManager, cutAreas: OccupiedTriangle[]): OccupiedTriangle[] {
+        const { regular, filler } = this.partitionGridOccupiedArea(cutAreas);
+        const retriangulatedRegular = regular.length > 0
+            ? booleanManager.cutOccupiedSurface(regular, [])
+            : [];
+
+        if (filler.length === 0) {
+            return retriangulatedRegular;
+        }
+
+        return [...retriangulatedRegular, ...booleanManager.cutOccupiedSurface(filler, cutAreas)];
+    }
+
+    private partitionGridOccupiedArea(cutAreas: OccupiedTriangle[]): {
+        regular: OccupiedTriangle[];
+        filler: OccupiedTriangle[];
+    } {
+        const cellSize = Math.max(0.01, this.gridSize);
+        const startX = this.center.x - this.width / 2;
+        const startZ = this.center.z - this.height / 2;
+        const endX = startX + this.width;
+        const endZ = startZ + this.height;
+        const padding = cellSize * 1;
+        const regular: OccupiedTriangle[] = [];
+        const filler: OccupiedTriangle[] = [];
+
+        for (let x = startX; x < endX - 1e-8; x += cellSize) {
+            const x1 = Math.min(x + cellSize, endX);
+            for (let z = startZ; z < endZ - 1e-8; z += cellSize) {
+                const z1 = Math.min(z + cellSize, endZ);
+                const target = this.shouldCullGridCell(x, x1, z, z1, cutAreas, padding) ? filler : regular;
+
+                const bl = new THREE.Vector3(x, this.center.y, z);
+                const br = new THREE.Vector3(x1, this.center.y, z);
+                const tr = new THREE.Vector3(x1, this.center.y, z1);
+                const tl = new THREE.Vector3(x, this.center.y, z1);
+                target.push({ a: bl, b: br, c: tr });
+                target.push({ a: bl.clone(), b: tr.clone(), c: tl });
+            }
+        }
+
+        return { regular, filler };
+    }
+
+    private shouldCullGridCell(
+        minX: number,
+        maxX: number,
+        minZ: number,
+        maxZ: number,
+        cutAreas: OccupiedTriangle[],
+        padding: number,
+    ): boolean {
+        for (const tri of cutAreas) {
+            const triMinX = Math.min(tri.a.x, tri.b.x, tri.c.x);
+            const triMaxX = Math.max(tri.a.x, tri.b.x, tri.c.x);
+            const triMinZ = Math.min(tri.a.z, tri.b.z, tri.c.z);
+            const triMaxZ = Math.max(tri.a.z, tri.b.z, tri.c.z);
+
+            if (triMaxX < minX - padding || triMinX > maxX + padding) continue;
+            if (triMaxZ < minZ - padding || triMinZ > maxZ + padding) continue;
+            return true;
+        }
+
+        return false;
     }
 }

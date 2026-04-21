@@ -328,16 +328,15 @@ export default class GizmoManager {
             let count = 0;
             for (const tri of area) {
                 center.x += tri.a.x + tri.b.x + tri.c.x;
-                center.z += tri.a.y + tri.b.y + tri.c.y;
+                center.y += tri.a.y + tri.b.y + tri.c.y;
+                center.z += tri.a.z + tri.b.z + tri.c.z;
                 count += 3;
             }
             if (count > 0) {
                 center.x /= count;
+                center.y /= count;
                 center.z /= count;
             }
-            const meshWorld = new THREE.Vector3();
-            element.mesh.getWorldPosition(meshWorld);
-            center.y = meshWorld.y;
             return center;
         }
 

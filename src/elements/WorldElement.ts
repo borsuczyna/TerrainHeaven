@@ -25,9 +25,9 @@ export interface UVTransform {
 }
 
 export interface OccupiedTriangle {
-    a: THREE.Vector2;
-    b: THREE.Vector2;
-    c: THREE.Vector2;
+    a: THREE.Vector3;
+    b: THREE.Vector3;
+    c: THREE.Vector3;
 }
 
 export interface ElementData {
@@ -56,6 +56,8 @@ export interface ElementData {
     // Terrain-specific
     terrainWidth?: number;
     terrainHeight?: number;
+    terrainGridEnabled?: boolean;
+    terrainGridSize?: number;
 }
 
 interface Connection {

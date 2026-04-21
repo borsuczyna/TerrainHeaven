@@ -17,7 +17,14 @@ export interface PropertyNumber {
     step?: number;
 }
 
-export type Property = PropertyVector3 | PropertyNumber | PropertySelect;
+export interface PropertyBoolean {
+    type: 'boolean';
+    label: string;
+    get: () => boolean;
+    set: (v: boolean) => void;
+}
+
+export type Property = PropertyVector3 | PropertyNumber | PropertyBoolean | PropertySelect;
 
 export interface PropertySelect {
     type: 'select';

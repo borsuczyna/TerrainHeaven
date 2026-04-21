@@ -230,14 +230,14 @@ export default class Road extends WorldElement {
             const tr = next.clone().add(rightNext.clone().multiplyScalar(hwNext));
 
             triangles.push({
-                a: new THREE.Vector2(bl.x, bl.z),
-                b: new THREE.Vector2(br.x, br.z),
-                c: new THREE.Vector2(tr.x, tr.z),
+                a: bl,
+                b: br,
+                c: tr,
             });
             triangles.push({
-                a: new THREE.Vector2(bl.x, bl.z),
-                b: new THREE.Vector2(tr.x, tr.z),
-                c: new THREE.Vector2(tl.x, tl.z),
+                a: bl.clone(),
+                b: tr.clone(),
+                c: tl,
             });
         }
 

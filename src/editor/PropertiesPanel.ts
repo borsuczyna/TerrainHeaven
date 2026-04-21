@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
-import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertySelect, PropertyButton, SectionItem } from './Properties';
+import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertyBoolean, PropertySelect, PropertyButton, SectionItem } from './Properties';
 import type WorldElement from '../elements/WorldElement';
 import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
@@ -136,6 +136,19 @@ export default class PropertiesPanel {
                 </div>`;
         }
 
+        if (prop.type === 'boolean') {
+            const checked = prop.get() ? 'checked' : '';
+            return `
+                <div class="prop-row" data-prop-id="${id}" data-prop-type="boolean">
+                    <span class="prop-label">${prop.label}</span>
+                    <div class="prop-fields">
+                        <div class="prop-field-single">
+                            <input type="checkbox" ${checked}>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
         if (prop.type === 'select') {
             const v = prop.get();
             const optionsHtml = prop.options.map(o =>
@@ -242,15 +255,47 @@ export default class PropertiesPanel {
             if (prop.type === 'number') {
                 const input = row.querySelector('input')!;
                 const historyLabel = `Edit ${prop.label}`;
-                const commitNumber = () => {
-                    const v = parseFloat(input.value) || 0;
-                    (prop as PropertyNumber).set(v);
+                const commitNumber = (finalize: boolean) => {
+                    const rawValue = input.value.trim();
+                    if (rawValue === '' || rawValue === '-' || rawValue === '.' || rawValue === '-.') {
+                        if (!finalize) return;
+                    }
+
+                    const parsed = Number(rawValue);
+                    if (!Number.isFinite(parsed)) {
+                        if (!finalize) return;
+                        input.value = String((prop as PropertyNumber).get());
+                        return;
+                    }
+
+                    let nextValue = parsed;
+                    if (!finalize) {
+                        if (prop.min !== undefined && nextValue < prop.min) return;
+                        if (prop.max !== undefined && nextValue > prop.max) return;
+                    } else {
+                        if (prop.min !== undefined) nextValue = Math.max(prop.min, nextValue);
+                        if (prop.max !== undefined) nextValue = Math.min(prop.max, nextValue);
+                        input.value = String(nextValue);
+                    }
+
+                    (prop as PropertyNumber).set(nextValue);
                 };
                 input.addEventListener('focus', () => this.beginHistory(row as HTMLElement, historyLabel));
-                input.addEventListener('change', commitNumber);
-                input.addEventListener('input', commitNumber);
+                input.addEventListener('change', () => commitNumber(true));
+                input.addEventListener('input', () => commitNumber(false));
                 input.addEventListener('change', () => this.endHistory(row as HTMLElement, historyLabel));
+                input.addEventListener('blur', () => commitNumber(true));
                 input.addEventListener('blur', () => this.endHistory(row as HTMLElement, historyLabel));
+            }
+
+            if (prop.type === 'boolean') {
+                const input = row.querySelector('input')!;
+                input.addEventListener('change', () => {
+                    const historyLabel = `Edit ${prop.label}`;
+                    this.history.beginAction(historyLabel);
+                    (prop as PropertyBoolean).set((input as HTMLInputElement).checked);
+                    this.history.endAction(historyLabel);
+                });
             }
 
             if (prop.type === 'button') {
@@ -309,6 +354,13 @@ export default class PropertiesPanel {
                     const input = row.querySelector('input')!;
                     if (input !== document.activeElement) {
                         (input as HTMLInputElement).value = String(prop.get());
+                    }
+                }
+
+                if (prop.type === 'boolean') {
+                    const input = row.querySelector('input')!;
+                    if (input !== document.activeElement) {
+                        (input as HTMLInputElement).checked = (prop as PropertyBoolean).get();
                     }
                 }
 
