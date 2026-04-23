@@ -1,20 +1,25 @@
 import * as THREE from 'three';
 import { container } from 'tsyringe';
-import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle, type UVTransform } from './WorldElement';
 import WorldNode from './WorldNode';
+import Triangle from './Vertex';
+import Terrain from './Terrain.ts';
 import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 import GeometrySweepManager, { type GeometryLineSegment, type GeometryLineSection } from '../editor/GeometrySweepManager';
+import SceneManager from '../editor/SceneManager';
 
 export type EdgeType = 'none' | 'sidewalk';
+export type PillarShape = 'box' | 'circular';
 
-type RoadGeometryGroup = 'road' | 'sidewalk';
+type RoadGeometryGroup = 'road' | 'sidewalk' | 'bridgeDeck' | 'bridgePillars';
 
 interface GeometryLineContext {
     halfWidth: number;
     sidewalkWidth: number;
     curbHeight: number;
+    deckThickness: number;
     leftDistance: number;
     rightDistance: number;
     maxEdgeLength: number;
@@ -33,6 +38,14 @@ export default class Road extends WorldElement {
     public roadTexStretch: number = 1;
     public sidewalkTexStretch: number = 1;
     public roadCrown: number = 0;
+    public bridgeEnabled: boolean = false;
+    public bridgePillarShape: PillarShape = 'box';
+    public bridgePillarSegments: number = 12;
+    public bridgePillarDistance: number = 8;
+    public bridgePillarCount: number = 2;
+    public bridgePillarWidth: number = 0.8;
+    public bridgePillarInset: number = 0.4;
+    public bridgeDeckThickness: number = 0.5;
 
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
@@ -52,6 +65,13 @@ export default class Road extends WorldElement {
     private curveLineB: THREE.Line | null = null;
     private laneLines: THREE.Line[] = [];
     private readonly geometrySweepManager: GeometrySweepManager = container.resolve(GeometrySweepManager);
+    private readonly terrainRaycaster = new THREE.Raycaster();
+    private readonly uvTransforms: Map<RoadGeometryGroup, UVTransform> = new Map([
+        ['road', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
+        ['sidewalk', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
+        ['bridgeDeck', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
+        ['bridgePillars', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
+    ]);
 
     public get divisions(): number { return this._divisions; }
     public set divisions(value: number) {
@@ -211,6 +231,91 @@ export default class Road extends WorldElement {
         return (this.roadCrown + conn.element.roadCrown) / 2;
     }
 
+    private getResolvedBridgeDeckThickness(nodeIndex: number): number {
+        const conn = this.connections.get(nodeIndex);
+        if (!conn) return this.bridgeDeckThickness;
+        if (!(conn.element instanceof Road) || !conn.element.bridgeEnabled) return this.bridgeDeckThickness;
+        return (this.bridgeDeckThickness + conn.element.bridgeDeckThickness) / 2;
+    }
+
+    private isRoadGeometryGroup(group: string): group is RoadGeometryGroup {
+        return group === 'road' || group === 'sidewalk' || group === 'bridgeDeck' || group === 'bridgePillars';
+    }
+
+    private getStoredUVTransform(group: RoadGeometryGroup): UVTransform {
+        const stored = this.uvTransforms.get(group);
+        if (stored) return stored;
+        const fallback: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+        this.uvTransforms.set(group, fallback);
+        return fallback;
+    }
+
+    private serializeUVTransforms(): Record<string, UVTransform> {
+        const out: Record<string, UVTransform> = {};
+        const groups: RoadGeometryGroup[] = ['road', 'sidewalk', 'bridgeDeck', 'bridgePillars'];
+        for (const group of groups) {
+            const t = this.getStoredUVTransform(group);
+            out[group] = { offsetX: t.offsetX, offsetY: t.offsetY, scaleX: t.scaleX, scaleY: t.scaleY };
+        }
+        return out;
+    }
+
+    private loadUVTransforms(uvTransforms: Record<string, UVTransform>): void {
+        for (const [groupName, transform] of Object.entries(uvTransforms)) {
+            if (!this.isRoadGeometryGroup(groupName)) continue;
+            this.uvTransforms.set(groupName, {
+                offsetX: Number.isFinite(transform.offsetX) ? transform.offsetX : 0,
+                offsetY: Number.isFinite(transform.offsetY) ? transform.offsetY : 0,
+                scaleX: Number.isFinite(transform.scaleX) ? Math.max(0.1, transform.scaleX) : 1,
+                scaleY: Number.isFinite(transform.scaleY) ? Math.max(0.1, transform.scaleY) : 1,
+            });
+        }
+    }
+
+    private applyUVTransformToTriangles(group: RoadGeometryGroup, triangles: Triangle[]): void {
+        const t = this.getStoredUVTransform(group);
+        if (Math.abs(t.offsetX) < 1e-8 && Math.abs(t.offsetY) < 1e-8
+            && Math.abs(t.scaleX - 1) < 1e-8 && Math.abs(t.scaleY - 1) < 1e-8) {
+            return;
+        }
+
+        for (const tri of triangles) {
+            tri.uvA.set(tri.uvA.x * t.scaleX + t.offsetX, tri.uvA.y * t.scaleY + t.offsetY);
+            tri.uvB.set(tri.uvB.x * t.scaleX + t.offsetX, tri.uvB.y * t.scaleY + t.offsetY);
+            tri.uvC.set(tri.uvC.x * t.scaleX + t.offsetX, tri.uvC.y * t.scaleY + t.offsetY);
+        }
+    }
+
+    public override getUVGroups(): string[] {
+        const groups: string[] = ['road'];
+        if (this.edgeType === 'sidewalk') groups.push('sidewalk');
+        if (this.bridgeEnabled) {
+            groups.push('bridgeDeck', 'bridgePillars');
+        }
+        return groups;
+    }
+
+    public override getUVTransform(group: string): UVTransform {
+        if (!this.isRoadGeometryGroup(group)) return super.getUVTransform(group);
+        const t = this.getStoredUVTransform(group);
+        return { offsetX: t.offsetX, offsetY: t.offsetY, scaleX: t.scaleX, scaleY: t.scaleY };
+    }
+
+    public override setUVTransform(group: string, transform: UVTransform): void {
+        if (!this.isRoadGeometryGroup(group)) {
+            super.setUVTransform(group, transform);
+            return;
+        }
+
+        this.uvTransforms.set(group, {
+            offsetX: Number.isFinite(transform.offsetX) ? transform.offsetX : 0,
+            offsetY: Number.isFinite(transform.offsetY) ? transform.offsetY : 0,
+            scaleX: Number.isFinite(transform.scaleX) ? Math.max(0.1, transform.scaleX) : 1,
+            scaleY: Number.isFinite(transform.scaleY) ? Math.max(0.1, transform.scaleY) : 1,
+        });
+        this.update();
+    }
+
     public connectWith(thisNodeIndex: number, otherRoad: Road, otherNodeIndex: number = 0): void {
         this.connect(thisNodeIndex, otherRoad, otherNodeIndex);
         this.updateCurveLines();
@@ -219,6 +324,10 @@ export default class Road extends WorldElement {
     }
 
     public override getOccupiedArea(): OccupiedTriangle[] {
+        if (this.bridgeEnabled) {
+            return [];
+        }
+
         const edge = this.computeEdgeData();
         const triangles: OccupiedTriangle[] = [];
         const swStart = this.getResolvedSidewalkWidth(0);
@@ -276,6 +385,7 @@ export default class Road extends WorldElement {
         }
         return {
             type: 'road', id, nodes, textures, textureRotations,
+            uvTransforms: this.serializeUVTransforms(),
             width: this.width,
             lanes: this.lanes,
             divisions: this.divisions,
@@ -285,6 +395,14 @@ export default class Road extends WorldElement {
             roadCrown: this.roadCrown,
             curvePointA,
             curvePointB,
+            bridgeEnabled: this.bridgeEnabled,
+            bridgePillarShape: this.bridgePillarShape,
+            bridgePillarSegments: this.bridgePillarSegments,
+            bridgePillarDistance: this.bridgePillarDistance,
+            bridgePillarCount: this.bridgePillarCount,
+            bridgePillarWidth: this.bridgePillarWidth,
+            bridgePillarInset: this.bridgePillarInset,
+            bridgeDeckThickness: this.bridgeDeckThickness,
         };
     }
 
@@ -298,6 +416,17 @@ export default class Road extends WorldElement {
         road.sidewalkWidth = ed.sidewalkWidth ?? 1;
         road.curbHeight = ed.curbHeight ?? 0.15;
         road.roadCrown = ed.roadCrown ?? 0;
+        road.bridgeEnabled = ed.bridgeEnabled ?? false;
+        road.bridgePillarShape = (ed.bridgePillarShape as PillarShape) ?? 'box';
+        road.bridgePillarSegments = Math.max(3, Math.round(ed.bridgePillarSegments ?? 12));
+        road.bridgePillarDistance = Math.max(0.1, ed.bridgePillarDistance ?? 8);
+        road.bridgePillarCount = Math.max(1, Math.round(ed.bridgePillarCount ?? 2));
+        road.bridgePillarWidth = Math.max(0.1, ed.bridgePillarWidth ?? 0.8);
+        road.bridgePillarInset = Math.max(0, ed.bridgePillarInset ?? 0.4);
+        road.bridgeDeckThickness = Math.max(0.05, ed.bridgeDeckThickness ?? 0.5);
+        if (ed.uvTransforms) {
+            road.loadUVTransforms(ed.uvTransforms);
+        }
         if (ed.divisions && ed.divisions > 0) {
             road.divisions = ed.divisions;
             if (ed.curvePointA) road.setCurvePointA(new THREE.Vector3(ed.curvePointA.x, ed.curvePointA.y, ed.curvePointA.z));
@@ -401,6 +530,85 @@ export default class Road extends WorldElement {
                 ],
             },
             {
+                label: 'Bridge',
+                properties: [
+                    {
+                        type: 'boolean' as const,
+                        label: 'Enabled',
+                        get: () => self.bridgeEnabled,
+                        set: (v: boolean) => {
+                            self.bridgeEnabled = v;
+                            self.update();
+                            self.onPropertiesChanged?.();
+                        },
+                    },
+                    ...(self.bridgeEnabled ? [
+                        {
+                            type: 'number' as const,
+                            label: 'Deck Thickness',
+                            get: () => self.bridgeDeckThickness,
+                            set: (v: number) => { self.bridgeDeckThickness = Math.max(0.05, v); self.update(); },
+                            min: 0.05,
+                            step: 0.05,
+                        },
+                        {
+                            type: 'select' as const,
+                            label: 'Pillar Shape',
+                            options: [
+                                { label: 'Box', value: 'box' },
+                                { label: 'Circular', value: 'circular' },
+                            ],
+                            get: () => self.bridgePillarShape,
+                            set: (v: string) => {
+                                self.bridgePillarShape = (v as PillarShape) === 'circular' ? 'circular' : 'box';
+                                self.update();
+                                self.onPropertiesChanged?.();
+                            },
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Pillar Distance',
+                            get: () => self.bridgePillarDistance,
+                            set: (v: number) => { self.bridgePillarDistance = Math.max(0.1, v); self.update(); },
+                            min: 0.1,
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Pillar Count',
+                            get: () => self.bridgePillarCount,
+                            set: (v: number) => { self.bridgePillarCount = Math.max(1, Math.round(v)); self.update(); },
+                            min: 1,
+                            step: 1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Pillar Width',
+                            get: () => self.bridgePillarWidth,
+                            set: (v: number) => { self.bridgePillarWidth = Math.max(0.1, v); self.update(); },
+                            min: 0.1,
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Pillar Inset',
+                            get: () => self.bridgePillarInset,
+                            set: (v: number) => { self.bridgePillarInset = Math.max(0, v); self.update(); },
+                            min: 0,
+                            step: 0.1,
+                        },
+                        ...(self.bridgePillarShape === 'circular' ? [{
+                            type: 'number' as const,
+                            label: 'Pillar Segments',
+                            get: () => self.bridgePillarSegments,
+                            set: (v: number) => { self.bridgePillarSegments = Math.max(3, Math.round(v)); self.update(); },
+                            min: 3,
+                            step: 1,
+                        }] : []),
+                    ] : []),
+                ],
+            },
+            {
                 label: 'Textures',
                 properties: [
                     {
@@ -465,7 +673,14 @@ export default class Road extends WorldElement {
 
     protected getGeometry(): GeometryGroup[] {
         const edge = this.computeEdgeData();
-        return this.sweepGeometryLine(edge);
+        const groups = this.sweepGeometryLine(edge);
+        if (!this.bridgeEnabled) return groups;
+
+        const pillarTriangles = this.getBridgePillarTriangles(edge);
+        if (pillarTriangles.length > 0) {
+            groups.push({ name: 'bridgePillars', triangles: pillarTriangles });
+        }
+        return groups;
     }
 
     private getCrownAt(t: number): number {
@@ -478,6 +693,23 @@ export default class Road extends WorldElement {
 
     private getLaneHeightAtFrac(frac: number, crownHeight: number): number {
         return crownHeight * (1 - Math.abs(2 * frac - 1));
+    }
+
+    private getBridgeOuterHalfWidth(context: GeometryLineContext): number {
+        return context.halfWidth + (this.edgeType === 'sidewalk' ? context.sidewalkWidth : 0);
+    }
+
+    private getDeckTopHeightAtLateral(lateral: number, context: GeometryLineContext): number {
+        if (this.edgeType === 'sidewalk' && Math.abs(lateral) > context.halfWidth + 1e-6) {
+            return context.curbHeight;
+        }
+
+        if (context.halfWidth <= 1e-6) {
+            return this.getLaneHeightAtFrac(0.5, context.crownHeight);
+        }
+
+        const laneFrac = THREE.MathUtils.clamp((lateral + context.halfWidth) / (2 * context.halfWidth), 0, 1);
+        return this.getLaneHeightAtFrac(laneFrac, context.crownHeight);
     }
 
     private getGeometryLine(context: GeometryLineContext): GeometryLineSegment<RoadGeometryGroup>[] {
@@ -583,6 +815,69 @@ export default class Road extends WorldElement {
             });
         }
 
+        if (this.bridgeEnabled) {
+            const deckThickness = Math.max(0.05, context.deckThickness);
+            const deckSegments: GeometryLineSegment<RoadGeometryGroup>[] = [];
+
+            for (const segment of segments) {
+                deckSegments.push({
+                    group: 'bridgeDeck',
+                    start: {
+                        lateral: segment.end.lateral,
+                        height: segment.end.height - deckThickness,
+                        u: segment.end.u,
+                        v: segment.end.v,
+                    },
+                    end: {
+                        lateral: segment.start.lateral,
+                        height: segment.start.height - deckThickness,
+                        u: segment.start.u,
+                        v: segment.start.v,
+                    },
+                });
+            }
+
+            const outerHalfWidth = this.getBridgeOuterHalfWidth(context);
+            const rightTop = this.getDeckTopHeightAtLateral(outerHalfWidth, context);
+            const leftTop = this.getDeckTopHeightAtLateral(-outerHalfWidth, context);
+            const rightV = context.rightDistance * this.roadTexStretch;
+            const leftV = context.leftDistance * this.roadTexStretch;
+
+            // Outer side walls close top deck to underside.
+            deckSegments.push({
+                group: 'bridgeDeck',
+                start: {
+                    lateral: outerHalfWidth,
+                    height: rightTop,
+                    u: 1,
+                    v: rightV,
+                },
+                end: {
+                    lateral: outerHalfWidth,
+                    height: rightTop - deckThickness,
+                    u: 0,
+                    v: rightV,
+                },
+            });
+            deckSegments.push({
+                group: 'bridgeDeck',
+                start: {
+                    lateral: -outerHalfWidth,
+                    height: leftTop - deckThickness,
+                    u: 0,
+                    v: leftV,
+                },
+                end: {
+                    lateral: -outerHalfWidth,
+                    height: leftTop,
+                    u: 1,
+                    v: leftV,
+                },
+            });
+
+            segments.push(...deckSegments);
+        }
+
         return segments;
     }
 
@@ -596,6 +891,8 @@ export default class Road extends WorldElement {
         const swEnd = this.getResolvedSidewalkWidth(1);
         const chStart = this.getResolvedCurbHeight(0);
         const chEnd = this.getResolvedCurbHeight(1);
+        const dtStart = this.getResolvedBridgeDeckThickness(0);
+        const dtEnd = this.getResolvedBridgeDeckThickness(1);
 
         const geometrySections: GeometryLineSection<RoadGeometryGroup>[] = [];
         for (let i = 0; i < pointCount; i++) {
@@ -604,6 +901,7 @@ export default class Road extends WorldElement {
                 halfWidth: edge.halfWidths[i],
                 sidewalkWidth: swStart + (swEnd - swStart) * t,
                 curbHeight: chStart + (chEnd - chStart) * t,
+                deckThickness: dtStart + (dtEnd - dtStart) * t,
                 leftDistance: edge.leftCumDist[i],
                 rightDistance: edge.rightCumDist[i],
                 maxEdgeLength: edge.maxEdgeLen,
@@ -619,12 +917,226 @@ export default class Road extends WorldElement {
         const sweptGroups = this.geometrySweepManager.sweepSections(geometrySections);
         const roadGroup = sweptGroups.find((group) => group.name === 'road');
         const sidewalkGroup = sweptGroups.find((group) => group.name === 'sidewalk');
+        const bridgeDeckGroup = sweptGroups.find((group) => group.name === 'bridgeDeck');
+
+        if (roadGroup) this.applyUVTransformToTriangles('road', roadGroup.triangles);
+        if (sidewalkGroup) this.applyUVTransformToTriangles('sidewalk', sidewalkGroup.triangles);
+        if (bridgeDeckGroup) this.applyUVTransformToTriangles('bridgeDeck', bridgeDeckGroup.triangles);
 
         const groups: GeometryGroup[] = [{ name: 'road', triangles: roadGroup?.triangles ?? [] }];
         if (sidewalkGroup && sidewalkGroup.triangles.length > 0) {
             groups.push(sidewalkGroup);
         }
+        if (bridgeDeckGroup && bridgeDeckGroup.triangles.length > 0) {
+            groups.push(bridgeDeckGroup);
+        }
         return groups;
+    }
+
+    private getBridgePillarTriangles(edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
+        const triangles: Triangle[] = [];
+        const terrainMeshes = this.getTerrainMeshes();
+
+        const totalLength = edge.centerTotal;
+        if (totalLength <= 1e-6) return triangles;
+
+        const spacing = Math.max(0.1, this.bridgePillarDistance);
+        const margin = Math.min(spacing * 0.5, totalLength * 0.5);
+        const rowDistances: number[] = [];
+        for (let d = margin; d <= totalLength - margin + 1e-6; d += spacing) {
+            rowDistances.push(d);
+        }
+        if (rowDistances.length === 0) {
+            rowDistances.push(totalLength * 0.5);
+        }
+
+        const swStart = this.getResolvedSidewalkWidth(0);
+        const swEnd = this.getResolvedSidewalkWidth(1);
+        const chStart = this.getResolvedCurbHeight(0);
+        const chEnd = this.getResolvedCurbHeight(1);
+        const dtStart = this.getResolvedBridgeDeckThickness(0);
+        const dtEnd = this.getResolvedBridgeDeckThickness(1);
+
+        const lateralFractions = this.getBridgePillarLateralFractions();
+        const halfPillarWidth = Math.max(0.05, this.bridgePillarWidth * 0.5);
+
+        for (const distance of rowDistances) {
+            const sample = this.sampleEdgeAtDistance(edge, distance);
+            if (!sample) continue;
+
+            const sidewalkWidth = swStart + (swEnd - swStart) * sample.t;
+            const curbHeight = chStart + (chEnd - chStart) * sample.t;
+            const context: GeometryLineContext = {
+                halfWidth: sample.halfWidth,
+                sidewalkWidth,
+                curbHeight,
+                deckThickness: dtStart + (dtEnd - dtStart) * sample.t,
+                leftDistance: 0,
+                rightDistance: 0,
+                maxEdgeLength: 1,
+                crownHeight: this.getCrownAt(sample.t),
+            };
+
+            const outerHalfWidth = this.getBridgeOuterHalfWidth(context);
+            const maxOffset = Math.max(0, outerHalfWidth - this.bridgePillarInset - halfPillarWidth);
+            for (const lateralFraction of lateralFractions) {
+                const offset = -maxOffset + 2 * maxOffset * lateralFraction;
+                const pillarCenter = sample.origin.clone().add(sample.right.clone().multiplyScalar(offset));
+
+                const deckTopY = sample.origin.y + this.getDeckTopHeightAtLateral(offset, context);
+                const topY = deckTopY - Math.max(0.05, context.deckThickness);
+                const terrainY = this.getTerrainHeightAtXZ(pillarCenter.x, pillarCenter.z, terrainMeshes);
+                if (terrainY >= topY - 0.01) continue;
+
+                if (this.bridgePillarShape === 'circular') {
+                    this.addCircularPillarTriangles(
+                        triangles,
+                        pillarCenter,
+                        topY,
+                        terrainY,
+                        halfPillarWidth,
+                        Math.max(3, Math.round(this.bridgePillarSegments)),
+                    );
+                } else {
+                    this.addBoxPillarTriangles(triangles, pillarCenter, topY, terrainY, halfPillarWidth);
+                }
+            }
+        }
+
+        this.applyUVTransformToTriangles('bridgePillars', triangles);
+
+        return triangles;
+    }
+
+    private getBridgePillarLateralFractions(): number[] {
+        const count = Math.max(1, Math.round(this.bridgePillarCount));
+        if (count === 1) return [0.5];
+        if (count === 2) return [0, 1];
+
+        const fractions: number[] = [];
+        for (let i = 0; i < count; i++) {
+            fractions.push(i / (count - 1));
+        }
+        return fractions;
+    }
+
+    private sampleEdgeAtDistance(
+        edge: ReturnType<Road['computeEdgeData']>,
+        distance: number,
+    ): { origin: THREE.Vector3; right: THREE.Vector3; halfWidth: number; t: number } | null {
+        const pointCount = edge.points.length;
+        if (pointCount < 2) return null;
+
+        const target = THREE.MathUtils.clamp(distance, 0, edge.centerTotal);
+        let segIndex = pointCount - 2;
+        for (let i = 0; i < pointCount - 1; i++) {
+            if (target <= edge.centerCumDist[i + 1]) {
+                segIndex = i;
+                break;
+            }
+        }
+
+        const segStart = edge.centerCumDist[segIndex];
+        const segEnd = edge.centerCumDist[segIndex + 1];
+        const segLength = segEnd - segStart;
+        const alpha = segLength > 1e-6 ? (target - segStart) / segLength : 0;
+
+        const origin = edge.points[segIndex].clone().lerp(edge.points[segIndex + 1], alpha);
+        const right = edge.rightVecs[segIndex].clone().lerp(edge.rightVecs[segIndex + 1], alpha);
+        if (right.lengthSq() < 1e-8) {
+            right.copy(edge.rightVecs[segIndex]);
+        }
+        right.normalize();
+
+        const halfWidth = THREE.MathUtils.lerp(edge.halfWidths[segIndex], edge.halfWidths[segIndex + 1], alpha);
+        const t = (segIndex + alpha) / (pointCount - 1);
+
+        return { origin, right, halfWidth, t };
+    }
+
+    private getTerrainMeshes(): THREE.Object3D[] {
+        const scene = container.resolve(SceneManager);
+        return scene.getElements()
+            .filter((element): element is Terrain => element instanceof Terrain)
+            .map((terrain) => terrain.mesh);
+    }
+
+    private getTerrainHeightAtXZ(x: number, z: number, terrainMeshes: THREE.Object3D[]): number {
+        if (terrainMeshes.length === 0) return 0;
+
+        this.terrainRaycaster.set(new THREE.Vector3(x, 10000, z), new THREE.Vector3(0, -1, 0));
+        this.terrainRaycaster.near = 0;
+        this.terrainRaycaster.far = 20000;
+        const hits = this.terrainRaycaster.intersectObjects(terrainMeshes, true);
+        return hits.length > 0 ? hits[0].point.y : 0;
+    }
+
+    private addBoxPillarTriangles(
+        out: Triangle[],
+        center: THREE.Vector3,
+        topY: number,
+        bottomY: number,
+        halfSize: number,
+    ): void {
+        const b0 = new THREE.Vector3(center.x - halfSize, bottomY, center.z - halfSize);
+        const b1 = new THREE.Vector3(center.x + halfSize, bottomY, center.z - halfSize);
+        const b2 = new THREE.Vector3(center.x + halfSize, bottomY, center.z + halfSize);
+        const b3 = new THREE.Vector3(center.x - halfSize, bottomY, center.z + halfSize);
+
+        const t0 = new THREE.Vector3(center.x - halfSize, topY, center.z - halfSize);
+        const t1 = new THREE.Vector3(center.x + halfSize, topY, center.z - halfSize);
+        const t2 = new THREE.Vector3(center.x + halfSize, topY, center.z + halfSize);
+        const t3 = new THREE.Vector3(center.x - halfSize, topY, center.z + halfSize);
+
+        this.pushPillarQuad(out, b0, b1, t1, t0, 0, 1, topY - bottomY);
+        this.pushPillarQuad(out, b1, b2, t2, t1, 0, 1, topY - bottomY);
+        this.pushPillarQuad(out, b2, b3, t3, t2, 0, 1, topY - bottomY);
+        this.pushPillarQuad(out, b3, b0, t0, t3, 0, 1, topY - bottomY);
+    }
+
+    private addCircularPillarTriangles(
+        out: Triangle[],
+        center: THREE.Vector3,
+        topY: number,
+        bottomY: number,
+        radius: number,
+        segments: number,
+    ): void {
+        for (let i = 0; i < segments; i++) {
+            const a0 = (i / segments) * Math.PI * 2;
+            const a1 = ((i + 1) / segments) * Math.PI * 2;
+
+            const b0 = new THREE.Vector3(center.x + Math.cos(a0) * radius, bottomY, center.z + Math.sin(a0) * radius);
+            const b1 = new THREE.Vector3(center.x + Math.cos(a1) * radius, bottomY, center.z + Math.sin(a1) * radius);
+            const t0 = new THREE.Vector3(center.x + Math.cos(a0) * radius, topY, center.z + Math.sin(a0) * radius);
+            const t1 = new THREE.Vector3(center.x + Math.cos(a1) * radius, topY, center.z + Math.sin(a1) * radius);
+
+            this.pushPillarQuad(out, b0, b1, t1, t0, i / segments, (i + 1) / segments, topY - bottomY);
+        }
+    }
+
+    private pushPillarQuad(
+        out: Triangle[],
+        bottomA: THREE.Vector3,
+        bottomB: THREE.Vector3,
+        topB: THREE.Vector3,
+        topA: THREE.Vector3,
+        u0: number,
+        u1: number,
+        height: number,
+    ): void {
+        const vTop = 0;
+        const vBottom = Math.max(0.01, height);
+        out.push(new Triangle(bottomA, topB, bottomB,
+            new THREE.Vector2(u0, vBottom),
+            new THREE.Vector2(u1, vTop),
+            new THREE.Vector2(u1, vBottom),
+        ));
+        out.push(new Triangle(bottomA, topA, topB,
+            new THREE.Vector2(u0, vBottom),
+            new THREE.Vector2(u0, vTop),
+            new THREE.Vector2(u1, vTop),
+        ));
     }
 
     private computeEdgeData() {
@@ -661,9 +1173,11 @@ export default class Road extends WorldElement {
         // Cumulative distances along each edge
         const leftCumDist = [0];
         const rightCumDist = [0];
+        const centerCumDist = [0];
         for (let i = 1; i < points.length; i++) {
             leftCumDist.push(leftCumDist[i - 1] + leftEdgePos[i].distanceTo(leftEdgePos[i - 1]));
             rightCumDist.push(rightCumDist[i - 1] + rightEdgePos[i].distanceTo(rightEdgePos[i - 1]));
+            centerCumDist.push(centerCumDist[i - 1] + points[i].distanceTo(points[i - 1]));
         }
 
         const leftTotal = leftCumDist[leftCumDist.length - 1];
@@ -678,7 +1192,9 @@ export default class Road extends WorldElement {
             rightCumDist[i] = rightTotal > 0 ? (rightCumDist[i] / rightTotal) * maxEdgeLen : 0;
         }
 
-        return { points, rightVecs, halfWidths, leftCumDist, rightCumDist, maxEdgeLen };
+        const centerTotal = centerCumDist[centerCumDist.length - 1];
+
+        return { points, rightVecs, halfWidths, leftCumDist, rightCumDist, centerCumDist, centerTotal, maxEdgeLen };
     }
 
 }

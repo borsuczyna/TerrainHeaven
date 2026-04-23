@@ -24,6 +24,8 @@ export default class UVEditorPanel {
     private dragStartX = 0;
     private dragStartY = 0;
     private dragStartTransform: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    private dragStartUVBounds: { minU: number; minV: number; maxU: number; maxV: number } | null = null;
+    private dragSourceUVBounds: { minU: number; minV: number; maxU: number; maxV: number } | null = null;
 
     // Scale handle
     private scaleHandleSize = 10;
@@ -96,7 +98,7 @@ export default class UVEditorPanel {
         window.addEventListener('history-restored', this.onHistoryRestored);
     }
 
-    public show(element: WorldElement): void {
+    public show(element: WorldElement, initialGroup?: string): void {
         this.element = element;
         const groups = element.getUVGroups();
         if (groups.length === 0) {
@@ -112,7 +114,7 @@ export default class UVEditorPanel {
             opt.textContent = g;
             this.groupSelect.appendChild(opt);
         }
-        this.activeGroup = groups[0];
+        this.activeGroup = (initialGroup && groups.includes(initialGroup)) ? initialGroup : groups[0];
         this.groupSelect.value = this.activeGroup;
 
         this.loadGroupTexture();
@@ -283,18 +285,7 @@ export default class UVEditorPanel {
         const uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
         if (!uvAttr) return;
 
-        // Find the group that matches activeGroup
-        let groupStart = 0;
-        let groupCount = uvAttr.count;
-        const groups = geometry.groups;
-        const groupNames = this.element.getGroupNames();
-        for (let i = 0; i < groups.length; i++) {
-            if (groupNames[i] === this.activeGroup) {
-                groupStart = groups[i].start;
-                groupCount = groups[i].count;
-                break;
-            }
-        }
+        const { start: groupStart, count: groupCount } = this.getActiveGroupRange(uvAttr);
 
         // Draw filled triangles with semi-transparent fill
         ctx.fillStyle = 'rgba(100, 200, 255, 0.1)';
@@ -323,17 +314,7 @@ export default class UVEditorPanel {
         const uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
         if (!uvAttr) return null;
 
-        let groupStart = 0;
-        let groupCount = uvAttr.count;
-        const groups = geometry.groups;
-        const groupNames = this.element.getGroupNames();
-        for (let i = 0; i < groups.length; i++) {
-            if (groupNames[i] === this.activeGroup) {
-                groupStart = groups[i].start;
-                groupCount = groups[i].count;
-                break;
-            }
-        }
+        const { start: groupStart, count: groupCount } = this.getActiveGroupRange(uvAttr);
 
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (let i = groupStart; i < groupStart + groupCount; i++) {
@@ -346,6 +327,53 @@ export default class UVEditorPanel {
 
         if (!isFinite(minX)) return null;
         return { minX, minY, maxX, maxY };
+    }
+
+    private getActiveGroupRange(uvAttr: THREE.BufferAttribute): { start: number; count: number } {
+        if (!this.element) {
+            return { start: 0, count: uvAttr.count };
+        }
+
+        const geometry = this.element.mesh.geometry;
+        if (!geometry) {
+            return { start: 0, count: uvAttr.count };
+        }
+
+        const groups = geometry.groups;
+        const groupNames = this.element.getGroupNames();
+        for (let i = 0; i < groups.length; i++) {
+            if (groupNames[i] === this.activeGroup) {
+                return { start: groups[i].start, count: groups[i].count };
+            }
+        }
+
+        return { start: 0, count: uvAttr.count };
+    }
+
+    private getActiveUVBounds(): { minU: number; minV: number; maxU: number; maxV: number } | null {
+        if (!this.element) return null;
+        const geometry = this.element.mesh.geometry;
+        if (!geometry) return null;
+        const uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
+        if (!uvAttr) return null;
+
+        const { start, count } = this.getActiveGroupRange(uvAttr);
+        let minU = Infinity;
+        let minV = Infinity;
+        let maxU = -Infinity;
+        let maxV = -Infinity;
+
+        for (let i = start; i < start + count; i++) {
+            const u = uvAttr.getX(i);
+            const v = uvAttr.getY(i);
+            minU = Math.min(minU, u);
+            minV = Math.min(minV, v);
+            maxU = Math.max(maxU, u);
+            maxV = Math.max(maxV, v);
+        }
+
+        if (!isFinite(minU) || !isFinite(minV) || !isFinite(maxU) || !isFinite(maxV)) return null;
+        return { minU, minV, maxU, maxV };
     }
 
     private drawWireframeBounds(w: number, h: number): void {
@@ -426,10 +454,25 @@ export default class UVEditorPanel {
         this.dragStartTransform = { ...transform };
         this.dragStartX = mx;
         this.dragStartY = my;
+        this.dragStartUVBounds = null;
+        this.dragSourceUVBounds = null;
         this.history.beginAction('Edit UV Mapping');
 
         if (this.hitScaleHandle(mx, my)) {
             this.dragging = 'scale';
+
+            const bounds = this.getActiveUVBounds();
+            if (bounds) {
+                this.dragStartUVBounds = bounds;
+                const safeScaleX = Math.max(1e-8, this.dragStartTransform.scaleX);
+                const safeScaleY = Math.max(1e-8, this.dragStartTransform.scaleY);
+                this.dragSourceUVBounds = {
+                    minU: (bounds.minU - this.dragStartTransform.offsetX) / safeScaleX,
+                    maxU: (bounds.maxU - this.dragStartTransform.offsetX) / safeScaleX,
+                    minV: (bounds.minV - this.dragStartTransform.offsetY) / safeScaleY,
+                    maxV: (bounds.maxV - this.dragStartTransform.offsetY) / safeScaleY,
+                };
+            }
         } else {
             this.dragging = 'move';
         }
@@ -459,8 +502,29 @@ export default class UVEditorPanel {
             t.offsetX += dx;
             t.offsetY += dy;
         } else if (this.dragging === 'scale') {
-            t.scaleX = Math.max(0.1, this.dragStartTransform.scaleX - dx);
-            t.scaleY = Math.max(0.1, this.dragStartTransform.scaleY - dy);
+            if (this.dragStartUVBounds && this.dragSourceUVBounds) {
+                const sourceWidth = this.dragSourceUVBounds.maxU - this.dragSourceUVBounds.minU;
+                const sourceHeight = this.dragSourceUVBounds.maxV - this.dragSourceUVBounds.minV;
+
+                if (Math.abs(sourceWidth) > 1e-8) {
+                    const targetWidth = this.dragStartUVBounds.maxU + dx - this.dragStartUVBounds.minU;
+                    t.scaleX = Math.max(0.1, targetWidth / sourceWidth);
+                    t.offsetX = this.dragStartUVBounds.minU - this.dragSourceUVBounds.minU * t.scaleX;
+                } else {
+                    t.scaleX = Math.max(0.1, this.dragStartTransform.scaleX + dx);
+                }
+
+                if (Math.abs(sourceHeight) > 1e-8) {
+                    const targetHeight = this.dragStartUVBounds.maxV + dy - this.dragStartUVBounds.minV;
+                    t.scaleY = Math.max(0.1, targetHeight / sourceHeight);
+                    t.offsetY = this.dragStartUVBounds.minV - this.dragSourceUVBounds.minV * t.scaleY;
+                } else {
+                    t.scaleY = Math.max(0.1, this.dragStartTransform.scaleY + dy);
+                }
+            } else {
+                t.scaleX = Math.max(0.1, this.dragStartTransform.scaleX + dx);
+                t.scaleY = Math.max(0.1, this.dragStartTransform.scaleY + dy);
+            }
         }
 
         this.element.setUVTransform(this.activeGroup, t);
@@ -474,6 +538,8 @@ export default class UVEditorPanel {
             this.history.endAction('Edit UV Mapping');
         }
         this.dragging = null;
+        this.dragStartUVBounds = null;
+        this.dragSourceUVBounds = null;
     };
 
     private onHistoryRestored = (): void => {

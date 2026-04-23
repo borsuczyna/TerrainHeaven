@@ -36,6 +36,7 @@ export interface ElementData {
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
     textureRotations: Record<string, number>;
+    uvTransforms?: Record<string, UVTransform>;
     // Road-specific
     width?: number;
     lanes?: number;
@@ -46,6 +47,14 @@ export interface ElementData {
     roadCrown?: number;
     curvePointA?: { x: number; y: number; z: number } | null;
     curvePointB?: { x: number; y: number; z: number } | null;
+    bridgeEnabled?: boolean;
+    bridgePillarShape?: string;
+    bridgePillarSegments?: number;
+    bridgePillarDistance?: number;
+    bridgePillarCount?: number;
+    bridgePillarWidth?: number;
+    bridgePillarInset?: number;
+    bridgeDeckThickness?: number;
     // Intersection-specific
     length?: number;
     nodeCount?: number;

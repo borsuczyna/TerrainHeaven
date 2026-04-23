@@ -273,36 +273,6 @@ export default class Intersection extends WorldElement {
                     label: 'Textures',
                     properties: [
                         {
-                            type: 'number' as const,
-                            label: 'Tex Width',
-                            get: () => self.roadTexWidth,
-                            set: (v: number) => { self.roadTexWidth = Math.max(0.1, v); self.update(); },
-                            min: 0.1,
-                            step: 0.1,
-                        },
-                        {
-                            type: 'number' as const,
-                            label: 'Tex Height',
-                            get: () => self.roadTexHeight,
-                            set: (v: number) => { self.roadTexHeight = Math.max(0.1, v); self.update(); },
-                            min: 0.1,
-                            step: 0.1,
-                        },
-                        {
-                            type: 'number' as const,
-                            label: 'Offset X',
-                            get: () => self.roadTexOffsetX,
-                            set: (v: number) => { self.roadTexOffsetX = v; self.update(); },
-                            step: 0.1,
-                        },
-                        {
-                            type: 'number' as const,
-                            label: 'Offset Y',
-                            get: () => self.roadTexOffsetY,
-                            set: (v: number) => { self.roadTexOffsetY = v; self.update(); },
-                            step: 0.1,
-                        },
-                        {
                             type: 'select' as const,
                             label: 'Road Rot.',
                             options: [

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { container } from 'tsyringe';
-import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle } from './WorldElement';
+import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle, type UVTransform } from './WorldElement';
 import Triangle from './Vertex';
 import type { PropertyDefinition } from '../editor/Properties';
 import BooleanManager from '../editor/BooleanManager';
@@ -13,6 +13,7 @@ export default class Terrain extends WorldElement {
     public length: number;
     public gridEnabled: boolean = false;
     public gridSize: number = 1;
+    private terrainUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 
     constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
         super();
@@ -44,6 +45,36 @@ export default class Terrain extends WorldElement {
         };
     }
 
+    public override getUVGroups(): string[] {
+        return ['terrain'];
+    }
+
+    public override getUVTransform(group: string): UVTransform {
+        if (group === 'terrain') {
+            return {
+                offsetX: this.terrainUV.offsetX,
+                offsetY: this.terrainUV.offsetY,
+                scaleX: this.terrainUV.scaleX,
+                scaleY: this.terrainUV.scaleY,
+            };
+        }
+        return super.getUVTransform(group);
+    }
+
+    public override setUVTransform(group: string, t: UVTransform): void {
+        if (group === 'terrain') {
+            this.terrainUV = {
+                offsetX: Number.isFinite(t.offsetX) ? t.offsetX : 0,
+                offsetY: Number.isFinite(t.offsetY) ? t.offsetY : 0,
+                scaleX: Number.isFinite(t.scaleX) ? Math.max(0.1, t.scaleX) : 1,
+                scaleY: Number.isFinite(t.scaleY) ? Math.max(0.1, t.scaleY) : 1,
+            };
+            this.update();
+            return;
+        }
+        super.setUVTransform(group, t);
+    }
+
     public override getOccupiedArea(): OccupiedTriangle[] {
         const hw = this.width / 2;
         const hh = this.length / 2;
@@ -66,6 +97,14 @@ export default class Terrain extends WorldElement {
             nodes: [{ x: this.center.x, y: this.center.y, z: this.center.z }],
             textures,
             textureRotations,
+            uvTransforms: {
+                terrain: {
+                    offsetX: this.terrainUV.offsetX,
+                    offsetY: this.terrainUV.offsetY,
+                    scaleX: this.terrainUV.scaleX,
+                    scaleY: this.terrainUV.scaleY,
+                },
+            },
             terrainWidth: this.width,
             terrainLength: this.length,
             terrainGridEnabled: this.gridEnabled,
@@ -82,6 +121,10 @@ export default class Terrain extends WorldElement {
         );
         terrain.gridEnabled = ed.terrainGridEnabled ?? false;
         terrain.gridSize = Math.max(0.01, ed.terrainGridSize ?? 1);
+        const terrainUV = ed.uvTransforms?.terrain;
+        if (terrainUV) {
+            terrain.setUVTransform('terrain', terrainUV);
+        }
         return terrain;
     }
 
@@ -170,14 +213,22 @@ export default class Terrain extends WorldElement {
         const triangles: Triangle[] = [];
         const w = Math.max(0.0001, this.width);
         const l = Math.max(0.0001, this.length);
+        const uv = this.terrainUV;
         for (const tri of refinedArea) {
             const a = tri.a.clone();
             const b = tri.b.clone();
             const c = tri.c.clone();
 
-            const uvA = new THREE.Vector2((tri.a.x - this.center.x) / w + 0.5, (tri.a.z - this.center.z) / l + 0.5);
-            const uvB = new THREE.Vector2((tri.b.x - this.center.x) / w + 0.5, (tri.b.z - this.center.z) / l + 0.5);
-            const uvC = new THREE.Vector2((tri.c.x - this.center.x) / w + 0.5, (tri.c.z - this.center.z) / l + 0.5);
+            const baseUA = (tri.a.x - this.center.x) / w + 0.5;
+            const baseVA = (tri.a.z - this.center.z) / l + 0.5;
+            const baseUB = (tri.b.x - this.center.x) / w + 0.5;
+            const baseVB = (tri.b.z - this.center.z) / l + 0.5;
+            const baseUC = (tri.c.x - this.center.x) / w + 0.5;
+            const baseVC = (tri.c.z - this.center.z) / l + 0.5;
+
+            const uvA = new THREE.Vector2(baseUA * uv.scaleX + uv.offsetX, baseVA * uv.scaleY + uv.offsetY);
+            const uvB = new THREE.Vector2(baseUB * uv.scaleX + uv.offsetX, baseVB * uv.scaleY + uv.offsetY);
+            const uvC = new THREE.Vector2(baseUC * uv.scaleX + uv.offsetX, baseVC * uv.scaleY + uv.offsetY);
             triangles.push(new Triangle(a, b, c, uvA, uvB, uvC));
         }
 

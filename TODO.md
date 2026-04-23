@@ -31,7 +31,7 @@ Make sure code is perfect, so you need to refactor a little bit ToolManager and 
 
 [x] Add transparent history on bottom right, possible to fold (only header visible when folded), add CTRL + Z/Y, implement it everywhere in the project, make HistoryManager for it
 
-[ ] Add bridge with pillars, pillars should be possible to select shape (box, circular; circular with segment count changing), pillars should reach the terrain flawlessly, it should be possible to change pillars distance and count, for example 1 - just one on center, 2 - on both sides, 3 - one on center and on sides, to make it easier and easier for users, make it option for road, not new WorldElement
+[x] Add bridge with pillars, pillars should be possible to select shape (box, circular; circular with segment count changing), pillars should reach the terrain flawlessly, it should be possible to change pillars distance and count, for example 1 - just one on center, 2 - on both sides, 3 - one on center and on sides, to make it easier and easier for users, make it option for road, not new WorldElement
 
 [ ] Tunnels - they should cut the terrain, to make it easier and easier for users, make it option for road, not new WorldElement
 

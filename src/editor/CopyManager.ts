@@ -4,6 +4,7 @@ import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
 import type WorldElement from '../elements/WorldElement';
+import type { UVTransform } from '../elements/WorldElement';
 import type SceneManager from './SceneManager';
 import type { PropertyDefinition } from './Properties';
 
@@ -15,6 +16,7 @@ export default class CopyManager {
     private sourceType: string | null = null;
     private propsSnapshot: Map<string, any> | null = null;
     private texturesSnapshot: Map<string, THREE.Texture> | null = null;
+    private uvTransformsSnapshot: Map<string, UVTransform> | null = null;
 
     // Road-specific
     private roadLength: number | null = null;
@@ -33,6 +35,7 @@ export default class CopyManager {
         this.sourceType = element.constructor.name;
         this.snapshotProperties(element);
         this.snapshotTextures(element);
+        this.snapshotUVTransforms(element);
 
         if (element instanceof Road) {
             const a = element.nodeA.mesh.position;
@@ -63,6 +66,7 @@ export default class CopyManager {
         this.sourceType = element.constructor.name;
         this.snapshotProperties(element);
         this.snapshotTextures(element);
+        this.snapshotUVTransforms(element);
         this.roadLength = null;
         this.roadDirection = null;
         this.intersectionNodeCount = null;
@@ -158,6 +162,19 @@ export default class CopyManager {
         }
     }
 
+    private snapshotUVTransforms(element: WorldElement): void {
+        this.uvTransformsSnapshot = new Map();
+        for (const groupName of element.getUVGroups()) {
+            const t = element.getUVTransform(groupName);
+            this.uvTransformsSnapshot.set(groupName, {
+                offsetX: t.offsetX,
+                offsetY: t.offsetY,
+                scaleX: t.scaleX,
+                scaleY: t.scaleY,
+            });
+        }
+    }
+
     private applySnapshot(element: WorldElement, def: PropertyDefinition): void {
         if (this.propsSnapshot) {
             for (const section of def.sections) {
@@ -172,6 +189,18 @@ export default class CopyManager {
         if (this.texturesSnapshot) {
             for (const [groupName, tex] of this.texturesSnapshot) {
                 element.setGroupTexture(groupName, tex);
+            }
+        }
+        if (this.uvTransformsSnapshot) {
+            const targetGroups = new Set(element.getUVGroups());
+            for (const [groupName, t] of this.uvTransformsSnapshot) {
+                if (!targetGroups.has(groupName)) continue;
+                element.setUVTransform(groupName, {
+                    offsetX: t.offsetX,
+                    offsetY: t.offsetY,
+                    scaleX: t.scaleX,
+                    scaleY: t.scaleY,
+                });
             }
         }
     }
