@@ -44,3 +44,6 @@ Make sure code is perfect, so you need to refactor a little bit ToolManager and 
 [ ] Del or backspace to delete (only for WorldElements)
 
 [ ] Add box selection and change camera movement to right button
+
+Important:
+[ ] When two points are very close to each other but on different Y, cutout on terrain is wrong, it uses most of the time one with higher Y, it should do cutout on all points not skipping any
