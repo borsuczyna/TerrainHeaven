@@ -3,7 +3,7 @@
     right: 12px;
     top: 108px;
     bottom: 12px;
-    width: 310px;
+    width: 360px;
     display: none;
     flex-direction: column;
     overflow: hidden;
@@ -19,8 +19,9 @@
 #foliage-panel.visible { display: flex; }
 
 body:has(#foliage-panel.visible) #view-gizmo,
-body:has(#foliage-panel.visible) #history-panel {
-    right: 350px;
+body:has(#foliage-panel.visible) #history-panel,
+body:has(#foliage-panel.visible) #transform-toolbar {
+    right: 390px;
 }
 
 .foliage-header {
@@ -38,7 +39,14 @@ body:has(#foliage-panel.visible) #history-panel {
 .foliage-close:hover { background: rgba(255,255,255,.13); color: white; }
 .foliage-close svg { width: 15px; }
 
+.foliage-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.foliage-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; height: 34px; border: 0; border-radius: 7px; background: transparent; color: #858e99; cursor: pointer; font-weight: 650; }
+.foliage-tabs button:hover { color: #dce4ed; background: rgba(255,255,255,.05); }
+.foliage-tabs button.active { color: #8dc7ff; background: rgba(74,157,238,.15); }
+.foliage-tabs svg { width: 14px; }
 .foliage-body { padding: 12px; overflow: auto; }
+.foliage-tab-view { display: none; }
+.foliage-tab-view.active { display: block; }
 .foliage-toggle { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 9px; background: rgba(79, 168, 255, .12); color: #e9f4ff; font-weight: 650; }
 .foliage-toggle input, .foliage-type input { accent-color: #57aaff; }
 .foliage-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.07); }
@@ -52,7 +60,7 @@ body:has(#foliage-panel.visible) #history-panel {
 .foliage-type:hover { background: rgba(255,255,255,.07); }
 .foliage-type.selected { border-color: rgba(87,170,255,.4); background: rgba(87,170,255,.1); }
 .foliage-preview { width: 38px; height: 38px; border-radius: 7px; background-size: cover !important; background-position: center !important; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
-.foliage-type-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.foliage-type-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .foliage-type-copy strong, .foliage-type-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .foliage-type-copy strong { color: #e7eaee; font-size: 11px; }
 .foliage-type-copy small { color: #747e8b; font-size: 9px; }
@@ -60,9 +68,42 @@ body:has(#foliage-panel.visible) #history-panel {
 .foliage-help svg { flex: 0 0 auto; width: 16px; color: #62b0f5; }
 .foliage-help b { color: #cbd3dd; }
 
+.foliage-preset-actions { display: grid; grid-template-columns: 1fr 36px 36px; gap: 6px; margin-bottom: 9px; }
+.foliage-preset-actions button, .foliage-empty button, .foliage-library-link { min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(87,170,255,.28); border-radius: 7px; background: rgba(87,170,255,.12); color: #a8d4ff; cursor: pointer; font-weight: 650; }
+.foliage-preset-actions button:hover, .foliage-empty button:hover, .foliage-library-link:hover { background: rgba(87,170,255,.2); color: white; }
+.foliage-preset-actions button:disabled { opacity: .35; cursor: default; }
+.foliage-preset-actions button.danger:not(:disabled):hover { border-color: rgba(255,90,90,.35); background: rgba(255,70,70,.15); color: #ff8d8d; }
+.foliage-preset-actions svg, .foliage-library-link svg { width: 14px; }
+.foliage-preset-list { display: flex; gap: 6px; padding-bottom: 10px; overflow-x: auto; }
+.foliage-preset-row { flex: 0 0 150px; min-width: 0; display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 8px; padding: 6px; border: 1px solid transparent; border-radius: 8px; background: rgba(255,255,255,.035); color: inherit; text-align: left; cursor: pointer; }
+.foliage-preset-row:hover { background: rgba(255,255,255,.07); }
+.foliage-preset-row.active { border-color: rgba(87,170,255,.45); background: rgba(87,170,255,.1); }
+.foliage-preset-row .foliage-preview { width: 34px; height: 34px; }
+.foliage-preset-row > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.foliage-preset-row strong, .foliage-preset-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foliage-preset-row strong { color: #e8edf3; font-size: 10px; }
+.foliage-preset-row small { color: #747e8b; font-size: 8px; }
+.foliage-preset-editor { border-top: 1px solid rgba(255,255,255,.08); }
+.foliage-inspector-section { padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+.foliage-inspector-section h3 { margin: 0 0 9px; color: #eef2f6; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+.foliage-inspector-section label { display: grid; grid-template-columns: 1fr 170px; align-items: center; gap: 10px; margin: 6px 0; color: #9fa8b4; }
+.foliage-inspector-section input:not([type="checkbox"]), .foliage-inspector-section select { width: 100%; min-height: 30px; box-sizing: border-box; padding: 5px 7px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; outline: none; background: #181a1e; color: #e8ebef; }
+.foliage-inspector-section input[type="color"] { padding: 2px; cursor: pointer; }
+.foliage-inspector-section input:focus, .foliage-inspector-section select:focus { border-color: #4c9eea; box-shadow: 0 0 0 2px rgba(76,158,234,.14); }
+.foliage-inspector-section .foliage-check input { justify-self: end; }
+.foliage-library-link { width: 170px; margin: 7px 0 0 auto; border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.04); color: #aeb7c2; font-size: 10px; }
+.foliage-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 14px; border: 1px dashed rgba(255,255,255,.1); border-radius: 9px; color: #747e8a; text-align: center; }
+.foliage-empty > svg { width: 22px; color: #619acb; }
+.foliage-empty strong { color: #cbd2db; }
+.foliage-empty span { font-size: 10px; }
+.foliage-empty button { margin-top: 5px; padding: 0 14px; }
+
 @media (max-width: 800px) {
     #foliage-panel { width: 280px; }
 
     body:has(#foliage-panel.visible) #view-gizmo { display: none; }
     body:has(#foliage-panel.visible) #history-panel { right: 14px; }
+    body:has(#foliage-panel.visible) #transform-toolbar { right: 310px; }
+    .foliage-inspector-section label { grid-template-columns: 1fr 130px; }
+    .foliage-library-link { width: 130px; }
 }

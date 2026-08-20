@@ -39,6 +39,22 @@ export default class FoliageManager {
         this.store.addInstance(typeIndex, instance);
     }
 
+    public addType(type?: FoliageTypeData): number {
+        return this.store.addType(type);
+    }
+
+    public duplicateType(typeIndex: number): number {
+        return this.store.duplicateType(typeIndex);
+    }
+
+    public updateType(typeIndex: number, patch: Partial<FoliageTypeData>): void {
+        this.store.updateType(typeIndex, patch);
+    }
+
+    public removeType(typeIndex: number): boolean {
+        return this.store.removeType(typeIndex);
+    }
+
     public isTooClose(typeIndex: number, point: FoliageVector3, spacing: number): boolean {
         return this.store.isTooClose(typeIndex, point, spacing);
     }
@@ -75,6 +91,8 @@ export default class FoliageManager {
             (mesh.material as THREE.Material).dispose();
         }
         this.meshes.clear();
+        for (const texture of this.fallbackTextures.values()) texture.dispose();
+        this.fallbackTextures.clear();
 
         for (let typeIndex = 0; typeIndex < this.types.length; typeIndex++) {
             const instances = this.getInstances(typeIndex);
@@ -112,6 +130,7 @@ export default class FoliageManager {
             this.root.add(mesh);
             this.meshes.set(typeIndex, mesh);
 
+            if (!type.TexturePath) continue;
             void this.textureLibrary.loadTexture(type.TexturePath).then((texture) => {
                 if (!texture || this.meshes.get(typeIndex) !== mesh) return;
                 texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -120,6 +139,7 @@ export default class FoliageManager {
                 material.map = texture;
                 material.alphaMap = null;
                 material.color.setHex(0xffffff);
+                material.vertexColors = true;
                 material.alphaTest = type.AlphaCutoff;
                 material.needsUpdate = true;
             });
@@ -127,9 +147,8 @@ export default class FoliageManager {
     }
 
     private createMaterial(typeIndex: number, type: FoliageTypeData): THREE.MeshBasicMaterial {
-        const fallbackColor = type.DisplayName.includes('Blue') ? 0x547fce
-            : type.DisplayName.includes('Daisy') ? 0xded2a4
-                : type.DisplayName.includes('Bush') ? 0x477c38 : 0x6f9a3d;
+        const fallbackColor = new THREE.Color(type.ColorA.r, type.ColorA.g, type.ColorA.b)
+            .lerp(new THREE.Color(type.ColorB.r, type.ColorB.g, type.ColorB.b), 0.5);
         return new THREE.MeshBasicMaterial({
             alphaMap: this.getFallbackTexture(typeIndex, type),
             color: fallbackColor,
@@ -157,30 +176,18 @@ export default class FoliageManager {
         const accent = new THREE.Color(type.ColorB.r, type.ColorB.g, type.ColorB.b);
         context.fillStyle = `#${primary.getHexString()}`;
 
-        if (type.DisplayName.includes('Grass')) {
-            for (let blade = 0; blade < 9; blade++) {
-                const x = 8 + blade * 6;
-                context.beginPath();
-                context.moveTo(32, 64);
-                context.quadraticCurveTo(x, 38, x + (blade % 2 ? 4 : -4), 4 + (blade % 3) * 8);
-                context.lineWidth = 4;
-                context.strokeStyle = blade % 2 ? `#${accent.getHexString()}` : `#${primary.getHexString()}`;
-                context.stroke();
-            }
-        } else {
-            for (let leaf = 0; leaf < 14; leaf++) {
-                const angle = leaf * 2.399;
-                const radius = 5 + (leaf % 5) * 5;
-                const x = 32 + Math.cos(angle) * radius;
-                const y = 38 + Math.sin(angle) * radius * 0.75;
-                context.beginPath();
-                context.ellipse(x, y, 7, 11, angle, 0, Math.PI * 2);
-                context.fillStyle = leaf % 2 ? `#${accent.getHexString()}` : `#${primary.getHexString()}`;
-                context.fill();
-            }
-            context.fillStyle = `#${primary.getHexString()}`;
-            context.fillRect(29, 35, 6, 29);
+        for (let leaf = 0; leaf < 14; leaf++) {
+            const angle = leaf * 2.399;
+            const radius = 5 + (leaf % 5) * 5;
+            const x = 32 + Math.cos(angle) * radius;
+            const y = 38 + Math.sin(angle) * radius * 0.75;
+            context.beginPath();
+            context.ellipse(x, y, 7, 11, angle, 0, Math.PI * 2);
+            context.fillStyle = leaf % 2 ? `#${accent.getHexString()}` : `#${primary.getHexString()}`;
+            context.fill();
         }
+        context.fillStyle = `#${primary.getHexString()}`;
+        context.fillRect(29, 35, 6, 29);
 
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;

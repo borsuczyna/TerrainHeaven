@@ -11,8 +11,7 @@ export interface FoliageColor {
     a: number;
 }
 
-// Field names intentionally mirror SummerHideout.Foliage.FoliageInstanceData.
-// An exporter can copy these records without translating their meaning.
+// Export-ready Unity contract: records can be copied without translating their meaning.
 export interface FoliageInstanceData {
     Position: FoliageVector3;
     RotationY: number;
@@ -21,8 +20,8 @@ export interface FoliageInstanceData {
     TypeIndex: number;
 }
 
-// Mirrors SummerHideout.Foliage.FoliageType. TexturePath is the portable asset
-// reference that a future Unity exporter will resolve to a Texture2D.
+// TexturePath is the portable asset reference that a future Unity exporter
+// will resolve to a Texture2D.
 export interface FoliageTypeData {
     DisplayName: string;
     TexturePath: string;
@@ -49,71 +48,23 @@ export interface FoliageProjectData {
     Layers: FoliageTypeLayerData[];
 }
 
-const color = (r: number, g: number, b: number): FoliageColor => ({ r, g, b, a: 1 });
+const color = (value: number): FoliageColor => ({ r: value, g: value, b: value, a: 1 });
 
-// Values copied from Summer Hideout/Assets/Definitions/Foliage*.asset in database order.
-export const SUMMER_HIDEOUT_FOLIAGE_TYPES: FoliageTypeData[] = [
-    {
-        DisplayName: 'Grass Yellow',
-        TexturePath: 'grass-plant-yellow.png',
-        MinSize: 0.44,
-        MaxSize: 1.08,
-        LengthFactor: 1,
-        ColorA: color(1, 1, 1),
-        ColorB: color(1, 0.83631414, 0.5803922),
-        WindEffectiveness: 0.1,
-        WindHeightOffset: 1,
-        WindBaseOffset: 0,
-        MaxDrawDistance: 40,
-        AlphaCutoff: 0.5,
-        CastShadows: false,
-    },
-    {
-        DisplayName: 'Bush',
-        TexturePath: 'bush.png',
-        MinSize: 0.67,
-        MaxSize: 2.04,
-        LengthFactor: 1,
-        ColorA: color(1, 0.7821041, 0.514151),
-        ColorB: color(1, 1, 1),
-        WindEffectiveness: 0.1,
-        WindHeightOffset: 1,
-        WindBaseOffset: 0,
-        MaxDrawDistance: 40,
-        AlphaCutoff: 0.5,
-        CastShadows: false,
-    },
-    {
-        DisplayName: 'Blue Flowers',
-        TexturePath: 'blue-flowers.png',
-        MinSize: 0.58,
-        MaxSize: 0.8,
-        LengthFactor: 2.43,
-        ColorA: color(1, 0.71863925, 0.3726415),
-        ColorB: color(1, 0.7208102, 0.3915094),
-        WindEffectiveness: 0.1,
-        WindHeightOffset: 1,
-        WindBaseOffset: 0,
-        MaxDrawDistance: 40,
-        AlphaCutoff: 0.5,
-        CastShadows: false,
-    },
-    {
-        DisplayName: 'Wild Daisy',
-        TexturePath: 'wild_daisy_bush.png',
-        MinSize: 0.04,
-        MaxSize: 1.05,
-        LengthFactor: 1.16,
-        ColorA: color(0.5754717, 0.44303754, 0.26330546),
-        ColorB: color(0.7924528, 0.71686244, 0.55695975),
-        WindEffectiveness: 0.5,
-        WindHeightOffset: 1,
-        WindBaseOffset: 0,
-        MaxDrawDistance: 40,
-        AlphaCutoff: 0.5,
-        CastShadows: false,
-    },
-];
+export const createDefaultFoliageType = (displayName = 'New Foliage'): FoliageTypeData => ({
+    DisplayName: displayName,
+    TexturePath: '',
+    MinSize: 0.5,
+    MaxSize: 1,
+    LengthFactor: 1,
+    ColorA: color(1),
+    ColorB: color(1),
+    WindEffectiveness: 0.1,
+    WindHeightOffset: 1,
+    WindBaseOffset: 0,
+    MaxDrawDistance: 40,
+    AlphaCutoff: 0.5,
+    CastShadows: false,
+});
 
 export const cloneFoliageTypes = (types: FoliageTypeData[]): FoliageTypeData[] => (
     types.map((type) => ({
@@ -127,9 +78,42 @@ export class FoliageStore {
     public types: FoliageTypeData[];
     private layers: FoliageTypeLayerData[];
 
-    constructor(types = SUMMER_HIDEOUT_FOLIAGE_TYPES) {
+    constructor(types: FoliageTypeData[] = []) {
         this.types = cloneFoliageTypes(types);
         this.layers = this.types.map(() => ({ Instances: [] }));
+    }
+
+    public addType(type = createDefaultFoliageType()): number {
+        this.types.push(cloneFoliageTypes([type])[0]);
+        this.layers.push({ Instances: [] });
+        return this.types.length - 1;
+    }
+
+    public duplicateType(typeIndex: number): number {
+        const source = this.types[typeIndex];
+        if (!source) return -1;
+        return this.addType({ ...source, DisplayName: `${source.DisplayName} Copy` });
+    }
+
+    public updateType(typeIndex: number, patch: Partial<FoliageTypeData>): void {
+        const type = this.types[typeIndex];
+        if (!type) return;
+        this.types[typeIndex] = {
+            ...type,
+            ...patch,
+            ColorA: patch.ColorA ? { ...patch.ColorA } : type.ColorA,
+            ColorB: patch.ColorB ? { ...patch.ColorB } : type.ColorB,
+        };
+    }
+
+    public removeType(typeIndex: number): boolean {
+        if (!this.types[typeIndex]) return false;
+        this.types.splice(typeIndex, 1);
+        this.layers.splice(typeIndex, 1);
+        for (let index = typeIndex; index < this.layers.length; index++) {
+            for (const instance of this.layers[index].Instances) instance.TypeIndex = index;
+        }
+        return true;
     }
 
     public getInstances(typeIndex: number): readonly FoliageInstanceData[] {
@@ -187,11 +171,11 @@ export class FoliageStore {
 
     public load(data?: FoliageProjectData): void {
         if (!data) {
-            this.types = cloneFoliageTypes(SUMMER_HIDEOUT_FOLIAGE_TYPES);
+            this.types = [];
             this.clear();
             return;
         }
-        this.types = cloneFoliageTypes(data.Types ?? SUMMER_HIDEOUT_FOLIAGE_TYPES);
+        this.types = cloneFoliageTypes(data.Types ?? []);
         this.layers = this.types.map((_, index) => ({
             Instances: (data.Layers?.[index]?.Instances ?? []).map((instance) => ({
                 Position: { ...instance.Position },

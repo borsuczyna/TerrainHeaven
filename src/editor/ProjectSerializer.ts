@@ -90,7 +90,7 @@ export default class ProjectSerializer {
             texturePaths: [...new Set([
                 ...elementDataList.flatMap((element) => Object.values(element.textures)),
                 ...foliage.Types.map((type) => type.TexturePath),
-            ])],
+            ].filter(Boolean))],
             foliage,
         };
 
