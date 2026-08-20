@@ -18,7 +18,7 @@ export default class TerrainCutPointManager {
         node.mesh.userData.terrainCutPoint = true;
         this.cutPoints.push(node);
         this.scene.instance.add(node.mesh);
-        this.scene.update();
+        this.scene.markTerrainDirty();
         return node;
     }
 
@@ -27,14 +27,17 @@ export default class TerrainCutPointManager {
         if (index < 0) return;
         this.cutPoints.splice(index, 1);
         this.scene.instance.remove(node.mesh);
-        this.scene.update();
+        node.dispose();
+        this.scene.markTerrainDirty();
     }
 
     public clear(): void {
         for (const node of this.cutPoints) {
             this.scene.instance.remove(node.mesh);
+            node.dispose();
         }
         this.cutPoints.length = 0;
+        this.scene.markTerrainDirty();
     }
 
     public getPoints(): WorldNode[] {
@@ -57,7 +60,7 @@ export default class TerrainCutPointManager {
             this.cutPoints.push(node);
             this.scene.instance.add(node.mesh);
         }
-        this.scene.update();
+        this.scene.markTerrainDirty();
     }
 
     public isCutPoint(node: WorldNode): boolean {
@@ -76,7 +79,7 @@ export default class TerrainCutPointManager {
                         type: 'vector3',
                         label: 'Position',
                         get: () => node.mesh.position.clone(),
-                        set: (value: THREE.Vector3) => { node.update(value); this.scene.update(); },
+                        set: (value: THREE.Vector3) => { node.update(value); this.scene.markTerrainDirty(); },
                     },
                     {
                         type: 'button',

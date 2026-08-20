@@ -1,12 +1,10 @@
 ﻿import * as THREE from 'three';
-import { singleton, inject } from 'tsyringe';
+import { singleton } from 'tsyringe';
 import type GizmoManager from './GizmoManager';
-import ToolManager from './ToolManager';
 
 @singleton()
 export default class Camera {
     public readonly instance: THREE.PerspectiveCamera;
-    private readonly toolManager: ToolManager;
     private gizmo: GizmoManager | null = null;
 
     private keys = new Set<string>();
@@ -16,8 +14,7 @@ export default class Camera {
     private yaw = -Math.PI / 2;
     private isDragging = false;
 
-    constructor(@inject(ToolManager) toolManager: ToolManager) {
-        this.toolManager = toolManager;
+    constructor() {
         this.instance = new THREE.PerspectiveCamera(
             75,
             window.innerWidth / window.innerHeight,
@@ -37,6 +34,7 @@ export default class Camera {
         window.addEventListener('mousemove', this.onMouseMove);
         window.addEventListener('mousedown', this.onMouseDown);
         window.addEventListener('mouseup', this.onMouseUp);
+        window.addEventListener('contextmenu', this.onContextMenu);
         window.addEventListener('resize', this.onResize);
     }
 
@@ -49,10 +47,10 @@ export default class Camera {
     };
 
     private onMouseDown = (e: MouseEvent): void => {
-        if (e.button !== 0) return;
+        if (e.button !== 2) return;
         if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
-        if (this.toolManager.getActive()?.blocksCamera) return;
         if (this.gizmo?.isDragging) return;
+        e.preventDefault();
         this.isDragging = true;
     };
 
@@ -61,8 +59,14 @@ export default class Camera {
     }
 
     private onMouseUp = (e: MouseEvent): void => {
-        if (e.button !== 0) return;
+        if (e.button !== 2) return;
         this.isDragging = false;
+    };
+
+    private onContextMenu = (e: MouseEvent): void => {
+        if ((e.target as HTMLElement).tagName === 'CANVAS') {
+            e.preventDefault();
+        }
     };
 
     private onMouseMove = (e: MouseEvent): void => {
@@ -121,6 +125,7 @@ export default class Camera {
         window.removeEventListener('mousemove', this.onMouseMove);
         window.removeEventListener('mousedown', this.onMouseDown);
         window.removeEventListener('mouseup', this.onMouseUp);
+        window.removeEventListener('contextmenu', this.onContextMenu);
         window.removeEventListener('resize', this.onResize);
     }
 }

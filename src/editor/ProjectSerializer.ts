@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { singleton, inject } from 'tsyringe';
 import SceneManager from './SceneManager';
 import type { ProjectSettingsData } from './ProjectSettings';
@@ -9,6 +8,7 @@ import Terrain from '../elements/Terrain.ts';
 import type WorldElement from '../elements/WorldElement';
 import type { ElementData } from '../elements/WorldElement';
 import TerrainCutPointManager from './TerrainCutPointManager';
+import TextureLibrary from './TextureLibrary';
 
 interface ConnectionData {
     elementA: number;
@@ -23,6 +23,7 @@ interface ProjectData {
     elements: ElementData[];
     connections: ConnectionData[];
     terrainCutPoints?: { x: number; y: number; z: number }[];
+    texturePaths?: string[];
 }
 
 @singleton()
@@ -34,9 +35,11 @@ export default class ProjectSerializer {
         @inject(SceneManager) scene: SceneManager,
         @inject(ProjectSettings) settings: ProjectSettings,
         @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
+        @inject(TextureLibrary) private readonly textureLibrary: TextureLibrary,
     ) {
         this.scene = scene;
         this.settings = settings;
+        this.textureLibrary.onAssetAvailable = (path) => this.reloadTexturePath(path);
     }
 
     public save(): string {
@@ -74,6 +77,7 @@ export default class ProjectSerializer {
             elements: elementDataList,
             connections,
             terrainCutPoints: this.terrainCutPoints.serialize(),
+            texturePaths: [...new Set(elementDataList.flatMap((element) => Object.values(element.textures)))],
         };
 
         return JSON.stringify(projectData, null, 2);
@@ -89,6 +93,10 @@ export default class ProjectSerializer {
 
         // Load settings
         this.settings.loadData(data.settings);
+        const texturePaths = data.elements.flatMap((element) =>
+            Object.values(element.textures ?? {}).map((path) => this.normalizeProjectTexturePath(path)),
+        );
+        void this.textureLibrary.setProjectReferences(texturePaths);
 
         // Create elements
         const elements: WorldElement[] = [];
@@ -102,8 +110,11 @@ export default class ProjectSerializer {
                 el = Terrain.deserialize(ed);
             }
             if (!el) continue;
-            this.loadTextures(el, ed.textures, ed.textureRotations);
-            this.scene.add(el);
+            const textureReferences = Object.fromEntries(
+                Object.entries(ed.textures ?? {}).map(([groupName, path]) => [groupName, this.normalizeProjectTexturePath(path)]),
+            );
+            this.loadTextures(el, textureReferences, ed.textureRotations);
+            this.scene.add(el, false);
             elements.push(el);
         }
 
@@ -123,17 +134,43 @@ export default class ProjectSerializer {
     }
 
     private loadTextures(element: WorldElement, textures: Record<string, string>, rotations: Record<string, number>): void {
-        const loader = new THREE.TextureLoader();
-        for (const [groupName, url] of Object.entries(textures)) {
-            loader.load(url, (tex) => {
-                tex.wrapS = THREE.RepeatWrapping;
-                tex.wrapT = THREE.RepeatWrapping;
-                tex.colorSpace = THREE.SRGBColorSpace;
-                element.setGroupTexture(groupName, tex);
+        for (const [groupName, path] of Object.entries(textures)) {
+            element.setGroupTextureReference(groupName, path);
+            void this.textureLibrary.loadTexture(path).then((texture) => {
+                if (texture) element.setGroupTexture(groupName, texture, path);
             });
         }
         for (const [groupName, deg] of Object.entries(rotations)) {
             element.textureRotations.set(groupName, deg);
+        }
+    }
+
+    private reloadTexturePath(path: string): void {
+        for (const element of this.scene.getElements()) {
+            for (const [groupName, sourcePath] of element.getGroupTextureReferences()) {
+                if (sourcePath !== path) continue;
+                void this.textureLibrary.loadTexture(path).then((texture) => {
+                    if (texture) element.setGroupTexture(groupName, texture, path);
+                });
+            }
+        }
+    }
+
+    private normalizeProjectTexturePath(source: string): string {
+        if (source.startsWith('data:')) {
+            let hash = 2166136261;
+            for (let index = 0; index < source.length; index++) {
+                hash ^= source.charCodeAt(index);
+                hash = Math.imul(hash, 16777619);
+            }
+            return `legacy-texture-${(hash >>> 0).toString(16)}.png`;
+        }
+
+        try {
+            const url = new URL(source);
+            return decodeURIComponent(url.pathname.split('/').pop() || 'texture.png');
+        } catch {
+            return source.replace(/\\/g, '/').replace(/^\.\//, '');
         }
     }
 }

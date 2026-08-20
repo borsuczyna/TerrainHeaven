@@ -84,8 +84,10 @@ export default abstract class WorldElement {
     protected nodes: WorldNode[] = [];
     public connections: Map<number, Connection> = new Map();
     public onPropertiesChanged: (() => void) | null = null;
+    public onGeometryChanged: (() => void) | null = null;
     private groupNames: string[] = [];
     private groupTextures: Map<string, THREE.Texture> = new Map();
+    private groupTexturePaths: Map<string, string> = new Map();
     public textureRotations: Map<string, number> = new Map();
     private isSelected: boolean = false;
 
@@ -221,8 +223,8 @@ export default abstract class WorldElement {
         const textureRotations: Record<string, number> = {};
         for (const groupName of this.getGroupNames()) {
             const tex = this.getGroupTexture(groupName);
-            const src = tex?.image instanceof HTMLImageElement ? tex.image.src : undefined;
-            if (src) textures[groupName] = src;
+            const sourcePath = this.groupTexturePaths.get(groupName) ?? tex?.userData.sourcePath;
+            if (typeof sourcePath === 'string' && sourcePath) textures[groupName] = sourcePath;
             const rot = this.textureRotations.get(groupName);
             if (rot) textureRotations[groupName] = rot;
         }
@@ -243,6 +245,8 @@ export default abstract class WorldElement {
     public getWidth(): number { return 0; }
     public getSidewalkWidth(): number { return 0; }
     public getCurbHeight(): number { return 0; }
+    public isTerrainSurface(): boolean { return false; }
+    public dependsOnTerrainSurface(): boolean { return false; }
 
     public getResolvedHalfWidth(index: number): number {
         const conn = this.connections.get(index);
@@ -402,6 +406,24 @@ export default abstract class WorldElement {
     public update(): void {
         const groups = this.getGeometry();
         this.setGeometry(groups);
+        this.onGeometryChanged?.();
+    }
+
+    public dispose(): void {
+        container.resolve(WireframeManager).unregister(this.mesh);
+        this.mesh.geometry.dispose();
+        const materials = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+        for (const material of materials) material.dispose();
+        for (const texture of new Set(this.groupTextures.values())) texture.dispose();
+        this.groupTextures.clear();
+        this.groupTexturePaths.clear();
+
+        const nodes = new Set(this.getChildWorldNodes());
+        for (const node of nodes) node.dispose();
+        this.nodes = [];
+        this.connections.clear();
+        this.onPropertiesChanged = null;
+        this.onGeometryChanged = null;
     }
 
     protected abstract getGeometry(): GeometryGroup[];
@@ -422,12 +444,26 @@ export default abstract class WorldElement {
         return this.groupTextures.get(groupName);
     }
 
+    public setGroupTextureReference(groupName: string, sourcePath: string): void {
+        if (sourcePath) this.groupTexturePaths.set(groupName, sourcePath);
+    }
+
+    public getGroupTextureReferences(): ReadonlyMap<string, string> {
+        return this.groupTexturePaths;
+    }
+
     public getGroupNames(): string[] {
         return this.groupNames;
     }
 
-    public setGroupTexture(groupName: string, texture: THREE.Texture): void {
+    public setGroupTexture(groupName: string, texture: THREE.Texture, sourcePath?: string): void {
+        const previous = this.groupTextures.get(groupName);
         this.groupTextures.set(groupName, texture);
+        const resolvedPath = sourcePath ?? texture.userData.sourcePath;
+        if (typeof resolvedPath === 'string' && resolvedPath) {
+            this.groupTexturePaths.set(groupName, resolvedPath);
+            texture.userData.sourcePath = resolvedPath;
+        }
         this.applyTextureRotation(groupName, texture);
         // Update existing material if already built
         const mats = this.mesh.material;
@@ -439,6 +475,7 @@ export default abstract class WorldElement {
                 m.needsUpdate = true;
             }
         }
+        if (previous && previous !== texture) previous.dispose();
     }
 
     public setTextureRotation(groupName: string, degrees: number): void {
@@ -464,6 +501,8 @@ export default abstract class WorldElement {
     }
 
     private setGeometry(groups: GeometryGroup[]): void {
+        const oldGeometry = this.mesh.geometry;
+        const oldMaterials = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
         const geometry = new THREE.BufferGeometry();
         const allTriangles: Triangle[] = [];
         const groupInfos: { name: string; start: number; count: number }[] = [];
@@ -509,5 +548,8 @@ export default abstract class WorldElement {
 
         this.mesh.geometry = geometry;
         this.mesh.material = materials;
+
+        oldGeometry.dispose();
+        for (const material of oldMaterials) material.dispose();
     }
 }

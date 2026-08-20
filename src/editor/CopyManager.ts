@@ -155,10 +155,17 @@ export default class CopyManager {
     }
 
     private snapshotTextures(element: WorldElement): void {
+        if (this.texturesSnapshot) {
+            for (const texture of this.texturesSnapshot.values()) texture.dispose();
+        }
         this.texturesSnapshot = new Map();
         for (const groupName of element.getGroupNames()) {
             const tex = element.getGroupTexture(groupName);
-            if (tex) this.texturesSnapshot.set(groupName, tex);
+            if (tex) {
+                const snapshot = tex.clone();
+                snapshot.needsUpdate = true;
+                this.texturesSnapshot.set(groupName, snapshot);
+            }
         }
     }
 
@@ -188,7 +195,9 @@ export default class CopyManager {
         }
         if (this.texturesSnapshot) {
             for (const [groupName, tex] of this.texturesSnapshot) {
-                element.setGroupTexture(groupName, tex);
+                const copy = tex.clone();
+                copy.needsUpdate = true;
+                element.setGroupTexture(groupName, copy, tex.userData.sourcePath);
             }
         }
         if (this.uvTransformsSnapshot) {

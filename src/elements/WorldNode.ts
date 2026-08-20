@@ -40,4 +40,11 @@ export default class WorldNode {
             mat.emissive.setHex(0x000000);
         }
     }
+
+    public dispose(): void {
+        this.mesh.geometry.dispose();
+        const materials = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+        for (const material of materials) material.dispose();
+        this.parent = null;
+    }
 }

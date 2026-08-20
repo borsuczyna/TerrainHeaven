@@ -9,23 +9,41 @@
   <body>
     <canvas id="editor" tabindex="0"></canvas>
     <header id="header-toolbar">
+      <div class="brand-lockup">
+        <div class="brand-mark"><i data-lucide="map"></i></div>
+        <div class="brand-copy">
+          <strong>SanTown</strong>
+          <span>World Editor</span>
+        </div>
+      </div>
+      <div class="workspace-pill"><span class="workspace-dot"></span> Scene</div>
       <div class="header-actions">
-        <button id="header-save" class="header-btn" type="button">Save</button>
-        <button id="header-load" class="header-btn" type="button">Load</button>
-        <button id="header-settings" class="header-btn" type="button">Settings</button>
+        <button id="header-save" class="header-btn" type="button" data-tooltip="Save project"><i data-lucide="save"></i><span>Save</span></button>
+        <button id="header-load" class="header-btn" type="button" data-tooltip="Open project"><i data-lucide="folder-open"></i><span>Open</span></button>
+        <button id="header-settings" class="header-btn header-icon-btn" type="button" data-tooltip="Project settings"><i data-lucide="settings-2"></i></button>
       </div>
     </header>
     <div id="transform-toolbar">
       <button id="btn-transform-translate" type="button"><i data-lucide="move-3d"></i></button>
       <button id="btn-transform-rotate" type="button"><i data-lucide="rotate-3d"></i></button>
+      <span class="toolbar-separator"></span>
+      <button id="btn-delete" class="danger-action" type="button" data-tooltip="Delete selection [Delete]"><i data-lucide="trash-2"></i></button>
     </div>
     <div id="toolbar">
-      <button id="btn-select" data-tooltip="Select" class="active"><i data-lucide="mouse-pointer-2"></i></button>
+      <button id="btn-select" data-tooltip="Select [V]" class="active"><i data-lucide="mouse-pointer-2"></i></button>
+      <span class="toolbar-separator"></span>
       <button id="btn-road" data-tooltip="Road / Intersection" data-switcher="road" ><i data-lucide="route"></i></button>
       <button id="btn-terrain" data-tooltip="Terrain Tool"><i data-lucide="mountain"></i></button>
+      <span class="toolbar-separator"></span>
       <button id="btn-uv" data-tooltip="UV Mapper"><i data-lucide="scan"></i></button>
-      <button id="btn-textures" data-tooltip="Texture Browser"><i data-lucide="image"></i></button>
+      <button id="btn-textures" data-tooltip="Texture Library"><i data-lucide="image"></i></button>
       <button id="btn-wireframe" data-tooltip="Wireframe"><i data-lucide="grid-3x3"></i></button>
+    </div>
+    <div id="viewport-help" aria-label="Viewport navigation">
+      <span><i data-lucide="mouse"></i><kbd>RMB</kbd> Look</span>
+      <span><kbd>WASD</kbd> Move</span>
+      <span><kbd>Space</kbd> Up</span>
+      <span><kbd>Shift</kbd> Down</span>
     </div>
     <div id="properties-panel"></div>
     <script type="module" src="/src/main.ts"></script>

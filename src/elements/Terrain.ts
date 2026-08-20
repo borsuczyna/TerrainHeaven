@@ -9,6 +9,7 @@ import TerrainCutPointManager from '../editor/TerrainCutPointManager';
 import TerrainMesher from '../terrain/TerrainMesher';
 
 export default class Terrain extends WorldElement {
+    public override isTerrainSurface(): boolean { return true; }
     public center: THREE.Vector3;
     public width: number;
     public length: number;
@@ -165,6 +166,20 @@ export default class Terrain extends WorldElement {
                             },
                             min: 10,
                             max: 50,
+                            step: 0.1,
+                        },
+                        {
+                            type: 'number',
+                            label: 'UV Size',
+                            get: () => this.terrainUV.scaleX,
+                            set: (value: number) => {
+                                const size = THREE.MathUtils.clamp(value, 0.1, 100);
+                                this.terrainUV.scaleX = size;
+                                this.terrainUV.scaleY = size;
+                                this.update();
+                            },
+                            min: 0.1,
+                            max: 100,
                             step: 0.1,
                         },
                         {

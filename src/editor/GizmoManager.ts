@@ -177,7 +177,7 @@ export default class GizmoManager {
                 element.update();
             }
             if (movedGlobalNode) {
-                this.sceneManager.update();
+                this.sceneManager.markTerrainDirty();
             }
             this.helperLastPosition.copy(this.helper.position);
             return;

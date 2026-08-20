@@ -1,182 +1,111 @@
-/* Texture Browser */
 #texture-browser {
     position: fixed;
-    left: 70px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 340px;
-    height: 500px;
-    background: #252525;
-    border-right: 1px solid #1a1a1a;
-    color: #ccc;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 12px;
-    z-index: 15;
     display: none;
     flex-direction: column;
-    border-radius: 8px;
     overflow: hidden;
+    z-index: 15;
 }
 
 #texture-browser.visible {
     display: flex;
 }
 
-.tb-header {
+.tb-header,
+.tb-heading,
+.tb-actions,
+.tb-drop-zone,
+.tb-empty,
+.tb-missing,
+.tb-missing > div:not(.tb-missing-icon) {
     display: flex;
+}
+
+.tb-header,
+.tb-actions {
     align-items: center;
+}
+
+.tb-header {
     justify-content: space-between;
-    padding: 8px 12px;
-    background: #333;
-    border-bottom: 1px solid #1a1a1a;
 }
 
-.tb-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #ddd;
+.tb-heading,
+.tb-drop-zone,
+.tb-empty,
+.tb-missing > div:not(.tb-missing-icon) {
+    flex-direction: column;
 }
 
-.tb-close {
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 18px;
+.tb-close,
+.tb-upload,
+.tb-texture {
     cursor: pointer;
-    padding: 0 4px;
-    line-height: 1;
 }
 
-.tb-close:hover {
-    color: #fff;
+.tb-actions {
+    gap: 8px;
 }
 
-.tb-search {
-    width: 100%;
-    padding: 8px 12px;
-    border: none;
-    border-bottom: 1px solid #1a1a1a;
-    background: #1e1e1e;
-    color: #ccc;
-    font-size: 12px;
-    font-family: inherit;
-    outline: none;
-    box-sizing: border-box;
+.tb-upload {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    white-space: nowrap;
 }
 
-.tb-search:focus {
-    background: #222;
+.tb-upload svg {
+    width: 14px;
+    height: 14px;
 }
 
-.tb-search::placeholder {
-    color: #666;
+.tb-drop-zone {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
 }
 
 .tb-list {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-
-.tb-list::-webkit-scrollbar {
-    width: 8px;
-}
-
-.tb-list::-webkit-scrollbar-track {
-    background: #1a1a1a;
-}
-
-.tb-list::-webkit-scrollbar-thumb {
-    background: #333;
-    border-radius: 4px;
-}
-
-.tb-dict {
-    border-bottom: 1px solid #1e1e1e;
-}
-
-.tb-dict-header {
-    padding: 6px 12px;
-    background: #2e2e2e;
-    cursor: pointer;
-    user-select: none;
-    font-size: 12px;
-    font-weight: 500;
-    color: #bbb;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.tb-dict-header:hover {
-    background: #363636;
-}
-
-.tb-arrow {
-    font-size: 8px;
-    color: #666;
-    transition: transform 0.15s;
-    display: inline-block;
-}
-
-.tb-arrow.open {
-    transform: rotate(90deg);
-}
-
-.tb-count {
-    color: #555;
-    font-size: 10px;
-    margin-left: auto;
+    min-height: 0;
+    overflow: auto;
 }
 
 .tb-textures {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 4px;
-    padding: 6px;
-    background: #222;
 }
 
 .tb-texture {
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    background: #2a2a2a;
-    border-radius: 4px;
-    padding: 4px;
-    cursor: grab;
-    transition: background 0.1s;
     overflow: hidden;
+    cursor: grab;
 }
 
-.tb-texture:hover {
-    background: #3a3a3a;
+.tb-texture:active {
+    cursor: grabbing;
 }
 
 .tb-texture img {
     width: 100%;
     aspect-ratio: 1;
-    object-fit: contain;
-    border-radius: 3px;
-    background: #1a1a1a;
-    image-rendering: pixelated;
+    object-fit: cover;
 }
 
-.tb-tex-name {
-    font-size: 9px;
-    color: #999;
-    text-align: center;
-    margin-top: 3px;
-    word-break: break-all;
-    line-height: 1.2;
+.tb-tex-name,
+.tb-tex-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.tb-tex-name mark,
-.tb-dict-header mark {
-    background: #b8860b;
-    color: #fff;
-    padding: 0 1px;
-    border-radius: 2px;
+.tb-missing {
+    flex-wrap: wrap;
+}
+
+.tb-missing-paths {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
 }

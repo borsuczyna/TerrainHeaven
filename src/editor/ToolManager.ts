@@ -24,12 +24,16 @@ export default class ToolManager {
         meta: Record<string, { label: string; icon: string }>;
     }> = new Map();
     private switcherMenu: HTMLDivElement;
+    private switcherHideTimer: number | null = null;
 
     constructor() {
         this.switcherMenu = document.createElement('div');
         this.switcherMenu.className = 'tool-switcher-menu';
         this.switcherMenu.style.display = 'none';
         document.body.appendChild(this.switcherMenu);
+
+        this.switcherMenu.addEventListener('mouseenter', () => this.cancelSwitcherHide());
+        this.switcherMenu.addEventListener('mouseleave', () => this.scheduleSwitcherHide());
 
         document.addEventListener('click', () => {
             this.hideSwitcherMenu();
@@ -80,6 +84,14 @@ export default class ToolManager {
             e.stopPropagation();
             this.showSwitcherMenu(id);
         });
+
+        button.addEventListener('mouseenter', () => {
+            this.cancelSwitcherHide();
+            this.showSwitcherMenu(id);
+        });
+        button.addEventListener('mouseleave', () => this.scheduleSwitcherHide());
+        button.addEventListener('focus', () => this.showSwitcherMenu(id));
+        button.addEventListener('blur', () => this.scheduleSwitcherHide());
     }
 
     public setActive(name: string): void {
@@ -175,8 +187,8 @@ export default class ToolManager {
             item.type = 'button';
             item.className = 'tool-switcher-item';
             const info = sw.meta[toolName] ?? { label: toolName, icon: 'circle' };
-            item.dataset.tooltip = this.formatTooltip(info.label, sw.shortcut);
-            item.innerHTML = `<i data-lucide="${info.icon}"></i>`;
+            item.title = this.formatTooltip(info.label, sw.shortcut);
+            item.innerHTML = `<span class="tool-switcher-icon"><i data-lucide="${info.icon}"></i></span><span class="tool-switcher-label">${info.label}</span>${sw.shortcut ? `<kbd>${sw.shortcut}</kbd>` : ''}`;
             if (toolName === sw.activeToolName) item.classList.add('active');
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -198,7 +210,19 @@ export default class ToolManager {
     }
 
     private hideSwitcherMenu(): void {
+        this.cancelSwitcherHide();
         this.switcherMenu.style.display = 'none';
+    }
+
+    private scheduleSwitcherHide(): void {
+        this.cancelSwitcherHide();
+        this.switcherHideTimer = window.setTimeout(() => this.hideSwitcherMenu(), 180);
+    }
+
+    private cancelSwitcherHide(): void {
+        if (this.switcherHideTimer === null) return;
+        window.clearTimeout(this.switcherHideTimer);
+        this.switcherHideTimer = null;
     }
 
     private formatTooltip(label: string, shortcut?: string): string {

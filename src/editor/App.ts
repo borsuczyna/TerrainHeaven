@@ -103,7 +103,7 @@ export default class App {
         this.lastTime = time;
 
         this.projectSettings.update();
-        this.scene.update();
+        this.scene.flushDirty();
         this.renderer.render(this.scene.instance, this.camera.instance);
         this.camera.update(delta);
 

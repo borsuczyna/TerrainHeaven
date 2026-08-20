@@ -60,6 +60,7 @@ export default class SelectionManager {
         window.addEventListener('mousedown', this.onMouseDown, { capture: true });
         window.addEventListener('keydown', this.onKeyDown);
         window.addEventListener('history-restored', this.onHistoryRestored);
+        window.addEventListener('delete-selection', this.onDeleteSelection);
     }
 
     private onMouseDown = (e: MouseEvent): void => {
@@ -154,6 +155,11 @@ export default class SelectionManager {
         const tagName = target?.tagName;
         if (tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA') return;
         if (e.repeat) return;
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault();
+            this.deleteSelection();
+            return;
+        }
         if (!e.ctrlKey && !e.metaKey) return;
 
         if (e.key === 'c' || e.key === 'C') {
@@ -204,6 +210,26 @@ export default class SelectionManager {
         this.clearSelection();
         this.emitSelectionChanged();
     };
+
+    private onDeleteSelection = (): void => {
+        this.deleteSelection();
+    };
+
+    public deleteSelection(): boolean {
+        const cutPoints = new Set(this.getSelected().filter((node) => this.terrainCutPoints.isCutPoint(node)));
+        const elements = new Set(this.getSelectedElements());
+        for (const node of this.getSelected()) {
+            if (node.parent && !this.terrainCutPoints.isCutPoint(node)) elements.add(node.parent);
+        }
+        if (cutPoints.size === 0 && elements.size === 0) return false;
+
+        this.history.beginAction('Delete Selection');
+        this.clearSelection();
+        for (const point of cutPoints) this.terrainCutPoints.removePoint(point);
+        for (const element of elements) this.sceneManager.remove(element);
+        this.history.endAction('Delete Selection');
+        return true;
+    }
 
     private selectAdd(node: WorldNode): void {
         this.selected.add(node);
@@ -367,5 +393,6 @@ export default class SelectionManager {
         window.removeEventListener('mousedown', this.onMouseDown, { capture: true });
         window.removeEventListener('keydown', this.onKeyDown);
         window.removeEventListener('history-restored', this.onHistoryRestored);
+        window.removeEventListener('delete-selection', this.onDeleteSelection);
     }
 }

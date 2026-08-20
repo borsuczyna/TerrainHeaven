@@ -4,6 +4,7 @@ import type { PropertyDefinition, PropertyVector3, PropertyNumber, PropertyBoole
 import type WorldElement from '../elements/WorldElement';
 import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
+import { createIcons, icons } from 'lucide';
 
 @singleton()
 export default class PropertiesPanel {
@@ -68,7 +69,7 @@ export default class PropertiesPanel {
         const def = this.customDef ?? this.element?.getProperties();
         if (!def) return;
 
-        let html = `<div class="panel-header"><span class="icon">${def.icon}</span><span class="panel-title">${def.title}</span><button class="panel-menu-btn" title="Options">&#8943;</button><div class="panel-menu" style="display:none"></div></div>`;
+        let html = `<div class="panel-header"><span class="icon">${def.icon}</span><span class="panel-heading"><span class="panel-eyebrow">Inspector</span><span class="panel-title">${def.title}</span></span><div class="panel-header-actions"><button class="panel-delete-btn" data-tooltip="Delete selection" type="button"><i data-lucide="trash-2"></i></button><button class="panel-menu-btn" data-tooltip="More options" type="button"><i data-lucide="ellipsis"></i></button></div><div class="panel-menu" style="display:none"></div></div>`;
 
         for (const section of def.sections) {
             html += `<div class="section">`;
@@ -84,6 +85,7 @@ export default class PropertiesPanel {
         }
 
         this.container.innerHTML = html;
+        createIcons({ icons });
         this.bindEvents(def);
         this.bindMenuEvents();
     }
@@ -170,7 +172,12 @@ export default class PropertiesPanel {
 
     private bindMenuEvents(): void {
         const btn = this.container.querySelector('.panel-menu-btn') as HTMLElement;
+        const deleteButton = this.container.querySelector('.panel-delete-btn') as HTMLButtonElement;
         const menu = this.container.querySelector('.panel-menu') as HTMLElement;
+
+        deleteButton.addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('delete-selection'));
+        });
 
         btn.addEventListener('click', (e) => {
             e.stopPropagation();

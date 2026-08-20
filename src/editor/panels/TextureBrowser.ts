@@ -1,70 +1,96 @@
-import { singleton } from 'tsyringe';
-import textureData from '../../data/textures.json';
-
-const BASE_URL = 'https://files.prineside.com/gtasa_samp_game_texture//png/';
+import { inject, singleton } from 'tsyringe';
+import { createIcons, icons } from 'lucide';
+import TextureLibrary from '../TextureLibrary';
 
 @singleton()
 export default class TextureBrowser {
-    private container: HTMLElement;
-    private searchInput: HTMLInputElement;
-    private listContainer: HTMLElement;
+    private readonly container: HTMLElement;
+    private readonly searchInput: HTMLInputElement;
+    private readonly listContainer: HTMLElement;
+    private readonly fileInput: HTMLInputElement;
     private visible = false;
-    private openDicts: Set<string> = new Set();
-    private dictNames: string[];
     private searchTerm = '';
 
     public onHide: (() => void) | null = null;
 
-    constructor() {
-        this.dictNames = Object.keys(textureData);
-
-        this.container = document.createElement('div');
+    constructor(@inject(TextureLibrary) private readonly library: TextureLibrary) {
+        this.container = document.createElement('aside');
         this.container.id = 'texture-browser';
+        this.container.innerHTML = `
+            <div class="tb-header">
+                <div class="tb-heading">
+                    <span class="tb-eyebrow">Assets</span>
+                    <span class="tb-title">Texture Library</span>
+                </div>
+                <button class="tb-close" type="button" aria-label="Close"><i data-lucide="x"></i></button>
+            </div>
+            <div class="tb-actions">
+                <button class="tb-upload" type="button"><i data-lucide="upload"></i> Upload textures</button>
+                <input class="tb-search" type="search" placeholder="Search library…" aria-label="Search textures">
+            </div>
+            <div class="tb-drop-zone">
+                <i data-lucide="image-up"></i>
+                <strong>Drop image files here</strong>
+                <span>PNG, JPG, WEBP and other browser formats</span>
+            </div>
+            <div class="tb-list"></div>
+        `;
         document.body.appendChild(this.container);
 
-        // Header
-        const header = document.createElement('div');
-        header.className = 'tb-header';
-        header.innerHTML = '<span class="tb-title">Texture Browser</span>';
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'tb-close';
-        closeBtn.textContent = '\u00d7';
-        closeBtn.addEventListener('click', () => this.hide());
-        header.appendChild(closeBtn);
-        this.container.appendChild(header);
+        this.searchInput = this.container.querySelector('.tb-search') as HTMLInputElement;
+        this.listContainer = this.container.querySelector('.tb-list') as HTMLElement;
+        this.fileInput = document.createElement('input');
+        this.fileInput.type = 'file';
+        this.fileInput.accept = 'image/*';
+        this.fileInput.multiple = true;
+        this.fileInput.hidden = true;
+        this.container.appendChild(this.fileInput);
 
-        // Search
-        this.searchInput = document.createElement('input');
-        this.searchInput.type = 'text';
-        this.searchInput.className = 'tb-search';
-        this.searchInput.placeholder = 'Search textures...';
+        this.container.querySelector('.tb-close')?.addEventListener('click', () => this.hide());
+        this.container.querySelector('.tb-upload')?.addEventListener('click', () => this.fileInput.click());
+        this.fileInput.addEventListener('change', () => {
+            void this.importFiles(this.fileInput.files);
+            this.fileInput.value = '';
+        });
         this.searchInput.addEventListener('input', () => {
-            this.searchTerm = this.searchInput.value.toLowerCase();
+            this.searchTerm = this.searchInput.value.trim().toLowerCase();
             this.render();
         });
-        this.container.appendChild(this.searchInput);
 
-        // List
-        this.listContainer = document.createElement('div');
-        this.listContainer.className = 'tb-list';
-        this.container.appendChild(this.listContainer);
+        this.container.addEventListener('dragover', (event) => {
+            if (!event.dataTransfer?.types.includes('Files')) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+            this.container.classList.add('drag-over');
+        });
+        this.container.addEventListener('dragleave', (event) => {
+            if (!this.container.contains(event.relatedTarget as Node | null)) {
+                this.container.classList.remove('drag-over');
+            }
+        });
+        this.container.addEventListener('drop', (event) => {
+            if (!event.dataTransfer?.files.length) return;
+            event.preventDefault();
+            this.container.classList.remove('drag-over');
+            void this.importFiles(event.dataTransfer.files);
+        });
+
+        this.library.onChanged = () => this.render();
+        void this.library.ready().then(() => this.render());
+        createIcons({ icons });
     }
 
     public get isVisible(): boolean { return this.visible; }
 
     public toggle(): void {
-        if (this.visible) {
-            this.hide();
-        } else {
-            this.show();
-        }
+        if (this.visible) this.hide();
+        else this.show();
     }
 
     public show(): void {
         this.visible = true;
         this.container.classList.add('visible');
         this.render();
-        this.searchInput.focus();
     }
 
     public hide(): void {
@@ -73,105 +99,76 @@ export default class TextureBrowser {
         this.onHide?.();
     }
 
-    private render(): void {
-        this.listContainer.innerHTML = '';
-        const data = textureData as Record<string, string[]>;
-
-        for (const dictName of this.dictNames) {
-            const textures = data[dictName];
-            const search = this.searchTerm;
-
-            // Filter: match dict name or any texture name
-            if (search) {
-                const dictMatch = dictName.toLowerCase().includes(search);
-                const anyTexMatch = textures.some(t => t.toLowerCase().includes(search));
-                if (!dictMatch && !anyTexMatch) continue;
-            }
-
-            const dictEl = document.createElement('div');
-            dictEl.className = 'tb-dict';
-
-            const isOpen = this.openDicts.has(dictName);
-
-            // Dict header
-            const headerEl = document.createElement('div');
-            headerEl.className = 'tb-dict-header';
-            headerEl.innerHTML = `<span class="tb-arrow${isOpen ? ' open' : ''}">&#9654;</span>${this.highlight(dictName)} <span class="tb-count">(${textures.length})</span>`;
-            headerEl.addEventListener('click', () => {
-                if (this.openDicts.has(dictName)) {
-                    this.openDicts.delete(dictName);
-                } else {
-                    this.openDicts.add(dictName);
-                }
-                this.render();
-            });
-            dictEl.appendChild(headerEl);
-
-            // Texture list (only if open)
-            if (isOpen) {
-                const listEl = document.createElement('div');
-                listEl.className = 'tb-textures';
-
-                for (const texName of textures) {
-                    if (search && !dictName.toLowerCase().includes(search) && !texName.toLowerCase().includes(search)) {
-                        continue;
-                    }
-
-                    const texEl = document.createElement('div');
-                    texEl.className = 'tb-texture';
-                    texEl.draggable = true;
-
-                    const imgSrc = `${BASE_URL}${encodeURIComponent(dictName)}.${encodeURIComponent(texName)}.png`;
-
-                    const img = document.createElement('img');
-                    img.loading = 'lazy';
-                    img.src = imgSrc;
-                    img.alt = texName;
-                    img.addEventListener('error', () => {
-                        img.style.display = 'none';
-                    });
-
-                    texEl.addEventListener('dragstart', (e) => {
-                        e.dataTransfer?.setData('application/x-texture-url', imgSrc);
-                        e.dataTransfer!.effectAllowed = 'copy';
-
-                        // Custom drag ghost
-                        const ghost = document.createElement('div');
-                        ghost.className = 'tb-drag-ghost';
-                        const ghostImg = document.createElement('img');
-                        ghostImg.src = imgSrc;
-                        ghost.appendChild(ghostImg);
-                        const ghostLabel = document.createElement('span');
-                        ghostLabel.textContent = texName;
-                        ghost.appendChild(ghostLabel);
-                        document.body.appendChild(ghost);
-                        e.dataTransfer!.setDragImage(ghost, 32, 32);
-                        requestAnimationFrame(() => ghost.remove());
-                    });
-
-                    const label = document.createElement('span');
-                    label.className = 'tb-tex-name';
-                    label.innerHTML = this.highlight(texName);
-
-                    texEl.appendChild(img);
-                    texEl.appendChild(label);
-                    listEl.appendChild(texEl);
-                }
-
-                dictEl.appendChild(listEl);
-            }
-
-            this.listContainer.appendChild(dictEl);
-        }
+    private async importFiles(files: FileList | null): Promise<void> {
+        if (!files) return;
+        await this.library.addFiles(files);
+        this.render();
     }
 
-    private highlight(text: string): string {
-        if (!this.searchTerm) return text;
-        const idx = text.toLowerCase().indexOf(this.searchTerm);
-        if (idx < 0) return text;
-        const before = text.slice(0, idx);
-        const match = text.slice(idx, idx + this.searchTerm.length);
-        const after = text.slice(idx + this.searchTerm.length);
-        return `${before}<mark>${match}</mark>${after}`;
+    private render(): void {
+        this.listContainer.innerHTML = '';
+
+        const missing = this.library.getMissingPaths();
+        if (missing.length > 0) {
+            const warning = document.createElement('section');
+            warning.className = 'tb-missing';
+            warning.innerHTML = `
+                <div class="tb-missing-icon"><i data-lucide="triangle-alert"></i></div>
+                <div><strong>${missing.length} missing texture${missing.length === 1 ? '' : 's'}</strong><span>Drop the original files here to relink them.</span></div>
+            `;
+            const paths = document.createElement('div');
+            paths.className = 'tb-missing-paths';
+            for (const path of missing.slice(0, 5)) {
+                const item = document.createElement('code');
+                item.textContent = path.split('/').pop() ?? path;
+                item.title = path;
+                paths.appendChild(item);
+            }
+            warning.appendChild(paths);
+            this.listContainer.appendChild(warning);
+        }
+
+        const assets = this.library.getAssets().filter((asset) =>
+            !this.searchTerm || asset.name.toLowerCase().includes(this.searchTerm) || asset.path.toLowerCase().includes(this.searchTerm),
+        );
+
+        if (assets.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'tb-empty';
+            empty.innerHTML = this.searchTerm
+                ? '<i data-lucide="search-x"></i><strong>No matching textures</strong><span>Try a different search.</span>'
+                : '<i data-lucide="images"></i><strong>Your library is empty</strong><span>Upload or drop images to get started.</span>';
+            this.listContainer.appendChild(empty);
+            createIcons({ icons });
+            return;
+        }
+
+        const grid = document.createElement('div');
+        grid.className = 'tb-textures';
+        for (const asset of assets) {
+            const item = document.createElement('div');
+            item.className = 'tb-texture';
+            item.draggable = true;
+            item.title = `Drag ${asset.name} onto a surface`;
+
+            const image = document.createElement('img');
+            image.src = asset.url;
+            image.alt = asset.name;
+            const name = document.createElement('span');
+            name.className = 'tb-tex-name';
+            name.textContent = asset.name;
+            const path = document.createElement('span');
+            path.className = 'tb-tex-path';
+            path.textContent = asset.path;
+            item.append(image, name, path);
+
+            item.addEventListener('dragstart', (event) => {
+                event.dataTransfer?.setData('application/x-santown-texture-path', asset.path);
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+            });
+            grid.appendChild(item);
+        }
+        this.listContainer.appendChild(grid);
+        createIcons({ icons });
     }
 }

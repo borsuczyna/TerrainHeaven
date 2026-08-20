@@ -6,6 +6,9 @@ import { singleton } from 'tsyringe';
 export default class SceneManager {
     public readonly instance: THREE.Scene = new THREE.Scene();
     private elements: WorldElement[] = [];
+    private terrainDirty = false;
+    private terrainDependentsDirty = false;
+    private isUpdatingAll = false;
     constructor() {
         this.instance = new THREE.Scene();
         this.setupGrid();
@@ -28,10 +31,15 @@ export default class SceneManager {
         this.instance.add(directionalLight);
     }
 
-    public add(object: WorldElement): void {
+    public add(object: WorldElement, update: boolean = true): void {
         this.elements.push(object);
         this.instance.add(object.mesh);
-        this.update();
+        object.onGeometryChanged = () => {
+            if (this.isUpdatingAll) return;
+            if (this.isTerrain(object)) this.terrainDependentsDirty = true;
+            else this.markTerrainDirty();
+        };
+        if (update) object.update();
     }
 
     public getElements(): WorldElement[] {
@@ -41,8 +49,25 @@ export default class SceneManager {
     public clearElements(): void {
         for (const el of this.elements) {
             this.instance.remove(el.mesh);
+            el.dispose();
         }
         this.elements = [];
+        this.terrainDirty = false;
+        this.terrainDependentsDirty = false;
+    }
+
+    public remove(element: WorldElement): boolean {
+        const index = this.elements.indexOf(element);
+        if (index < 0) return false;
+
+        for (const nodeIndex of [...element.connections.keys()]) {
+            element.disconnect(nodeIndex);
+        }
+        this.elements.splice(index, 1);
+        this.instance.remove(element.mesh);
+        element.dispose();
+        this.markTerrainDirty();
+        return true;
     }
 
     public addMesh(mesh: THREE.Mesh): void {
@@ -50,6 +75,54 @@ export default class SceneManager {
     }
 
     public update(): void {
-        this.elements.forEach(element => element.update());
+        this.isUpdatingAll = true;
+        try {
+            // Terrain depends on all road/intersection geometry, so it must be last.
+            for (const element of this.elements) {
+                if (!this.isTerrain(element)) element.update();
+            }
+            for (const element of this.elements) {
+                if (this.isTerrain(element)) element.update();
+            }
+            for (const element of this.elements) {
+                if (element.dependsOnTerrainSurface()) element.update();
+            }
+            this.terrainDirty = false;
+            this.terrainDependentsDirty = false;
+        } finally {
+            this.isUpdatingAll = false;
+        }
+    }
+
+    public markTerrainDirty(): void {
+        this.terrainDirty = true;
+    }
+
+    public flushDirty(): void {
+        if ((!this.terrainDirty && !this.terrainDependentsDirty) || this.isUpdatingAll) return;
+        const rebuildTerrain = this.terrainDirty;
+        const rebuildDependents = this.terrainDependentsDirty || rebuildTerrain;
+        this.terrainDirty = false;
+        this.terrainDependentsDirty = false;
+
+        this.isUpdatingAll = true;
+        try {
+            if (rebuildTerrain) {
+                for (const element of this.elements) {
+                    if (this.isTerrain(element)) element.update();
+                }
+            }
+            if (rebuildDependents) {
+                for (const element of this.elements) {
+                    if (element.dependsOnTerrainSurface()) element.update();
+                }
+            }
+        } finally {
+            this.isUpdatingAll = false;
+        }
+    }
+
+    private isTerrain(element: WorldElement): boolean {
+        return element.isTerrainSurface();
     }
 }

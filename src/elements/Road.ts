@@ -50,6 +50,7 @@ export default class Road extends WorldElement {
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
     public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
+    public override dependsOnTerrainSurface(): boolean { return this.bridgeEnabled; }
     private _divisions: number = 0;
     private curvePointA: WorldNode | null = null;
     private curvePointB: WorldNode | null = null;
@@ -61,6 +62,24 @@ export default class Road extends WorldElement {
     public getCurvePointBPosition(): THREE.Vector3 | null {
         return this.curvePointB ? this.curvePointB.mesh.position.clone() : null;
     }
+
+    public override getAffectedElementsForNode(node: WorldNode): WorldElement[] {
+        const affected = new Set(super.getAffectedElementsForNode(node));
+        if (node !== this.curvePointA && node !== this.curvePointB) return [...affected];
+
+        const queue: WorldElement[] = [this];
+        while (queue.length > 0) {
+            const element = queue.shift()!;
+            if (affected.has(element) && element !== this) continue;
+            affected.add(element);
+
+            for (const connection of element.connections.values()) {
+                if (!affected.has(connection.element)) queue.push(connection.element);
+            }
+        }
+        return [...affected];
+    }
+
     private curveLineA: THREE.Line | null = null;
     private curveLineB: THREE.Line | null = null;
     private laneLines: THREE.Line[] = [];
@@ -106,12 +125,15 @@ export default class Road extends WorldElement {
         if (point) {
             if (!this.curvePointA) {
                 this.curvePointA = new WorldNode(point, Config.editor.curveNodeColor);
+                this.curvePointA.parent = this;
                 this.mesh.add(this.curvePointA.mesh);
             } else {
+                this.curvePointA.parent = this;
                 this.curvePointA.update(point);
             }
         } else if (this.curvePointA) {
             this.mesh.remove(this.curvePointA.mesh);
+            this.curvePointA.dispose();
             this.curvePointA = null;
         }
         this.updateCurveLines();
@@ -121,12 +143,15 @@ export default class Road extends WorldElement {
         if (point) {
             if (!this.curvePointB) {
                 this.curvePointB = new WorldNode(point, Config.editor.curveNodeColor);
+                this.curvePointB.parent = this;
                 this.mesh.add(this.curvePointB.mesh);
             } else {
+                this.curvePointB.parent = this;
                 this.curvePointB.update(point);
             }
         } else if (this.curvePointB) {
             this.mesh.remove(this.curvePointB.mesh);
+            this.curvePointB.dispose();
             this.curvePointB = null;
         }
         this.updateCurveLines();
@@ -138,10 +163,7 @@ export default class Road extends WorldElement {
     }
 
     private updateCurveLines(): void {
-        if (this.curveLineA) { this.mesh.remove(this.curveLineA); this.curveLineA = null; }
-        if (this.curveLineB) { this.mesh.remove(this.curveLineB); this.curveLineB = null; }
-        for (const line of this.laneLines) this.mesh.remove(line);
-        this.laneLines = [];
+        this.disposeCurveLines();
 
         if (!this.curvePointA || !this.curvePointB) return;
 
@@ -195,6 +217,29 @@ export default class Road extends WorldElement {
             this.laneLines.push(line);
             this.mesh.add(line);
         }
+    }
+
+    private disposeCurveLines(): void {
+        const lines = [this.curveLineA, this.curveLineB, ...this.laneLines]
+            .filter((line): line is THREE.Line => line !== null);
+        const materials = new Set<THREE.Material>();
+
+        for (const line of lines) {
+            this.mesh.remove(line);
+            line.geometry.dispose();
+            const lineMaterials = Array.isArray(line.material) ? line.material : [line.material];
+            for (const material of lineMaterials) materials.add(material);
+        }
+        for (const material of materials) material.dispose();
+
+        this.curveLineA = null;
+        this.curveLineB = null;
+        this.laneLines = [];
+    }
+
+    public override dispose(): void {
+        this.disposeCurveLines();
+        super.dispose();
     }
 
     private getBezierCurvePoints(): THREE.Vector3[] {

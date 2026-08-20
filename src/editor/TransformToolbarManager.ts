@@ -16,6 +16,7 @@ export default class TransformToolbarManager {
         this.toolbar = document.getElementById('transform-toolbar');
         this.translateButton = document.getElementById('btn-transform-translate') as HTMLButtonElement | null;
         this.rotateButton = document.getElementById('btn-transform-rotate') as HTMLButtonElement | null;
+        const deleteButton = document.getElementById('btn-delete') as HTMLButtonElement | null;
         this.propertiesPanel = document.getElementById('properties-panel');
         if (!this.toolbar || !this.translateButton || !this.rotateButton) return;
 
@@ -28,6 +29,10 @@ export default class TransformToolbarManager {
 
         this.rotateButton.addEventListener('click', () => {
             this.gizmo.setMode('rotate');
+        });
+
+        deleteButton?.addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('delete-selection'));
         });
 
         this.gizmo.onModeStateChanged = (state) => {
