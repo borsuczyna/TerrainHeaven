@@ -19,6 +19,7 @@ export default class HeaderManager {
         const btnLoad = document.getElementById('header-load') as HTMLButtonElement;
 
         btnSettings.addEventListener('click', () => {
+            btnSettings.blur();
             if (this.settingsPanel.isVisible) {
                 this.settingsPanel.hide();
                 btnSettings.classList.remove('active');
@@ -29,10 +30,15 @@ export default class HeaderManager {
         });
 
         btnSave.addEventListener('click', () => {
+            btnSave.blur();
             void this.saveWithDialog();
         });
 
         btnLoad.addEventListener('click', () => {
+            // Buttons keep keyboard focus after a click, so without this, pressing
+            // Space to fly up in the viewport re-triggers this button's click handler
+            // and reopens the load dialog.
+            btnLoad.blur();
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.santown,.json';

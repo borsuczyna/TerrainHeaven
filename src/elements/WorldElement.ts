@@ -94,6 +94,10 @@ export default abstract class WorldElement {
     constructor() {
         container.resolve(WireframeManager).register(this.mesh);
         this.mesh.userData.worldElement = this;
+        // Large terrain/road meshes receiving shadows is cheap; casting them all is not.
+        // Elements that materially need to cast a shadow opt in explicitly.
+        this.mesh.castShadow = false;
+        this.mesh.receiveShadow = true;
     }
 
     public getNode(index: number): WorldNode {

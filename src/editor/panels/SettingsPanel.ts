@@ -1,23 +1,21 @@
 import { singleton, inject } from 'tsyringe';
+import { createIcons, icons } from 'lucide';
 import ProjectSettings from '../ProjectSettings';
 import HistoryManager from '../HistoryManager';
 
 @singleton()
 export default class SettingsPanel {
-    private container: HTMLElement;
-    private settings: ProjectSettings;
-    private history: HistoryManager;
+    private readonly container: HTMLElement;
     private activeActionLabel: string | null = null;
 
     constructor(
-        @inject(ProjectSettings) settings: ProjectSettings,
-        @inject(HistoryManager) history: HistoryManager,
+        @inject(ProjectSettings) private readonly settings: ProjectSettings,
+        @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
-        this.settings = settings;
-        this.history = history;
         this.container = document.createElement('div');
         this.container.id = 'settings-panel';
         document.body.appendChild(this.container);
+        this.settings.onTimeChanged = (hour) => this.syncTimeDisplay(hour);
         this.build();
     }
 
@@ -26,7 +24,7 @@ export default class SettingsPanel {
     }
 
     public show(): void {
-        this.refresh();
+        this.build();
         this.container.classList.add('visible');
     }
 
@@ -46,60 +44,156 @@ export default class SettingsPanel {
         const s = this.settings;
         this.container.innerHTML = `
             <div class="sp-header">
-                <span class="sp-title">Project Settings</span>
-                <button class="sp-close">&times;</button>
+                <div class="sp-heading"><span class="sp-eyebrow">Viewport</span><span class="sp-title">Visual Settings</span></div>
+                <button class="sp-close" type="button" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
             <div class="sp-body">
                 <div class="sp-section">
-                    <div class="sp-section-label">Sky</div>
-                    <div class="sp-row sp-sky-color-row" style="display: ${s.dayNightCycle ? 'none' : 'flex'}">
-                        <label class="sp-label">Color</label>
-                        <input type="color" class="sp-color" value="${s.skyColor}" data-prop="skyColor">
-                    </div>
-                </div>
-                <div class="sp-section">
-                    <div class="sp-section-label">Day / Night</div>
+                    <div class="sp-section-label">Rendering</div>
                     <div class="sp-row">
-                        <label class="sp-label">Enable</label>
-                        <input type="checkbox" class="sp-checkbox" ${s.dayNightCycle ? 'checked' : ''} data-prop="dayNightCycle">
+                        <label class="sp-label">Enhanced Visuals</label>
+                        <input type="checkbox" class="sp-checkbox" ${s.enhancedVisuals ? 'checked' : ''} data-prop="enhancedVisuals">
                     </div>
-                    <div class="sp-row sp-hour-row" style="display: ${s.dayNightCycle ? 'flex' : 'none'}">
-                        <label class="sp-label">Hour</label>
-                        <input type="range" class="sp-slider" min="0" max="24" step="0.5" value="${s.hour}" data-prop="hour">
-                        <span class="sp-hour-value">${s.hour.toFixed(1)}</span>
-                    </div>
+                    <p class="sp-help">Warm sunlight, soft shadows and lightweight day/night lighting.</p>
                 </div>
+                ${s.enhancedVisuals ? this.buildEnhancedControls() : this.buildBasicControls()}
             </div>
         `;
 
-        this.container.querySelector('.sp-close')!.addEventListener('click', () => this.hide());
-
-        this.container.querySelector('[data-prop="skyColor"]')!.addEventListener('input', (e) => {
-            this.beginAction('Change Sky Color');
-            s.skyColor = (e.target as HTMLInputElement).value;
-            s.apply();
-        });
-        this.container.querySelector('[data-prop="skyColor"]')!.addEventListener('change', () => {
-            this.endAction('Change Sky Color');
-        });
-
-        this.container.querySelector('[data-prop="dayNightCycle"]')!.addEventListener('change', (e) => {
-            this.history.beginAction('Toggle Day/Night Cycle');
-            s.dayNightCycle = (e.target as HTMLInputElement).checked;
+        this.container.querySelector('.sp-close')?.addEventListener('click', () => this.hide());
+        this.bindCheckbox('enhancedVisuals', 'Toggle Enhanced Visuals', (checked) => {
+            s.enhancedVisuals = checked;
             s.apply();
             this.build();
-            this.history.endAction('Toggle Day/Night Cycle');
         });
 
-        this.container.querySelector('[data-prop="hour"]')!.addEventListener('input', (e) => {
+        if (s.enhancedVisuals) this.bindEnhancedControls();
+        else this.bindBasicControls();
+        createIcons({ icons });
+    }
+
+    private buildEnhancedControls(): string {
+        const s = this.settings;
+        return `
+            <div class="sp-section">
+                <div class="sp-section-label">Time &amp; Atmosphere</div>
+                <div class="sp-row sp-wide-row">
+                    <label class="sp-label">Time of Day</label>
+                    <input type="range" class="sp-slider" min="0" max="24" step="0.1" value="${s.hour}" data-prop="hour">
+                    <span class="sp-value sp-hour-value">${this.formatHour(s.hour)}</span>
+                </div>
+                <div class="sp-row">
+                    <label class="sp-label">Day / Night Cycle</label>
+                    <input type="checkbox" class="sp-checkbox" ${s.dayNightCycle ? 'checked' : ''} data-prop="dayNightCycle">
+                </div>
+                ${s.dayNightCycle ? `
+                    <div class="sp-row sp-wide-row">
+                        <label class="sp-label">Day Length</label>
+                        <input type="range" class="sp-slider" min="30" max="1200" step="30" value="${s.dayLength}" data-prop="dayLength">
+                        <span class="sp-value sp-day-length-value">${this.formatDuration(s.dayLength)}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    private buildBasicControls(): string {
+        const s = this.settings;
+        return `
+            <div class="sp-section">
+                <div class="sp-section-label">Basic Sky</div>
+                <div class="sp-row sp-sky-color-row" style="display: ${s.dayNightCycle ? 'none' : 'flex'}">
+                    <label class="sp-label">Color</label>
+                    <input type="color" class="sp-color" value="${s.skyColor}" data-prop="skyColor">
+                </div>
+                <div class="sp-row">
+                    <label class="sp-label">Day / Night</label>
+                    <input type="checkbox" class="sp-checkbox" ${s.dayNightCycle ? 'checked' : ''} data-prop="dayNightCycle">
+                </div>
+                ${s.dayNightCycle ? `
+                    <div class="sp-row sp-wide-row">
+                        <label class="sp-label">Time of Day</label>
+                        <input type="range" class="sp-slider" min="0" max="24" step="0.1" value="${s.hour}" data-prop="hour">
+                        <span class="sp-value sp-hour-value">${this.formatHour(s.hour)}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    private bindEnhancedControls(): void {
+        this.bindCheckbox('dayNightCycle', 'Toggle Day/Night Cycle', (checked) => {
+            this.settings.dayNightCycle = checked;
+            this.settings.apply();
+            this.build();
+        });
+        this.bindHour();
+
+        const dayLength = this.container.querySelector<HTMLInputElement>('[data-prop="dayLength"]');
+        dayLength?.addEventListener('input', () => {
+            this.beginAction('Change Day Length');
+            this.settings.dayLength = Number(dayLength.value);
+            const value = this.container.querySelector('.sp-day-length-value');
+            if (value) value.textContent = this.formatDuration(this.settings.dayLength);
+        });
+        dayLength?.addEventListener('change', () => this.endAction('Change Day Length'));
+    }
+
+    private bindBasicControls(): void {
+        const skyColor = this.container.querySelector<HTMLInputElement>('[data-prop="skyColor"]');
+        skyColor?.addEventListener('input', () => {
+            this.beginAction('Change Sky Color');
+            this.settings.skyColor = skyColor.value;
+            this.settings.apply();
+        });
+        skyColor?.addEventListener('change', () => this.endAction('Change Sky Color'));
+
+        this.bindCheckbox('dayNightCycle', 'Toggle Day/Night', (checked) => {
+            this.settings.dayNightCycle = checked;
+            this.settings.apply();
+            this.build();
+        });
+        this.bindHour();
+    }
+
+    private bindHour(): void {
+        const hour = this.container.querySelector<HTMLInputElement>('[data-prop="hour"]');
+        hour?.addEventListener('input', () => {
             this.beginAction('Change Time Of Day');
-            s.hour = parseFloat((e.target as HTMLInputElement).value);
-            s.apply();
-            (this.container.querySelector('.sp-hour-value') as HTMLElement).textContent = s.hour.toFixed(1);
+            this.settings.hour = Number(hour.value);
+            this.settings.apply();
+            this.syncTimeDisplay(this.settings.hour);
         });
-        this.container.querySelector('[data-prop="hour"]')!.addEventListener('change', () => {
-            this.endAction('Change Time Of Day');
+        hour?.addEventListener('change', () => this.endAction('Change Time Of Day'));
+    }
+
+    private bindCheckbox(prop: string, label: string, onChange: (checked: boolean) => void): void {
+        const checkbox = this.container.querySelector<HTMLInputElement>(`[data-prop="${prop}"]`);
+        checkbox?.addEventListener('change', () => {
+            this.history.beginAction(label);
+            onChange(checkbox.checked);
+            this.history.endAction(label);
         });
+    }
+
+    private syncTimeDisplay(hour: number): void {
+        if (!this.isVisible) return;
+        const input = this.container.querySelector<HTMLInputElement>('[data-prop="hour"]');
+        const value = this.container.querySelector('.sp-hour-value');
+        if (input && document.activeElement !== input) input.value = String(hour);
+        if (value) value.textContent = this.formatHour(hour);
+    }
+
+    private formatHour(hour: number): string {
+        const normalized = ((hour % 24) + 24) % 24;
+        const whole = Math.floor(normalized);
+        const minutes = Math.floor((normalized - whole) * 60);
+        return `${whole.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    }
+
+    private formatDuration(seconds: number): string {
+        if (seconds < 60) return `${Math.round(seconds)}s`;
+        return `${Math.round(seconds / 60)}m`;
     }
 
     private beginAction(label: string): void {

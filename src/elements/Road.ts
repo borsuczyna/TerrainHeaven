@@ -160,6 +160,8 @@ export default class Road extends WorldElement {
     public override update(): void {
         this.updateCurveLines();
         super.update();
+        // Ground-level roads do not need to shadow the terrain. Bridges do.
+        this.mesh.castShadow = this.bridgeEnabled;
     }
 
     private updateCurveLines(): void {
@@ -1015,19 +1017,20 @@ export default class Road extends WorldElement {
                 const deckTopY = sample.origin.y + this.getDeckTopHeightAtLateral(offset, context);
                 const topY = deckTopY - Math.max(0.05, context.deckThickness);
                 const terrainY = this.getTerrainHeightAtXZ(pillarCenter.x, pillarCenter.z, terrainMeshes);
-                if (terrainY >= topY - 0.01) continue;
+                if (terrainY === null || terrainY >= topY - 0.01) continue;
 
                 if (this.bridgePillarShape === 'circular') {
                     this.addCircularPillarTriangles(
                         triangles,
                         pillarCenter,
                         topY,
-                        terrainY,
                         halfPillarWidth,
                         Math.max(3, Math.round(this.bridgePillarSegments)),
+                        terrainMeshes,
+                        terrainY,
                     );
                 } else {
-                    this.addBoxPillarTriangles(triangles, pillarCenter, topY, terrainY, halfPillarWidth);
+                    this.addBoxPillarTriangles(triangles, pillarCenter, topY, halfPillarWidth, terrainMeshes, terrainY);
                 }
             }
         }
@@ -1090,57 +1093,89 @@ export default class Road extends WorldElement {
             .map((terrain) => terrain.mesh);
     }
 
-    private getTerrainHeightAtXZ(x: number, z: number, terrainMeshes: THREE.Object3D[]): number {
-        if (terrainMeshes.length === 0) return 0;
+    // Returns null when the raycast finds no terrain at this point (e.g. a gap in the
+    // adaptive terrain mesh), instead of silently falling back to world height 0 -
+    // which used to make pillars sink to absurd depths under elevated terrain.
+    private getTerrainHeightAtXZ(x: number, z: number, terrainMeshes: THREE.Object3D[]): number | null {
+        if (terrainMeshes.length === 0) return null;
 
         this.terrainRaycaster.set(new THREE.Vector3(x, 10000, z), new THREE.Vector3(0, -1, 0));
         this.terrainRaycaster.near = 0;
         this.terrainRaycaster.far = 20000;
         const hits = this.terrainRaycaster.intersectObjects(terrainMeshes, true);
-        return hits.length > 0 ? hits[0].point.y : 0;
+        return hits.length > 0 ? hits[0].point.y : null;
+    }
+
+    // Bridge pillars sink this far below the sampled terrain height at each corner, so a
+    // sloped or uneven surface between sample points never pokes through.
+    private static readonly PILLAR_EMBED_DEPTH = 0.5;
+
+    private getPillarBottomY(x: number, z: number, terrainMeshes: THREE.Object3D[], fallbackY: number): number {
+        const terrainY = this.getTerrainHeightAtXZ(x, z, terrainMeshes) ?? fallbackY;
+        return terrainY - Road.PILLAR_EMBED_DEPTH;
     }
 
     private addBoxPillarTriangles(
         out: Triangle[],
         center: THREE.Vector3,
         topY: number,
-        bottomY: number,
         halfSize: number,
+        terrainMeshes: THREE.Object3D[],
+        fallbackY: number,
     ): void {
-        const b0 = new THREE.Vector3(center.x - halfSize, bottomY, center.z - halfSize);
-        const b1 = new THREE.Vector3(center.x + halfSize, bottomY, center.z - halfSize);
-        const b2 = new THREE.Vector3(center.x + halfSize, bottomY, center.z + halfSize);
-        const b3 = new THREE.Vector3(center.x - halfSize, bottomY, center.z + halfSize);
+        const x0 = center.x - halfSize;
+        const x1 = center.x + halfSize;
+        const z0 = center.z - halfSize;
+        const z1 = center.z + halfSize;
 
-        const t0 = new THREE.Vector3(center.x - halfSize, topY, center.z - halfSize);
-        const t1 = new THREE.Vector3(center.x + halfSize, topY, center.z - halfSize);
-        const t2 = new THREE.Vector3(center.x + halfSize, topY, center.z + halfSize);
-        const t3 = new THREE.Vector3(center.x - halfSize, topY, center.z + halfSize);
+        const y0 = this.getPillarBottomY(x0, z0, terrainMeshes, fallbackY);
+        const y1 = this.getPillarBottomY(x1, z0, terrainMeshes, fallbackY);
+        const y2 = this.getPillarBottomY(x1, z1, terrainMeshes, fallbackY);
+        const y3 = this.getPillarBottomY(x0, z1, terrainMeshes, fallbackY);
 
-        this.pushPillarQuad(out, b0, b1, t1, t0, 0, 1, topY - bottomY);
-        this.pushPillarQuad(out, b1, b2, t2, t1, 0, 1, topY - bottomY);
-        this.pushPillarQuad(out, b2, b3, t3, t2, 0, 1, topY - bottomY);
-        this.pushPillarQuad(out, b3, b0, t0, t3, 0, 1, topY - bottomY);
+        const b0 = new THREE.Vector3(x0, y0, z0);
+        const b1 = new THREE.Vector3(x1, y1, z0);
+        const b2 = new THREE.Vector3(x1, y2, z1);
+        const b3 = new THREE.Vector3(x0, y3, z1);
+
+        const t0 = new THREE.Vector3(x0, topY, z0);
+        const t1 = new THREE.Vector3(x1, topY, z0);
+        const t2 = new THREE.Vector3(x1, topY, z1);
+        const t3 = new THREE.Vector3(x0, topY, z1);
+
+        this.pushPillarQuad(out, b0, b1, t1, t0, 0, 1, topY - Math.min(y0, y1));
+        this.pushPillarQuad(out, b1, b2, t2, t1, 0, 1, topY - Math.min(y1, y2));
+        this.pushPillarQuad(out, b2, b3, t3, t2, 0, 1, topY - Math.min(y2, y3));
+        this.pushPillarQuad(out, b3, b0, t0, t3, 0, 1, topY - Math.min(y3, y0));
     }
 
     private addCircularPillarTriangles(
         out: Triangle[],
         center: THREE.Vector3,
         topY: number,
-        bottomY: number,
         radius: number,
         segments: number,
+        terrainMeshes: THREE.Object3D[],
+        fallbackY: number,
     ): void {
         for (let i = 0; i < segments; i++) {
             const a0 = (i / segments) * Math.PI * 2;
             const a1 = ((i + 1) / segments) * Math.PI * 2;
 
-            const b0 = new THREE.Vector3(center.x + Math.cos(a0) * radius, bottomY, center.z + Math.sin(a0) * radius);
-            const b1 = new THREE.Vector3(center.x + Math.cos(a1) * radius, bottomY, center.z + Math.sin(a1) * radius);
-            const t0 = new THREE.Vector3(center.x + Math.cos(a0) * radius, topY, center.z + Math.sin(a0) * radius);
-            const t1 = new THREE.Vector3(center.x + Math.cos(a1) * radius, topY, center.z + Math.sin(a1) * radius);
+            const x0 = center.x + Math.cos(a0) * radius;
+            const z0 = center.z + Math.sin(a0) * radius;
+            const x1 = center.x + Math.cos(a1) * radius;
+            const z1 = center.z + Math.sin(a1) * radius;
 
-            this.pushPillarQuad(out, b0, b1, t1, t0, i / segments, (i + 1) / segments, topY - bottomY);
+            const y0 = this.getPillarBottomY(x0, z0, terrainMeshes, fallbackY);
+            const y1 = this.getPillarBottomY(x1, z1, terrainMeshes, fallbackY);
+
+            const b0 = new THREE.Vector3(x0, y0, z0);
+            const b1 = new THREE.Vector3(x1, y1, z1);
+            const t0 = new THREE.Vector3(x0, topY, z0);
+            const t1 = new THREE.Vector3(x1, topY, z1);
+
+            this.pushPillarQuad(out, b0, b1, t1, t0, i / segments, (i + 1) / segments, topY - Math.min(y0, y1));
         }
     }
 

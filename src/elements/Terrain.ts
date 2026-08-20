@@ -23,6 +23,9 @@ export default class Terrain extends WorldElement {
 
     constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
         super();
+        // One low-poly terrain caster gives hills readable self-shadowing without
+        // paying the cost of rendering every road/intersection into the shadow map.
+        this.mesh.castShadow = true;
         this.center = center.clone();
         this.width = width;
         this.length = length;

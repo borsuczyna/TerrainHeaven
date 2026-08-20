@@ -775,7 +775,7 @@ body:has(#properties-panel.visible) #history-panel {
 }
 
 #settings-panel {
-    width: 430px;
+    width: 440px;
 }
 
 #texture-browser {
@@ -829,6 +829,22 @@ body:has(#properties-panel.visible) #history-panel {
     padding: 14px 16px 18px;
 }
 
+.sp-heading {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.05;
+}
+
+.sp-eyebrow {
+    margin-bottom: 4px;
+    color: var(--ui-text-tertiary);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
 .sp-section-label {
     margin-bottom: 8px;
     padding-bottom: 7px;
@@ -842,8 +858,28 @@ body:has(#properties-panel.visible) #history-panel {
 }
 
 .sp-label {
-    width: 90px;
+    width: 130px;
     color: var(--ui-text-secondary);
+    font-size: 12px;
+}
+
+.sp-wide-row {
+    gap: 10px;
+}
+
+.sp-help {
+    margin: -2px 0 8px 138px;
+    color: var(--ui-text-tertiary);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.sp-value {
+    width: 42px;
+    flex: 0 0 42px;
+    color: var(--ui-text-secondary);
+    font: 600 10px/1.2 "SFMono-Regular", Consolas, monospace;
+    text-align: right;
 }
 
 .sp-color {

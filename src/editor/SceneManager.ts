@@ -5,6 +5,7 @@ import { singleton } from 'tsyringe';
 @singleton()
 export default class SceneManager {
     public readonly instance: THREE.Scene = new THREE.Scene();
+    public onSceneGeometryChanged: (() => void) | null = null;
     private elements: WorldElement[] = [];
     private terrainDirty = false;
     private terrainDependentsDirty = false;
@@ -23,10 +24,10 @@ export default class SceneManager {
     }
 
     private setupLighting(): void {
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
         this.instance.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
         directionalLight.position.set(10, 20, 10);
         this.instance.add(directionalLight);
     }
@@ -38,6 +39,7 @@ export default class SceneManager {
             if (this.isUpdatingAll) return;
             if (this.isTerrain(object)) this.terrainDependentsDirty = true;
             else this.markTerrainDirty();
+            this.onSceneGeometryChanged?.();
         };
         if (update) object.update();
     }
@@ -54,6 +56,7 @@ export default class SceneManager {
         this.elements = [];
         this.terrainDirty = false;
         this.terrainDependentsDirty = false;
+        this.onSceneGeometryChanged?.();
     }
 
     public remove(element: WorldElement): boolean {
@@ -67,6 +70,7 @@ export default class SceneManager {
         this.instance.remove(element.mesh);
         element.dispose();
         this.markTerrainDirty();
+        this.onSceneGeometryChanged?.();
         return true;
     }
 
@@ -92,6 +96,7 @@ export default class SceneManager {
         } finally {
             this.isUpdatingAll = false;
         }
+        this.onSceneGeometryChanged?.();
     }
 
     public markTerrainDirty(): void {
@@ -120,6 +125,7 @@ export default class SceneManager {
         } finally {
             this.isUpdatingAll = false;
         }
+        this.onSceneGeometryChanged?.();
     }
 
     private isTerrain(element: WorldElement): boolean {

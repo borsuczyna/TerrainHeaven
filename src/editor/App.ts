@@ -102,7 +102,7 @@ export default class App {
         const delta = (time - this.lastTime) / 1000;
         this.lastTime = time;
 
-        this.projectSettings.update();
+        this.projectSettings.update(delta);
         this.scene.flushDirty();
         this.renderer.render(this.scene.instance, this.camera.instance);
         this.camera.update(delta);
