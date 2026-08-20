@@ -1,5 +1,7 @@
 import { singleton, inject } from 'tsyringe';
 import SettingsPanel from './panels/SettingsPanel';
+import HelpPanel from './panels/HelpPanel';
+import ViewGizmoMenu from './panels/ViewGizmoMenu';
 import ProjectSerializer from './ProjectSerializer';
 import SelectionManager from './SelectionManager';
 import HistoryManager from './HistoryManager';
@@ -8,6 +10,8 @@ import HistoryManager from './HistoryManager';
 export default class HeaderManager {
     constructor(
         @inject(SettingsPanel) private readonly settingsPanel: SettingsPanel,
+        @inject(HelpPanel) private readonly helpPanel: HelpPanel,
+        @inject(ViewGizmoMenu) private readonly viewGizmoMenu: ViewGizmoMenu,
         @inject(ProjectSerializer) private readonly serializer: ProjectSerializer,
         @inject(SelectionManager) private readonly selection: SelectionManager,
         @inject(HistoryManager) private readonly history: HistoryManager,
@@ -17,9 +21,18 @@ export default class HeaderManager {
         const btnSettings = document.getElementById('header-settings') as HTMLButtonElement;
         const btnSave = document.getElementById('header-save') as HTMLButtonElement;
         const btnLoad = document.getElementById('header-load') as HTMLButtonElement;
+        const btnView = document.getElementById('header-view') as HTMLButtonElement;
+        const btnHelp = document.getElementById('header-help') as HTMLButtonElement;
+
+        this.viewGizmoMenu.init(btnView);
+
+        this.helpPanel.onHide = () => btnHelp.classList.remove('active');
+        btnHelp.addEventListener('click', () => {
+            this.helpPanel.toggle();
+            btnHelp.classList.toggle('active', this.helpPanel.isVisible);
+        });
 
         btnSettings.addEventListener('click', () => {
-            btnSettings.blur();
             if (this.settingsPanel.isVisible) {
                 this.settingsPanel.hide();
                 btnSettings.classList.remove('active');
@@ -30,15 +43,10 @@ export default class HeaderManager {
         });
 
         btnSave.addEventListener('click', () => {
-            btnSave.blur();
             void this.saveWithDialog();
         });
 
         btnLoad.addEventListener('click', () => {
-            // Buttons keep keyboard focus after a click, so without this, pressing
-            // Space to fly up in the viewport re-triggers this button's click handler
-            // and reopens the load dialog.
-            btnLoad.blur();
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.santown,.json';

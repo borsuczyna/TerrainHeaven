@@ -10,6 +10,7 @@ import RiverSplineTool from './tools/RiverSplineTool';
 import UVTool from './tools/UVTool';
 import TextureBrowser from './panels/TextureBrowser';
 import WireframeManager from './WireframeManager';
+import XRayManager from './XRayManager';
 
 @singleton()
 export default class LeftToolbarManager {
@@ -24,6 +25,7 @@ export default class LeftToolbarManager {
         @inject(UVTool) private readonly uvTool: UVTool,
         @inject(TextureBrowser) private readonly textureBrowser: TextureBrowser,
         @inject(WireframeManager) private readonly wireframeManager: WireframeManager,
+        @inject(XRayManager) private readonly xrayManager: XRayManager,
     ) {}
 
     public init(): void {
@@ -81,6 +83,19 @@ export default class LeftToolbarManager {
         btnTextures.addEventListener('click', () => {
             this.textureBrowser.toggle();
             btnTextures.classList.toggle('active', this.textureBrowser.isVisible);
+        });
+
+        const btnXray = document.getElementById('btn-xray') as HTMLButtonElement;
+        const toggleXray = (): void => {
+            const active = this.xrayManager.toggle();
+            btnXray.classList.toggle('active', active);
+        };
+        btnXray.addEventListener('click', toggleXray);
+        window.addEventListener('keydown', (e) => {
+            const tagName = (e.target as HTMLElement | null)?.tagName;
+            if (tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA') return;
+            if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.key.toLowerCase() === 'x') toggleXray();
         });
     }
 }

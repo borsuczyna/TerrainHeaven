@@ -92,6 +92,21 @@ export default class Camera {
         this.instance.rotation.x = this.pitch;
     }
 
+    // Snaps the camera's look direction to a cardinal view, keeping its current position -
+    // this is a free-fly camera with no orbit pivot, so there is nothing to orbit around.
+    public setView(view: 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right'): void {
+        const maxPitch = Math.PI / 2 - 0.01;
+        switch (view) {
+            case 'top': this.pitch = -maxPitch; break;
+            case 'bottom': this.pitch = maxPitch; break;
+            case 'front': this.yaw = 0; this.pitch = 0; break;
+            case 'back': this.yaw = Math.PI; this.pitch = 0; break;
+            case 'left': this.yaw = Math.PI / 2; this.pitch = 0; break;
+            case 'right': this.yaw = -Math.PI / 2; this.pitch = 0; break;
+        }
+        this.updateRotation();
+    }
+
     public update(delta: number): void {
         const forward = new THREE.Vector3();
         this.instance.getWorldDirection(forward);

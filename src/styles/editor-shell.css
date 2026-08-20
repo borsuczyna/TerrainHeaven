@@ -35,11 +35,18 @@ select {
     font: inherit;
 }
 
-button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
     outline: 2px solid rgba(10, 132, 255, 0.8);
     outline-offset: 2px;
+}
+
+button:focus,
+a:focus,
+[role="button"]:focus,
+[tabindex]:not(input):not(select):not(textarea):focus {
+    outline: none;
 }
 
 #header-toolbar {
@@ -763,6 +770,7 @@ body:has(#properties-panel.visible) #history-panel {
 }
 
 #settings-panel,
+#help-panel,
 #uv-editor,
 #texture-browser {
     border: 1px solid var(--ui-border);
@@ -776,6 +784,115 @@ body:has(#properties-panel.visible) #history-panel {
 
 #settings-panel {
     width: 440px;
+}
+
+#help-panel {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 460px;
+    max-height: 78vh;
+    overflow-y: auto;
+    display: none;
+    flex-direction: column;
+    z-index: 200;
+}
+
+#help-panel.visible {
+    display: flex;
+}
+
+.help-shortcut-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.help-shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 2px;
+    border-bottom: 1px solid var(--ui-border);
+    color: var(--ui-text-secondary);
+    font-size: 12px;
+}
+
+.help-shortcut-row:last-child {
+    border-bottom: none;
+}
+
+.help-shortcut-keys {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.help-shortcut-keys kbd {
+    min-width: 22px;
+    height: 22px;
+    box-sizing: border-box;
+    padding: 0 6px;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid var(--ui-border);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--ui-text);
+    font: 600 10px/1 "SFMono-Regular", Consolas, monospace;
+}
+
+.help-plus {
+    color: var(--ui-text-tertiary);
+    font-size: 10px;
+}
+
+#view-gizmo-menu {
+    position: fixed;
+    display: none;
+    width: 176px;
+    box-sizing: border-box;
+    padding: 8px;
+    border: 1px solid var(--ui-border);
+    border-radius: 14px;
+    background: var(--ui-bg-strong);
+    box-shadow: var(--ui-shadow);
+    backdrop-filter: var(--ui-blur);
+    -webkit-backdrop-filter: var(--ui-blur);
+    z-index: 150;
+}
+
+#view-gizmo-menu.visible {
+    display: block;
+}
+
+.view-gizmo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+}
+
+.view-gizmo-btn {
+    height: 34px;
+    border: 1px solid var(--ui-border);
+    border-radius: 8px;
+    background: var(--ui-surface);
+    color: var(--ui-text-secondary);
+    font: 600 10px/1 inherit;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.view-gizmo-btn:hover {
+    background: var(--ui-surface-hover);
+    border-color: var(--ui-border-strong);
+    color: var(--ui-text);
+}
+
+.view-gizmo-btn:active {
+    transform: scale(0.95);
 }
 
 #texture-browser {

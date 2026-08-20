@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { container } from 'tsyringe';
 import type WorldElement from './WorldElement';
+import XRayManager from '../editor/XRayManager';
 
 const NODE_SIZE = 0.2;
 
@@ -18,6 +20,7 @@ export default class WorldNode {
         this.mesh = new THREE.Mesh(geometry, material);
         this.mesh.position.copy(position);
         this.mesh.userData.worldNode = this;
+        container.resolve(XRayManager).register(this.mesh);
     }
 
     public update(position: THREE.Vector3): void {
@@ -42,6 +45,7 @@ export default class WorldNode {
     }
 
     public dispose(): void {
+        container.resolve(XRayManager).unregister(this.mesh);
         this.mesh.geometry.dispose();
         const materials = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
         for (const material of materials) material.dispose();
