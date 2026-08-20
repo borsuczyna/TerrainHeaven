@@ -67,6 +67,11 @@ export interface ElementData {
     terrainLength?: number;
     terrainGridEnabled?: boolean;
     terrainGridSize?: number;
+    terrainMeshDetail?: number;
+    terrainTriangleLimit?: number;
+    terrainSmoothingEnabled?: boolean;
+    terrainSmoothingRadius?: number;
+    terrainMaxSlope?: number;
 }
 
 interface Connection {
