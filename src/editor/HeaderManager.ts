@@ -70,7 +70,7 @@ export default class HeaderManager {
                 const handle = await picker({
                     suggestedName: 'project.santown',
                     types: [{
-                        description: 'SanTown Project',
+                        description: 'TerrainHeaven Project',
                         accept: { 'application/json': ['.santown', '.json'] },
                     }],
                 });
