@@ -1,30 +1,26 @@
 import * as THREE from 'three';
 import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle } from './WorldElement';
 import WorldNode from './WorldNode';
+import Triangle from './Vertex';
 import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition } from '../editor/Properties';
 
-// A river works like a Road (nodes, curve points, divisions, connectable ends, adjustable
-// width) but never cuts a hole in the terrain. Instead it forces a hairline-thin strip of
-// its own footprint into the terrain's triangulation along its centerline, so a terrain
-// edge always runs exactly under the river banks - snug enough to look seamless, but with
-// no real area removed. `width` only controls the visible bank guide-lines.
+const WATER_COLOR = 0x2f6fa8;
+
+// A river works like a Road: nodes, curve points, Divisions, connectable ends, adjustable
+// Width. Like a Road it cuts a real hole in the terrain at its full width - but instead of
+// leaving that hole for a separate deck mesh, the river's own surface fills it directly at
+// the curve's height, so terrain and water always meet with a seamless, matching edge.
 export default class RiverSpline extends WorldElement {
     public get nodeA(): WorldNode { return this.nodes[0]; }
     public get nodeB(): WorldNode { return this.nodes[1]; }
 
     public width: number = 4;
 
-    // Half the width of the terrain-conforming strip. Small enough to be visually seamless,
-    // large enough to stay well above the terrain mesher's coordinate snapping/area epsilon.
-    private static readonly TERRAIN_EDGE_HALF_WIDTH = 0.01;
-
     private _divisions: number = 0;
     private curvePointA: WorldNode | null = null;
     private curvePointB: WorldNode | null = null;
-    private bankLineLeft: THREE.Line | null = null;
-    private bankLineRight: THREE.Line | null = null;
     private handleLineA: THREE.Line | null = null;
     private handleLineB: THREE.Line | null = null;
 
@@ -94,6 +90,21 @@ export default class RiverSpline extends WorldElement {
     public override update(): void {
         this.updateCurveLines();
         super.update();
+        this.applyWaterMaterial();
+    }
+
+    private applyWaterMaterial(): void {
+        const mats = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+        for (const mat of mats) {
+            const material = mat as THREE.MeshStandardMaterial;
+            material.color.setHex(WATER_COLOR);
+            material.userData.baseColor = material.color.clone();
+            material.transparent = true;
+            material.opacity = 0.8;
+            material.roughness = 0.15;
+            material.metalness = 0.05;
+            material.needsUpdate = true;
+        }
     }
 
     private getBezierCurvePoints(): THREE.Vector3[] {
@@ -114,14 +125,14 @@ export default class RiverSpline extends WorldElement {
         return new THREE.Vector3().crossVectors(direction, up).normalize();
     }
 
-    // Hairline-thin footprint fed into the terrain mesher as a cut area so a terrain edge
-    // conforms exactly to the river's path and height, without visibly removing any surface.
-    public override getOccupiedArea(): OccupiedTriangle[] {
+    // Same full-width quad strip as the surface geometry, so getOccupiedArea() below cuts
+    // the terrain exactly where the water surface will sit - no gap, no overlap.
+    private buildSurfaceTriangles(): Triangle[] {
         const points = this.getBezierCurvePoints();
         if (points.length < 2) return [];
 
-        const halfWidth = RiverSpline.TERRAIN_EDGE_HALF_WIDTH;
-        const triangles: OccupiedTriangle[] = [];
+        const halfWidth = Math.max(0.05, this.width / 2);
+        const triangles: Triangle[] = [];
         for (let i = 0; i < points.length - 1; i++) {
             const rightA = this.getRightAtIndex(points, i);
             const rightB = this.getRightAtIndex(points, i + 1);
@@ -129,45 +140,58 @@ export default class RiverSpline extends WorldElement {
             const aRight = points[i].clone().addScaledVector(rightA, halfWidth);
             const bLeft = points[i + 1].clone().addScaledVector(rightB, -halfWidth);
             const bRight = points[i + 1].clone().addScaledVector(rightB, halfWidth);
-            triangles.push({ a: aLeft, b: aRight, c: bRight });
-            triangles.push({ a: aLeft, b: bRight, c: bLeft });
+            const uA = i / (points.length - 1);
+            const uB = (i + 1) / (points.length - 1);
+            triangles.push(new Triangle(
+                aLeft, aRight, bRight,
+                new THREE.Vector2(0, uA), new THREE.Vector2(1, uA), new THREE.Vector2(1, uB),
+            ));
+            triangles.push(new Triangle(
+                aLeft, bRight, bLeft,
+                new THREE.Vector2(0, uA), new THREE.Vector2(1, uB), new THREE.Vector2(0, uB),
+            ));
         }
         return triangles;
+    }
+
+    protected override getGeometry(): GeometryGroup[] {
+        return [{ name: 'water', triangles: this.buildSurfaceTriangles() }];
+    }
+
+    public override getOccupiedArea(): OccupiedTriangle[] {
+        const projected: OccupiedTriangle[] = [];
+        for (const tri of this.buildSurfaceTriangles()) {
+            const area = Math.abs(
+                (tri.b.x - tri.a.x) * (tri.c.z - tri.a.z)
+                - (tri.b.z - tri.a.z) * (tri.c.x - tri.a.x),
+            ) * 0.5;
+            if (area < 1e-8) continue;
+            projected.push({ a: tri.a.clone(), b: tri.b.clone(), c: tri.c.clone() });
+        }
+        return projected;
     }
 
     private updateCurveLines(): void {
         this.disposeCurveLines();
 
-        const points = this.getBezierCurvePoints();
-        const halfWidth = this.width / 2;
-        const leftPoints = points.map((point, index) => point.clone().addScaledVector(this.getRightAtIndex(points, index), -halfWidth));
-        const rightPoints = points.map((point, index) => point.clone().addScaledVector(this.getRightAtIndex(points, index), halfWidth));
+        if (!this.curvePointA || !this.curvePointB) return;
 
-        const bankMaterial = new THREE.LineBasicMaterial({ color: Config.editor.riverNodeColor });
-        this.bankLineLeft = new THREE.Line(new THREE.BufferGeometry().setFromPoints(leftPoints), bankMaterial);
-        this.mesh.add(this.bankLineLeft);
-        this.bankLineRight = new THREE.Line(new THREE.BufferGeometry().setFromPoints(rightPoints), bankMaterial);
-        this.mesh.add(this.bankLineRight);
+        const handleMaterial = new THREE.LineBasicMaterial({ color: Config.editor.curveNodeColor });
+        this.handleLineA = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+            this.nodeA.mesh.position.clone(),
+            this.curvePointA.mesh.position.clone(),
+        ]), handleMaterial);
+        this.mesh.add(this.handleLineA);
 
-        if (this.curvePointA && this.curvePointB) {
-            const handleMaterial = new THREE.LineBasicMaterial({ color: Config.editor.curveNodeColor });
-            this.handleLineA = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
-                this.nodeA.mesh.position.clone(),
-                this.curvePointA.mesh.position.clone(),
-            ]), handleMaterial);
-            this.mesh.add(this.handleLineA);
-
-            this.handleLineB = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
-                this.nodeB.mesh.position.clone(),
-                this.curvePointB.mesh.position.clone(),
-            ]), handleMaterial);
-            this.mesh.add(this.handleLineB);
-        }
+        this.handleLineB = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+            this.nodeB.mesh.position.clone(),
+            this.curvePointB.mesh.position.clone(),
+        ]), handleMaterial);
+        this.mesh.add(this.handleLineB);
     }
 
     private disposeCurveLines(): void {
-        const lines = [this.bankLineLeft, this.bankLineRight, this.handleLineA, this.handleLineB]
-            .filter((line): line is THREE.Line => line !== null);
+        const lines = [this.handleLineA, this.handleLineB].filter((line): line is THREE.Line => line !== null);
         const materials = new Set<THREE.Material>();
         for (const line of lines) {
             this.mesh.remove(line);
@@ -176,8 +200,6 @@ export default class RiverSpline extends WorldElement {
             for (const material of lineMaterials) materials.add(material);
         }
         for (const material of materials) material.dispose();
-        this.bankLineLeft = null;
-        this.bankLineRight = null;
         this.handleLineA = null;
         this.handleLineB = null;
     }
@@ -202,8 +224,6 @@ export default class RiverSpline extends WorldElement {
         const right = new THREE.Vector3().crossVectors(forward, up).normalize();
         return { forward, right, up };
     }
-
-    protected override getGeometry(): GeometryGroup[] { return []; }
 
     public override getProperties(): PropertyDefinition {
         const self = this;
