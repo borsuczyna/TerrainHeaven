@@ -81,7 +81,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
             this.preview.divisions = DEFAULT_CURVE_DIVISIONS;
             this.preview.setCurvePointA(start.position.clone());
             this.preview.setCurvePointB(start.position.clone());
-            this.preview.update();
+            this.updatePreviewAndConnections();
             this.phase = 'start-handle';
         } else {
             this.phase = 'straight';
@@ -96,13 +96,14 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
 
         if (this.phase === 'start-handle') {
             this.preview.setCurvePointA(point.position);
-            this.preview.update();
+            this.updatePreviewAndConnections();
             return;
         }
 
         if (this.phase === 'straight' || this.phase === 'choose-end') {
             this.preview.nodeB.update(point.position);
             if (this.phase === 'choose-end') this.updateAutomaticEndHandle();
+            else this.updateConnectedElements();
             return;
         }
 
@@ -111,7 +112,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
             // handle on the opposite side of that anchor.
             const incomingHandle = this.endAnchor.clone().multiplyScalar(2).sub(point.position);
             this.preview.setCurvePointB(incomingHandle);
-            this.preview.update();
+            this.updatePreviewAndConnections();
         }
     };
 
@@ -149,7 +150,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
         const start = this.getStartPosition();
         const end = this.preview.nodeB.mesh.position;
         this.preview.setCurvePointB(end.clone().lerp(start, 1 / 3));
-        this.preview.update();
+        this.updatePreviewAndConnections();
     }
 
     private finalize(): void {
@@ -167,7 +168,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
             if (nodeIndex >= 0 && !parent.isConnected(nodeIndex)) this.preview.connect(1, parent, nodeIndex);
         }
 
-        this.preview.update();
+        this.updatePreviewAndConnections();
         this.history.record(this.historyLabel);
         this.reset();
     }
@@ -176,7 +177,22 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
         if (!this.preview || !this.startNode?.parent) return;
         const parent = this.startNode.parent;
         const nodeIndex = parent.getNodeIndex(this.startNode);
-        if (nodeIndex >= 0 && !parent.isConnected(nodeIndex)) this.preview.connect(0, parent, nodeIndex);
+        if (nodeIndex >= 0 && !parent.isConnected(nodeIndex) && this.preview.connect(0, parent, nodeIndex)) {
+            this.updatePreviewAndConnections();
+        }
+    }
+
+    private updatePreviewAndConnections(): void {
+        if (!this.preview) return;
+        this.preview.update();
+        this.updateConnectedElements();
+    }
+
+    private updateConnectedElements(): void {
+        if (!this.preview) return;
+        const connected = new Set<WorldElement>();
+        for (const connection of this.preview.connections.values()) connected.add(connection.element);
+        for (const element of connected) element.update();
     }
 
     private getStartPosition(): THREE.Vector3 {

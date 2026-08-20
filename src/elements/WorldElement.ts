@@ -189,6 +189,10 @@ export default abstract class WorldElement {
         this.setNode(thisNodeIndex, other.getNode(otherNodeIndex));
         this.connections.set(thisNodeIndex, { element: other, nodeIndex: otherNodeIndex });
         other.connections.set(otherNodeIndex, { element: this, nodeIndex: thisNodeIndex });
+        // A connection changes the resolved width, curb and endpoint basis on both sides.
+        // Rebuild both meshes immediately so callers cannot leave the neighbour stale.
+        this.update();
+        other.update();
         return true;
     }
 
