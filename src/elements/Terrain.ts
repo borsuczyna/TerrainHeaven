@@ -261,7 +261,7 @@ export default class Terrain extends WorldElement {
         const cutPoints: TerrainCutPointInput[] = cutPointManager.getPointsWithRadius();
         for (const element of scene.getElements()) {
             if (element instanceof TerrainCutSpline) cutPoints.push(...element.getSampledCutPoints());
-            if (element instanceof RiverSpline) cutPoints.push(...element.getSampledTerrainPoints());
+            if (element instanceof RiverSpline) cutPoints.push(...element.getSampledTerrainPoints(this.center.y));
         }
         const area = this.terrainMesher.build({
             center: this.center,

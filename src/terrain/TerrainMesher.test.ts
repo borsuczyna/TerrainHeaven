@@ -109,4 +109,27 @@ describe('TerrainMesher geometry invariants', () => {
         }
         expect([...edges.values()].every((count) => count === 1 || count === 2)).toBe(true);
     });
+
+    it('applies a local cut-point slope as a geometric angle', () => {
+        const mesher = new TerrainMesher();
+        const bed = new THREE.Vector3(0, -2, 0);
+        const makeSlopePoint = (degrees: number): TerrainCutPointInput => ({
+            position: bed,
+            radius: 2 / Math.tan(THREE.MathUtils.degToRad(degrees)),
+            maxSlopeDegrees: degrees,
+        });
+        const settings = { ...makeInput().settings, meshDetail: 0.5, triangleLimit: 1000 };
+        const shallow = mesher.build(makeInput({ cutPoints: [makeSlopePoint(20)], settings }));
+        const steep = mesher.build(makeInput({ cutPoints: [makeSlopePoint(70)], settings }));
+        const shallowHeights = new Map(shallow.flatMap((tri) => [tri.a, tri.b, tri.c]).map((point) => [
+            `${point.x.toFixed(5)},${point.z.toFixed(5)}`,
+            point.y,
+        ]));
+
+        const profileDifference = steep.flatMap((tri) => [tri.a, tri.b, tri.c]).some((point) => {
+            const shallowHeight = shallowHeights.get(`${point.x.toFixed(5)},${point.z.toFixed(5)}`);
+            return shallowHeight !== undefined && shallowHeight < point.y - 0.25;
+        });
+        expect(profileDifference).toBe(true);
+    });
 });

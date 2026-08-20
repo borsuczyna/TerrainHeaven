@@ -123,10 +123,10 @@ export default class RiverSpline extends WorldElement {
         );
     }
 
-    // Keep a real terrain mesh below the water instead of opening a boolean hole. Samples
-    // cover the full channel width, while bankSlope controls how quickly terrain outside
-    // the channel blends back to its original height.
-    public getSampledTerrainPoints(): TerrainCutPointInput[] {
+    // Keep a real, lowered riverbed below the water instead of opening a boolean hole.
+    // Bank Slope is the actual angle between the bank and horizontal terrain:
+    // horizontal run = vertical depth / tan(angle).
+    public getSampledTerrainPoints(terrainSurfaceY = this.nodeA.mesh.position.y): TerrainCutPointInput[] {
         const p0 = this.nodeA.mesh.position;
         const p1 = this.curvePointA?.mesh.position ?? p0;
         const p2 = this.curvePointB?.mesh.position ?? this.nodeB.mesh.position;
@@ -136,7 +136,8 @@ export default class RiverSpline extends WorldElement {
         const points = sampleCubicBezier(p0, p1, p2, p3, longitudinalDivisions);
         const halfWidth = Math.max(0.05, this.width / 2);
         const crossSteps = Math.min(6, Math.max(2, Math.ceil(this.width / 1.5)));
-        const bankRadius = Math.max(0.5, halfWidth * (90 - THREE.MathUtils.clamp(this.bankSlope, 1, 89)) / 45);
+        const bedDepth = THREE.MathUtils.clamp(this.width * 0.25, 0.35, 4);
+        const bankSlopeDegrees = THREE.MathUtils.clamp(this.bankSlope, 1, 89);
         const samples: TerrainCutPointInput[] = [];
 
         for (let index = 0; index < points.length; index++) {
@@ -148,9 +149,13 @@ export default class RiverSpline extends WorldElement {
 
             for (let cross = 0; cross <= crossSteps; cross++) {
                 const offset = THREE.MathUtils.lerp(-halfWidth, halfWidth, cross / crossSteps);
+                const bedY = points[index].y - bedDepth;
+                const verticalDepth = Math.max(0.01, terrainSurfaceY - bedY);
+                const bankRun = verticalDepth / Math.tan(THREE.MathUtils.degToRad(bankSlopeDegrees));
                 samples.push({
-                    position: points[index].clone().addScaledVector(right, offset),
-                    radius: bankRadius,
+                    position: points[index].clone().addScaledVector(right, offset).setY(bedY),
+                    radius: bankRun,
+                    maxSlopeDegrees: bankSlopeDegrees,
                 });
             }
         }

@@ -25,8 +25,9 @@ describe('RiverSpline', () => {
         expect(material.depthWrite).toBe(false);
         expectFiniteGeometry(river);
 
-        const samples = river.getSampledTerrainPoints();
+        const samples = river.getSampledTerrainPoints(0);
         expect(samples.length).toBeGreaterThan(6);
+        expect(samples.every((sample) => sample.position.y < -0.3)).toBe(true);
         const terrain = new TerrainMesher().build({
             center: new THREE.Vector3(0, 3, 0),
             width: 20,
@@ -48,7 +49,20 @@ describe('RiverSpline', () => {
         ) * 0.5, 0);
         expect(terrainArea).toBeCloseTo(400, 3);
         expect(terrain.flatMap((triangle) => [triangle.a, triangle.b, triangle.c])
-            .some((point) => Math.abs(point.y) < 1e-5)).toBe(true);
+            .some((point) => point.y < -0.3)).toBe(true);
+    });
+
+    it('uses Bank Slope as the actual bank angle', () => {
+        const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0));
+        river.bankSlope = 20;
+        const shallow = river.getSampledTerrainPoints(0);
+        river.bankSlope = 75;
+        const steep = river.getSampledTerrainPoints(0);
+
+        expect(shallow[0].position.y).toBeCloseTo(steep[0].position.y, 8);
+        expect(shallow[0].radius).toBeGreaterThan(steep[0].radius * 5);
+        expect(shallow[0].maxSlopeDegrees).toBe(20);
+        expect(steep[0].maxSlopeDegrees).toBe(75);
     });
 
     it('keeps both meshes valid when two river paths are connected', () => {

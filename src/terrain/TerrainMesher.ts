@@ -57,6 +57,10 @@ export interface TerrainMesherSettings {
 export interface TerrainCutPointInput {
     position: THREE.Vector3;
     radius: number;
+    // Optional local slope override. Rivers use this to turn their Bank Slope
+    // property into a real geometric bank angle instead of relying on the
+    // terrain-wide maximum slope setting.
+    maxSlopeDegrees?: number;
 }
 
 export interface TerrainMesherInput {
@@ -648,6 +652,7 @@ export default class TerrainMesher {
 
             let weightedDelta = 0;
             let weightSum = 0;
+            let localSlopeHeight: number | null = null;
             if (road) {
                 const width = Math.max(input.settings.smoothingRadius, 1.5 * Math.abs(road.height - input.center.y) / road.maxSlope);
                 const weight = this.smoothInfluence(road.distance, width);
@@ -656,14 +661,34 @@ export default class TerrainMesher {
             }
             for (const cutPoint of cutPointMap.values()) {
                 const distance = Math.hypot(point[0] - cutPoint.position.x, point[1] - cutPoint.position.z);
+                if (cutPoint.maxSlopeDegrees !== undefined) {
+                    if (distance > cutPoint.radius) continue;
+                    const pointSlope = Math.tan(THREE.MathUtils.degToRad(
+                        THREE.MathUtils.clamp(cutPoint.maxSlopeDegrees, 1, 89),
+                    ));
+                    const candidate = cutPoint.position.y < input.center.y
+                        ? Math.min(input.center.y, cutPoint.position.y + distance * pointSlope)
+                        : Math.max(input.center.y, cutPoint.position.y - distance * pointSlope);
+                    if (localSlopeHeight === null
+                        || Math.abs(candidate - input.center.y) > Math.abs(localSlopeHeight - input.center.y)) {
+                        localSlopeHeight = candidate;
+                    }
+                    continue;
+                }
                 // A cut point's own radius sets how far its height modification reaches,
                 // still respecting the max-slope constraint so steep drops stay walkable.
-                const width = Math.max(cutPoint.radius, 1.5 * Math.abs(cutPoint.position.y - input.center.y) / maxSlope);
+                const slopeRun = Math.abs(cutPoint.position.y - input.center.y) / Math.max(maxSlope, 1e-6);
+                const width = Math.max(cutPoint.radius, 1.5 * slopeRun);
                 const weight = this.smoothInfluence(distance, width);
                 weightedDelta += (cutPoint.position.y - input.center.y) * weight;
                 weightSum += weight;
             }
-            const height = input.center.y + weightedDelta / Math.max(1, weightSum);
+            let height = input.center.y + weightedDelta / Math.max(1, weightSum);
+            if (localSlopeHeight !== null) {
+                height = localSlopeHeight < input.center.y
+                    ? Math.min(height, localSlopeHeight)
+                    : Math.max(height, localSlopeHeight);
+            }
             heightCache.set(key, height);
             return height;
         };

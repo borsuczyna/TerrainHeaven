@@ -22,7 +22,8 @@ interface GeometryLineContext {
     deckThickness: number;
     leftDistance: number;
     rightDistance: number;
-    maxEdgeLength: number;
+    centerDistance: number;
+    centerTotal: number;
     crownHeight: number;
 }
 
@@ -746,11 +747,13 @@ export default class Road extends WorldElement {
     private getGeometryLine(context: GeometryLineContext): GeometryLineSegment<RoadGeometryGroup>[] {
         const segments: GeometryLineSegment<RoadGeometryGroup>[] = [];
         const laneCount = Math.max(1, Math.round(this.lanes));
-        const laneVAtFrac = (frac: number, invert: boolean): number => {
-            const v = context.leftDistance + (context.rightDistance - context.leftDistance) * frac;
-            const maxV = context.maxEdgeLength * 2;
-            return (invert ? maxV - v : v) * this.roadTexStretch;
-        };
+        // Every vertex in a cross-section uses the same longitudinal coordinate.
+        // Mixing left/right edge distances shears UVs on bends because the outer
+        // edge is longer than the inner one.
+        const laneV = (invert: boolean): number => (
+            (invert ? context.centerTotal - context.centerDistance : context.centerDistance)
+            * this.roadTexStretch
+        );
 
         for (let lane = 0; lane < laneCount; lane++) {
             const laneLeftFrac = lane / laneCount;
@@ -762,13 +765,13 @@ export default class Road extends WorldElement {
                     lateral: -context.halfWidth + 2 * context.halfWidth * laneLeftFrac,
                     height: this.getLaneHeightAtFrac(laneLeftFrac, context.crownHeight),
                     u: invert ? 1 : 0,
-                    v: laneVAtFrac(laneLeftFrac, invert),
+                    v: laneV(invert),
                 },
                 end: {
                     lateral: -context.halfWidth + 2 * context.halfWidth * laneRightFrac,
                     height: this.getLaneHeightAtFrac(laneRightFrac, context.crownHeight),
                     u: invert ? 0 : 1,
-                    v: laneVAtFrac(laneRightFrac, invert),
+                    v: laneV(invert),
                 },
             });
         }
@@ -935,7 +938,8 @@ export default class Road extends WorldElement {
                 deckThickness: dtStart + (dtEnd - dtStart) * t,
                 leftDistance: edge.leftCumDist[i],
                 rightDistance: edge.rightCumDist[i],
-                maxEdgeLength: edge.maxEdgeLen,
+                centerDistance: edge.centerCumDist[i],
+                centerTotal: edge.centerTotal,
                 crownHeight: this.getCrownAt(t),
             };
             geometrySections.push({
@@ -1004,7 +1008,8 @@ export default class Road extends WorldElement {
                 deckThickness: dtStart + (dtEnd - dtStart) * sample.t,
                 leftDistance: 0,
                 rightDistance: 0,
-                maxEdgeLength: 1,
+                centerDistance: 0,
+                centerTotal: 1,
                 crownHeight: this.getCrownAt(sample.t),
             };
 
@@ -1258,7 +1263,7 @@ export default class Road extends WorldElement {
 
         const centerTotal = centerCumDist[centerCumDist.length - 1];
 
-        return { points, rightVecs, halfWidths, leftCumDist, rightCumDist, centerCumDist, centerTotal, maxEdgeLen };
+        return { points, rightVecs, halfWidths, leftCumDist, rightCumDist, centerCumDist, centerTotal };
     }
 
 }
