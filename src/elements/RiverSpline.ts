@@ -149,7 +149,11 @@ export default class RiverSpline extends WorldElement {
         const controlLength = p0.distanceTo(p1) + p1.distanceTo(p2) + p2.distanceTo(p3);
         const detailLevel = THREE.MathUtils.clamp(this.detailLevel, 0.1, 4);
         const targetSpacing = 1.5 / detailLevel;
-        const longitudinalDivisions = Math.min(64, Math.max(this._divisions, Math.ceil(controlLength / targetSpacing) - 1));
+        // Detail provides automatic coverage for long channels, while Divisions
+        // always adds explicit curve segments. Using max() here made Divisions
+        // appear ignored whenever automatic sampling was already denser.
+        const automaticDivisions = Math.min(64, Math.max(0, Math.ceil(controlLength / targetSpacing) - 1));
+        const longitudinalDivisions = automaticDivisions + this._divisions;
         const points = sampleCubicBezier(p0, p1, p2, p3, longitudinalDivisions);
         const halfWidth = Math.max(0.05, this.width / 2);
         const minimumCrossSteps = detailLevel < 0.5 ? 1 : 2;

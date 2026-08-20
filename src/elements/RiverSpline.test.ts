@@ -129,6 +129,21 @@ describe('RiverSpline', () => {
         expect(RiverSpline.deserialize(river.serialize(1)).detailLevel).toBeCloseTo(0.3, 8);
     });
 
+    it('always adds Divisions to both water geometry and terrain remeshing', () => {
+        const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(12, 0, 0));
+        river.detailLevel = 1;
+        river.update();
+        const waterWithoutDivisions = river.mesh.geometry.getAttribute('position').count;
+        const terrainWithoutDivisions = river.getSampledTerrainPoints(0).length;
+
+        river.divisions = 5;
+        const waterWithDivisions = river.mesh.geometry.getAttribute('position').count;
+        const terrainWithDivisions = river.getSampledTerrainPoints(0).length;
+
+        expect(waterWithDivisions).toBeGreaterThan(waterWithoutDivisions);
+        expect(terrainWithDivisions).toBeGreaterThan(terrainWithoutDivisions);
+    });
+
     it('keeps both meshes valid when two river paths are connected', () => {
         const first = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0));
         const second = new RiverSpline(new THREE.Vector3(5, 0, 0), new THREE.Vector3(9, 0, 4));
