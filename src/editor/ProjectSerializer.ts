@@ -6,6 +6,7 @@ import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
 import TerrainCutSpline from '../elements/TerrainCutSpline';
+import RiverSpline from '../elements/RiverSpline';
 import type WorldElement from '../elements/WorldElement';
 import type { ElementData } from '../elements/WorldElement';
 import TerrainCutPointManager from './TerrainCutPointManager';
@@ -111,6 +112,8 @@ export default class ProjectSerializer {
                 el = Terrain.deserialize(ed);
             } else if (ed.type === 'terrainCutSpline') {
                 el = TerrainCutSpline.deserialize(ed);
+            } else if (ed.type === 'river') {
+                el = RiverSpline.deserialize(ed);
             }
             if (!el) continue;
             const textureReferences = Object.fromEntries(
