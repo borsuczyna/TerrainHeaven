@@ -39,7 +39,7 @@ body:has(#foliage-panel.visible) #transform-toolbar {
 .foliage-close:hover { background: rgba(255,255,255,.13); color: white; }
 .foliage-close svg { width: 15px; }
 
-.foliage-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.foliage-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
 .foliage-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; height: 34px; border: 0; border-radius: 7px; background: transparent; color: #858e99; cursor: pointer; font-weight: 650; }
 .foliage-tabs button:hover { color: #dce4ed; background: rgba(255,255,255,.05); }
 .foliage-tabs button.active { color: #8dc7ff; background: rgba(74,157,238,.15); }
@@ -91,10 +91,18 @@ body:has(#foliage-panel.visible) #transform-toolbar {
 .foliage-inspector-section input[type="color"] { padding: 2px; cursor: pointer; }
 .foliage-inspector-section input:focus, .foliage-inspector-section select:focus { border-color: #4c9eea; box-shadow: 0 0 0 2px rgba(76,158,234,.14); }
 .foliage-inspector-section .foliage-check input { justify-self: end; }
-.foliage-wind-preview { margin: 0 0 11px; padding: 8px; border: 1px solid rgba(91,174,255,.22); border-radius: 8px; background: rgba(61,139,211,.08); }
-.foliage-wind-preview label { grid-template-columns: 1fr 120px; margin: 5px 0; }
-.foliage-wind-preview .foliage-wind-toggle { color: #a9d4ff; font-weight: 650; }
-.foliage-wind-preview .foliage-wind-toggle input { justify-self: end; accent-color: #57aaff; }
+.foliage-global-wind { padding: 12px; border: 1px solid rgba(91,174,255,.22); border-radius: 10px; background: linear-gradient(155deg, rgba(61,139,211,.13), rgba(255,255,255,.025)); }
+.foliage-global-wind-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.foliage-global-wind-heading > div { display: flex; flex-direction: column; gap: 2px; }
+.foliage-global-wind-heading span { color: #6faee5; font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; }
+.foliage-global-wind-heading strong { color: #eef5fb; font-size: 15px; }
+.foliage-global-wind-heading svg { width: 25px; color: #70b9f5; }
+.foliage-global-wind label { display: grid; grid-template-columns: 1fr 140px; align-items: center; gap: 10px; margin: 7px 0; color: #aeb9c5; }
+.foliage-global-wind input[type="number"] { width: 100%; min-height: 32px; box-sizing: border-box; padding: 5px 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; outline: none; background: #181a1e; color: #e8ebef; }
+.foliage-global-wind input[type="number"]:focus { border-color: #4c9eea; box-shadow: 0 0 0 2px rgba(76,158,234,.14); }
+.foliage-global-wind .foliage-wind-toggle { margin-bottom: 12px; padding-bottom: 11px; border-bottom: 1px solid rgba(255,255,255,.08); color: #a9d4ff; font-weight: 650; }
+.foliage-global-wind .foliage-wind-toggle input { justify-self: end; accent-color: #57aaff; }
+.foliage-global-wind p { margin: 14px 0 0; color: #788593; font-size: 10px; line-height: 1.45; }
 .foliage-library-link { width: 170px; margin: 7px 0 0 auto; border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.04); color: #aeb7c2; font-size: 10px; }
 .foliage-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 14px; border: 1px dashed rgba(255,255,255,.1); border-radius: 9px; color: #747e8a; text-align: center; }
 .foliage-empty > svg { width: 22px; color: #619acb; }

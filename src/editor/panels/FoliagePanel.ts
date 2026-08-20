@@ -13,7 +13,7 @@ export interface FoliageBrushSettings {
     maxHeightDifference: number;
 }
 
-type PanelTab = 'paint' | 'presets';
+type PanelTab = 'paint' | 'presets' | 'wind';
 
 @singleton()
 export default class FoliagePanel {
@@ -50,6 +50,7 @@ export default class FoliagePanel {
             <div class="foliage-tabs" role="tablist">
                 <button type="button" data-tab="paint" class="active"><i data-lucide="paintbrush"></i> Paint</button>
                 <button type="button" data-tab="presets"><i data-lucide="sliders-horizontal"></i> Presets</button>
+                <button type="button" data-tab="wind"><i data-lucide="wind"></i> Wind</button>
             </div>
             <div class="foliage-body">
                 <div class="foliage-tab-view active" data-view="paint">
@@ -76,6 +77,20 @@ export default class FoliagePanel {
                     <div class="foliage-preset-list" data-role="preset-list"></div>
                     <div class="foliage-preset-editor" data-role="preset-editor"></div>
                 </div>
+                <div class="foliage-tab-view" data-view="wind">
+                    <section class="foliage-global-wind">
+                        <div class="foliage-global-wind-heading">
+                            <div><span>Scene Preview</span><strong>Global Wind</strong></div>
+                            <i data-lucide="wind"></i>
+                        </div>
+                        <label class="foliage-wind-toggle"><span>Preview Wind</span><input type="checkbox" data-wind-preview="enabled"></label>
+                        <label><span>Direction</span><input type="number" min="0" max="359" step="1" data-wind-preview="directionDegrees"></label>
+                        <label><span>Strength</span><input type="number" min="0" max="3" step="0.05" data-wind-preview="strength"></label>
+                        <label><span>Speed</span><input type="number" min="0" max="10" step="0.05" data-wind-preview="speed"></label>
+                        <label><span>Turbulence</span><input type="number" min="0" max="2" step="0.05" data-wind-preview="turbulence"></label>
+                        <p>These values preview the global scene wind. Every preset responds through its own Wind Effectiveness, Height Offset and Base Offset.</p>
+                    </section>
+                </div>
             </div>
         `;
         document.body.appendChild(this.container);
@@ -84,6 +99,7 @@ export default class FoliagePanel {
         this.presetEditor = this.container.querySelector('[data-role="preset-editor"]') as HTMLElement;
         this.bindSettings();
         this.bindPanelActions();
+        this.bindWindPreview();
         this.foliage.onChanged = () => {
             if (!this.suppressRender) this.render();
         };
@@ -99,6 +115,7 @@ export default class FoliagePanel {
     public show(): void {
         this.visible = true;
         this.container.classList.add('visible');
+        this.syncWindPreviewInputs();
         this.render();
     }
 
@@ -137,6 +154,28 @@ export default class FoliagePanel {
         bindNumber('density', 1, 100, true);
         bindNumber('minimumSpacing', 0.02, 5);
         bindNumber('maxHeightDifference', 0, 20);
+    }
+
+    private bindWindPreview(): void {
+        const enabled = this.container.querySelector<HTMLInputElement>('[data-view="wind"] [data-wind-preview="enabled"]')!;
+        enabled.addEventListener('change', () => this.foliage.setWindPreview({ enabled: enabled.checked }));
+        (['directionDegrees', 'strength', 'speed', 'turbulence'] as const).forEach((field) => {
+            const input = this.container.querySelector<HTMLInputElement>(`[data-view="wind"] [data-wind-preview="${field}"]`)!;
+            input.addEventListener('input', () => {
+                const value = Number(input.value);
+                if (Number.isFinite(value)) this.foliage.setWindPreview({ [field]: value });
+            });
+        });
+        this.syncWindPreviewInputs();
+    }
+
+    private syncWindPreviewInputs(): void {
+        const enabled = this.container.querySelector<HTMLInputElement>('[data-view="wind"] [data-wind-preview="enabled"]');
+        if (enabled) enabled.checked = this.foliage.windPreview.enabled;
+        (['directionDegrees', 'strength', 'speed', 'turbulence'] as const).forEach((field) => {
+            const input = this.container.querySelector<HTMLInputElement>(`[data-view="wind"] [data-wind-preview="${field}"]`);
+            if (input) input.value = String(this.foliage.windPreview[field]);
+        });
     }
 
     private addPreset(): void {
@@ -303,13 +342,6 @@ export default class FoliagePanel {
             </section>
             <section class="foliage-inspector-section">
                 <h3>Wind</h3>
-                <div class="foliage-wind-preview">
-                    <label class="foliage-wind-toggle"><span>Preview Wind</span><input type="checkbox" data-wind-preview="enabled"></label>
-                    <label><span>Direction</span><input type="number" min="0" max="359" step="1" data-wind-preview="directionDegrees"></label>
-                    <label><span>Strength</span><input type="number" min="0" max="3" step="0.05" data-wind-preview="strength"></label>
-                    <label><span>Speed</span><input type="number" min="0" max="10" step="0.05" data-wind-preview="speed"></label>
-                    <label><span>Turbulence</span><input type="number" min="0" max="2" step="0.05" data-wind-preview="turbulence"></label>
-                </div>
                 <label><span>Wind Effectiveness</span><input type="number" min="0" max="10" step="0.01" data-type-field="WindEffectiveness"></label>
                 <label><span>Wind Height Offset</span><input type="number" min="-100" max="100" step="0.01" data-type-field="WindHeightOffset"></label>
                 <label><span>Wind Base Offset</span><input type="number" min="-100" max="100" step="0.01" data-type-field="WindBaseOffset"></label>
@@ -352,18 +384,6 @@ export default class FoliagePanel {
         textureSelect.addEventListener('change', () => this.updatePreset({ TexturePath: textureSelect.value }, 'Change Foliage Texture'));
         this.presetEditor.querySelector('[data-action="open-library"]')?.addEventListener('click', () => {
             (document.getElementById('btn-textures') as HTMLButtonElement | null)?.click();
-        });
-
-        const previewEnabled = this.presetEditor.querySelector<HTMLInputElement>('[data-wind-preview="enabled"]')!;
-        previewEnabled.checked = this.foliage.windPreview.enabled;
-        previewEnabled.addEventListener('change', () => this.foliage.setWindPreview({ enabled: previewEnabled.checked }));
-        (['directionDegrees', 'strength', 'speed', 'turbulence'] as const).forEach((field) => {
-            const input = this.presetEditor.querySelector<HTMLInputElement>(`[data-wind-preview="${field}"]`)!;
-            input.value = String(this.foliage.windPreview[field]);
-            input.addEventListener('input', () => {
-                const value = Number(input.value);
-                if (Number.isFinite(value)) this.foliage.setWindPreview({ [field]: value });
-            });
         });
 
         const numberFields: Array<keyof FoliageTypeData> = [
