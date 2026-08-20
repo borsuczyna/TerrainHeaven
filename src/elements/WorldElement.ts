@@ -31,7 +31,7 @@ export interface OccupiedTriangle {
 }
 
 export interface ElementData {
-    type: 'road' | 'intersection' | 'terrain';
+    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
@@ -72,6 +72,8 @@ export interface ElementData {
     terrainSmoothingEnabled?: boolean;
     terrainSmoothingRadius?: number;
     terrainMaxSlope?: number;
+    // Terrain cut spline-specific
+    terrainCutDistance?: number;
 }
 
 interface Connection {

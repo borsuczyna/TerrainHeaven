@@ -5,6 +5,7 @@ import ProjectSettings from './ProjectSettings';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
+import TerrainCutSpline from '../elements/TerrainCutSpline';
 import type WorldElement from '../elements/WorldElement';
 import type { ElementData } from '../elements/WorldElement';
 import TerrainCutPointManager from './TerrainCutPointManager';
@@ -22,7 +23,7 @@ interface ProjectData {
     settings: ProjectSettingsData;
     elements: ElementData[];
     connections: ConnectionData[];
-    terrainCutPoints?: { x: number; y: number; z: number }[];
+    terrainCutPoints?: { x: number; y: number; z: number; radius?: number }[];
     texturePaths?: string[];
 }
 
@@ -108,6 +109,8 @@ export default class ProjectSerializer {
                 el = Intersection.deserialize(ed);
             } else if (ed.type === 'terrain') {
                 el = Terrain.deserialize(ed);
+            } else if (ed.type === 'terrainCutSpline') {
+                el = TerrainCutSpline.deserialize(ed);
             }
             if (!el) continue;
             const textureReferences = Object.fromEntries(

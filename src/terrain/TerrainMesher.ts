@@ -51,12 +51,19 @@ export interface TerrainMesherSettings {
     maxSlopeDegrees: number;
 }
 
+// A point that forces the terrain to a specific height, blending outward over `radius`.
+// Used by both single terrain cut points and points sampled along a terrain cut spline.
+export interface TerrainCutPointInput {
+    position: THREE.Vector3;
+    radius: number;
+}
+
 export interface TerrainMesherInput {
     center: THREE.Vector3;
     width: number;
     length: number;
     cutAreas: OccupiedTriangle[];
-    cutPoints: THREE.Vector3[];
+    cutPoints: TerrainCutPointInput[];
     settings: TerrainMesherSettings;
 }
 
@@ -106,10 +113,10 @@ export default class TerrainMesher {
         const roadBoundarySegments = this.collectRoadSegments(regions, input);
         const roadSegments = this.splitRoadSegmentsAtCutVertices(roadBoundarySegments, input.cutAreas);
         const activeCutPoints = input.cutPoints.filter((point) => (
-            this.findContainingRegion([point.x, point.z], regions) !== null
-            && !this.isInsideCutArea([point.x, point.z], input.cutAreas)
+            this.findContainingRegion([point.position.x, point.position.z], regions) !== null
+            && !this.isInsideCutArea([point.position.x, point.position.z], input.cutAreas)
         ));
-        const activeCutPointKeys = new Set(activeCutPoints.map((point) => this.pointKey([point.x, point.z])));
+        const activeCutPointKeys = new Set(activeCutPoints.map((point) => this.pointKey([point.position.x, point.position.z])));
         const mandatoryEstimate = regions.reduce((sum, region) => (
             sum + region.contour.length + region.holes.reduce((holeSum, hole) => holeSum + hole.length, 0)
         ), 0) + activeCutPoints.length + Math.max(0, roadSegments.length - roadBoundarySegments.length);
@@ -143,7 +150,7 @@ export default class TerrainMesher {
         }
 
         if (triangles.length > input.settings.triangleLimit) {
-            const essential = activeCutPoints.map((point) => [point.x, point.z] as Point2);
+            const essential = activeCutPoints.map((point) => [point.position.x, point.position.z] as Point2);
             triangles = this.insertRoadBoundaryKnots(
                 this.triangulateRegions(regions, essential),
                 roadBoundarySegments,
@@ -171,8 +178,8 @@ export default class TerrainMesher {
         const trianglesWithBoundaryKnots = this.insertRoadBoundaryKnots(triangles, roadBoundarySegments, input.cutAreas);
         this.assertRoadBoundariesAreSealed(trianglesWithBoundaryKnots, roadSegments);
         const activeCutPointKeys = new Set(input.cutPoints
-            .filter((point) => this.findContainingRegion([point.x, point.z], regions) !== null)
-            .map((point) => this.pointKey([point.x, point.z])));
+            .filter((point) => this.findContainingRegion([point.position.x, point.position.z], regions) !== null)
+            .map((point) => this.pointKey([point.position.x, point.position.z])));
         return { signature, triangles: trianglesWithBoundaryKnots, regions, roadSegments, activeCutPointKeys };
     }
 
@@ -403,7 +410,7 @@ export default class TerrainMesher {
         input: TerrainMesherInput,
         regions: PolygonRegion[],
         roadSegments: Segment2[],
-        cutPoints: THREE.Vector3[],
+        cutPoints: TerrainCutPointInput[],
         limit: number,
     ): Point2[] {
         const result: Point2[] = [];
@@ -419,7 +426,7 @@ export default class TerrainMesher {
         };
 
         for (const point of cutPoints) {
-            addExactPoint([point.x, point.z]);
+            addExactPoint([point.position.x, point.position.z]);
         }
 
         if (result.length >= limit || roadSegments.length + cutPoints.length === 0) return result;
@@ -480,8 +487,8 @@ export default class TerrainMesher {
             if (scanned < scanLimit) {
                 for (const point of cutPoints) {
                     visitBounds(
-                        point.x - tier.outerRadius, point.x + tier.outerRadius,
-                        point.z - tier.outerRadius, point.z + tier.outerRadius,
+                        point.position.x - tier.outerRadius, point.position.x + tier.outerRadius,
+                        point.position.z - tier.outerRadius, point.position.z + tier.outerRadius,
                     );
                     if (scanned >= scanLimit) break;
                 }
@@ -509,7 +516,7 @@ export default class TerrainMesher {
         triangles: [Point2, Point2, Point2][],
         regions: PolygonRegion[],
         roadSegments: Segment2[],
-        cutPoints: THREE.Vector3[],
+        cutPoints: TerrainCutPointInput[],
         settings: TerrainMesherSettings,
         limit: number,
         existing: Point2[],
@@ -594,9 +601,9 @@ export default class TerrainMesher {
     }
 
     private applyHeights(topology: TopologyCache, input: TerrainMesherInput): OccupiedTriangle[] {
-        const cutPointMap = new Map<string, THREE.Vector3>();
+        const cutPointMap = new Map<string, TerrainCutPointInput>();
         for (const point of input.cutPoints) {
-            const key = this.pointKey([point.x, point.z]);
+            const key = this.pointKey([point.position.x, point.position.z]);
             if (topology.activeCutPointKeys.has(key)) cutPointMap.set(key, point);
         }
 
@@ -619,8 +626,8 @@ export default class TerrainMesher {
 
             const exactCutPoint = cutPointMap.get(key);
             if (exactCutPoint) {
-                heightCache.set(key, exactCutPoint.y);
-                return exactCutPoint.y;
+                heightCache.set(key, exactCutPoint.position.y);
+                return exactCutPoint.position.y;
             }
 
             const road = this.getNearestRoadConstraint(point, roadHeightSegments);
@@ -643,10 +650,12 @@ export default class TerrainMesher {
                 weightSum += weight;
             }
             for (const cutPoint of cutPointMap.values()) {
-                const distance = Math.hypot(point[0] - cutPoint.x, point[1] - cutPoint.z);
-                const width = Math.max(input.settings.smoothingRadius, 1.5 * Math.abs(cutPoint.y - input.center.y) / maxSlope);
+                const distance = Math.hypot(point[0] - cutPoint.position.x, point[1] - cutPoint.position.z);
+                // A cut point's own radius sets how far its height modification reaches,
+                // still respecting the max-slope constraint so steep drops stay walkable.
+                const width = Math.max(cutPoint.radius, 1.5 * Math.abs(cutPoint.position.y - input.center.y) / maxSlope);
                 const weight = this.smoothInfluence(distance, width);
-                weightedDelta += (cutPoint.y - input.center.y) * weight;
+                weightedDelta += (cutPoint.position.y - input.center.y) * weight;
                 weightSum += weight;
             }
             const height = input.center.y + weightedDelta / Math.max(1, weightSum);
@@ -737,7 +746,7 @@ export default class TerrainMesher {
     private getTopologySignature(input: TerrainMesherInput): string {
         const cutterKeys = input.cutAreas.map((tri) => [tri.a, tri.b, tri.c]
             .map((point) => this.pointKey([point.x, point.z])).sort().join(';')).sort();
-        const pointKeys = input.cutPoints.map((point) => this.pointKey([point.x, point.z])).sort();
+        const pointKeys = input.cutPoints.map((point) => this.pointKey([point.position.x, point.position.z])).sort();
         return [
             this.pointKey([input.center.x, input.center.z]),
             this.snap(input.width), this.snap(input.length),
@@ -859,10 +868,10 @@ export default class TerrainMesher {
         return best;
     }
 
-    private getNearestInfluenceDistance(point: Point2, roads: Segment2[], cutPoints: THREE.Vector3[]): number {
+    private getNearestInfluenceDistance(point: Point2, roads: Segment2[], cutPoints: TerrainCutPointInput[]): number {
         let best = Number.POSITIVE_INFINITY;
         for (const segment of roads) best = Math.min(best, this.projectToSegment(point, segment.a, segment.b).distance);
-        for (const cutPoint of cutPoints) best = Math.min(best, Math.hypot(point[0] - cutPoint.x, point[1] - cutPoint.z));
+        for (const cutPoint of cutPoints) best = Math.min(best, Math.hypot(point[0] - cutPoint.position.x, point[1] - cutPoint.position.z));
         return Number.isFinite(best) ? best : 0;
     }
 

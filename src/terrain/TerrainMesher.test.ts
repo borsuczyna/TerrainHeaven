@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import TerrainMesher, { type TerrainMesherInput } from './TerrainMesher';
+import TerrainMesher, { type TerrainMesherInput, type TerrainCutPointInput } from './TerrainMesher';
 import type { OccupiedTriangle } from '../elements/WorldElement';
+
+const cutPoint = (position: THREE.Vector3, radius = 4): TerrainCutPointInput => ({ position, radius });
 
 const makeInput = (overrides: Partial<TerrainMesherInput> = {}): TerrainMesherInput => ({
     center: new THREE.Vector3(0, 0, 0),
@@ -67,22 +69,22 @@ describe('TerrainMesher geometry invariants', () => {
     });
 
     it('keeps a terrain cut point exact and respects the triangle budget', () => {
-        const cutPoint = new THREE.Vector3(1.25, 6, -0.75);
-        const input = makeInput({ cutPoints: [cutPoint] });
+        const point = new THREE.Vector3(1.25, 6, -0.75);
+        const input = makeInput({ cutPoints: [cutPoint(point)] });
         const triangles = new TerrainMesher().build(input);
-        const matching = triangles.flatMap((tri) => [tri.a, tri.b, tri.c]).filter((point) => (
-            Math.abs(point.x - cutPoint.x) < 1e-5 && Math.abs(point.z - cutPoint.z) < 1e-5
+        const matching = triangles.flatMap((tri) => [tri.a, tri.b, tri.c]).filter((tp) => (
+            Math.abs(tp.x - point.x) < 1e-5 && Math.abs(tp.z - point.z) < 1e-5
         ));
 
         expect(matching.length).toBeGreaterThan(0);
-        expect(matching.every((point) => Math.abs(point.y - cutPoint.y) < 1e-5)).toBe(true);
+        expect(matching.every((tp) => Math.abs(tp.y - point.y) < 1e-5)).toBe(true);
         expect(triangles.length).toBeLessThanOrEqual(input.settings.triangleLimit);
     });
 
     it('reuses the same XZ topology when only a cut point height changes', () => {
         const mesher = new TerrainMesher();
-        const low = mesher.build(makeInput({ cutPoints: [new THREE.Vector3(0, 2, 0)] }));
-        const high = mesher.build(makeInput({ cutPoints: [new THREE.Vector3(0, 8, 0)] }));
+        const low = mesher.build(makeInput({ cutPoints: [cutPoint(new THREE.Vector3(0, 2, 0))] }));
+        const high = mesher.build(makeInput({ cutPoints: [cutPoint(new THREE.Vector3(0, 8, 0))] }));
 
         expect(topologyKey(high)).toEqual(topologyKey(low));
         expect(high.some((tri) => [tri.a, tri.b, tri.c].some((point) => point.x === 0 && point.z === 0 && point.y === 8))).toBe(true);
@@ -91,7 +93,7 @@ describe('TerrainMesher geometry invariants', () => {
     it('does not create non-manifold interior edges', () => {
         const triangles = new TerrainMesher().build(makeInput({
             cutAreas: rectangleCut(-3, 3, -8, 8, -1),
-            cutPoints: [new THREE.Vector3(-8, 4, 0), new THREE.Vector3(8, -3, 0)],
+            cutPoints: [cutPoint(new THREE.Vector3(-8, 4, 0)), cutPoint(new THREE.Vector3(8, -3, 0))],
         }));
         const edges = new Map<string, number>();
         const key = (a: THREE.Vector3, b: THREE.Vector3): string => {

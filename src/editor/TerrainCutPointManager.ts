@@ -4,10 +4,14 @@ import WorldNode from '../elements/WorldNode';
 import SceneManager from './SceneManager';
 import Config from '../utils/Config';
 import type { PropertyDefinition } from './Properties';
+import type { TerrainCutPointInput } from '../terrain/TerrainMesher';
+
+export const DEFAULT_CUT_POINT_RADIUS = 4;
 
 @singleton()
 export default class TerrainCutPointManager {
     private readonly cutPoints: WorldNode[] = [];
+    private readonly radii = new Map<WorldNode, number>();
 
     constructor(
         @inject(SceneManager) private readonly scene: SceneManager,
@@ -17,15 +21,34 @@ export default class TerrainCutPointManager {
         const node = new WorldNode(position, Config.editor.terrainCutNodeColor);
         node.mesh.userData.terrainCutPoint = true;
         this.cutPoints.push(node);
+        this.radii.set(node, DEFAULT_CUT_POINT_RADIUS);
         this.scene.instance.add(node.mesh);
         this.scene.markTerrainDirty();
         return node;
+    }
+
+    public getRadius(node: WorldNode): number {
+        return this.radii.get(node) ?? DEFAULT_CUT_POINT_RADIUS;
+    }
+
+    public setRadius(node: WorldNode, radius: number): void {
+        if (!this.radii.has(node)) return;
+        this.radii.set(node, Math.max(0.1, radius));
+        this.scene.markTerrainDirty();
+    }
+
+    public getPointsWithRadius(): TerrainCutPointInput[] {
+        return this.cutPoints.map((node) => ({
+            position: node.mesh.position.clone(),
+            radius: this.getRadius(node),
+        }));
     }
 
     public removePoint(node: WorldNode): void {
         const index = this.cutPoints.indexOf(node);
         if (index < 0) return;
         this.cutPoints.splice(index, 1);
+        this.radii.delete(node);
         this.scene.instance.remove(node.mesh);
         node.dispose();
         this.scene.markTerrainDirty();
@@ -37,6 +60,7 @@ export default class TerrainCutPointManager {
             node.dispose();
         }
         this.cutPoints.length = 0;
+        this.radii.clear();
         this.scene.markTerrainDirty();
     }
 
@@ -44,20 +68,22 @@ export default class TerrainCutPointManager {
         return [...this.cutPoints];
     }
 
-    public serialize(): { x: number; y: number; z: number }[] {
+    public serialize(): { x: number; y: number; z: number; radius: number }[] {
         return this.cutPoints.map((node) => ({
             x: node.mesh.position.x,
             y: node.mesh.position.y,
             z: node.mesh.position.z,
+            radius: this.getRadius(node),
         }));
     }
 
-    public load(points: { x: number; y: number; z: number }[]): void {
+    public load(points: { x: number; y: number; z: number; radius?: number }[]): void {
         this.clear();
         for (const point of points) {
             const node = new WorldNode(new THREE.Vector3(point.x, point.y, point.z), Config.editor.terrainCutNodeColor);
             node.mesh.userData.terrainCutPoint = true;
             this.cutPoints.push(node);
+            this.radii.set(node, point.radius ?? DEFAULT_CUT_POINT_RADIUS);
             this.scene.instance.add(node.mesh);
         }
         this.scene.markTerrainDirty();
@@ -80,6 +106,15 @@ export default class TerrainCutPointManager {
                         label: 'Position',
                         get: () => node.mesh.position.clone(),
                         set: (value: THREE.Vector3) => { node.update(value); this.scene.markTerrainDirty(); },
+                    },
+                    {
+                        type: 'number',
+                        label: 'Distance',
+                        get: () => this.getRadius(node),
+                        set: (value: number) => { this.setRadius(node, value); },
+                        min: 0.1,
+                        max: 100,
+                        step: 0.1,
                     },
                     {
                         type: 'button',

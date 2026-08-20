@@ -6,7 +6,8 @@ import type { PropertyDefinition } from '../editor/Properties';
 import BooleanManager from '../editor/BooleanManager';
 import SceneManager from '../editor/SceneManager';
 import TerrainCutPointManager from '../editor/TerrainCutPointManager';
-import TerrainMesher from '../terrain/TerrainMesher';
+import TerrainMesher, { type TerrainCutPointInput } from '../terrain/TerrainMesher';
+import TerrainCutSpline from './TerrainCutSpline';
 
 export default class Terrain extends WorldElement {
     public override isTerrainSurface(): boolean { return true; }
@@ -256,12 +257,16 @@ export default class Terrain extends WorldElement {
         const booleanManager = container.resolve(BooleanManager);
         const cutPointManager = container.resolve(TerrainCutPointManager);
         const cutAreas = booleanManager.getTerrainCutAreas(this, scene.getElements());
+        const cutPoints: TerrainCutPointInput[] = cutPointManager.getPointsWithRadius();
+        for (const element of scene.getElements()) {
+            if (element instanceof TerrainCutSpline) cutPoints.push(...element.getSampledCutPoints());
+        }
         const area = this.terrainMesher.build({
             center: this.center,
             width: this.width,
             length: this.length,
             cutAreas,
-            cutPoints: cutPointManager.getPoints().map((node) => node.mesh.position.clone()),
+            cutPoints,
             settings: {
                 meshDetail: this.meshDetail,
                 triangleLimit: this.triangleLimit,
