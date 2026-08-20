@@ -863,6 +863,21 @@ body:has(#properties-panel.visible) #history-panel {
     user-select: none;
 }
 
+#viewport-selection-box {
+    position: fixed;
+    display: none;
+    box-sizing: border-box;
+    border: 1px solid rgba(64, 156, 255, 0.95);
+    background: rgba(49, 132, 255, 0.16);
+    box-shadow: 0 0 0 1px rgba(20, 71, 135, 0.22) inset;
+    pointer-events: none;
+    z-index: 190;
+}
+
+#viewport-selection-box.visible {
+    display: block;
+}
+
 .view-axis-stage {
     position: relative;
     width: 88px;

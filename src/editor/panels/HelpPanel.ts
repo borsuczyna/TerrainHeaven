@@ -26,6 +26,8 @@ const SECTIONS: ShortcutSection[] = [
     {
         title: 'Editing',
         entries: [
+            { keys: ['LMB', 'Drag'], label: 'Box-select multiple elements (on empty space)' },
+            { keys: ['Ctrl', 'LMB', 'Drag'], label: 'Add a curved path with tangent handles' },
             { keys: ['Delete'], label: 'Delete selection' },
             { keys: ['Ctrl', 'C'], label: 'Copy selected element' },
             { keys: ['Ctrl', 'V'], label: 'Paste element / properties' },

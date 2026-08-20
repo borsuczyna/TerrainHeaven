@@ -28,6 +28,11 @@ export default class SelectionManager {
     private copyManager: CopyManager;
     private history: HistoryManager;
     private _nodeWasHit = false;
+    private readonly selectionBox: HTMLDivElement;
+    private boxStart = new THREE.Vector2();
+    private boxCurrent = new THREE.Vector2();
+    private boxSelecting = false;
+    private boxAdditive = false;
 
     public get nodeWasHit(): boolean {
         const v = this._nodeWasHit;
@@ -57,7 +62,13 @@ export default class SelectionManager {
         this.copyManager = copyManager;
         this.history = history;
 
+        this.selectionBox = document.createElement('div');
+        this.selectionBox.id = 'viewport-selection-box';
+        document.body.appendChild(this.selectionBox);
+
         window.addEventListener('mousedown', this.onMouseDown, { capture: true });
+        window.addEventListener('mousemove', this.onBoxMouseMove);
+        window.addEventListener('mouseup', this.onBoxMouseUp);
         window.addEventListener('keydown', this.onKeyDown);
         window.addEventListener('history-restored', this.onHistoryRestored);
         window.addEventListener('delete-selection', this.onDeleteSelection);
@@ -142,9 +153,9 @@ export default class SelectionManager {
                 this.clearElementSelection();
                 this.selectElementAdd(hitElement);
             }
-        } else if (!ctrlHeld) {
-            this.clearNodeSelection();
-            this.clearElementSelection();
+        } else {
+            this.startBoxSelection(e, ctrlHeld);
+            return;
         }
 
         this.emitSelectionChanged();
@@ -210,6 +221,86 @@ export default class SelectionManager {
         this.clearSelection();
         this.emitSelectionChanged();
     };
+
+    private startBoxSelection(e: MouseEvent, additive: boolean): void {
+        this.boxSelecting = true;
+        this.boxAdditive = additive;
+        this.boxStart.set(e.clientX, e.clientY);
+        this.boxCurrent.copy(this.boxStart);
+        this.updateSelectionBoxVisual();
+    }
+
+    private onBoxMouseMove = (e: MouseEvent): void => {
+        if (!this.boxSelecting) return;
+        this.boxCurrent.set(e.clientX, e.clientY);
+        this.updateSelectionBoxVisual();
+    };
+
+    private onBoxMouseUp = (e: MouseEvent): void => {
+        if (e.button !== 0 || !this.boxSelecting) return;
+        this.boxSelecting = false;
+        this.boxCurrent.set(e.clientX, e.clientY);
+        this.selectionBox.classList.remove('visible');
+
+        const moved = this.boxStart.distanceTo(this.boxCurrent) >= 4;
+        if (!moved) {
+            if (!this.boxAdditive) {
+                this.clearNodeSelection();
+                this.clearElementSelection();
+                this.emitSelectionChanged();
+            }
+            return;
+        }
+
+        const left = Math.min(this.boxStart.x, this.boxCurrent.x);
+        const right = Math.max(this.boxStart.x, this.boxCurrent.x);
+        const top = Math.min(this.boxStart.y, this.boxCurrent.y);
+        const bottom = Math.max(this.boxStart.y, this.boxCurrent.y);
+
+        if (!this.boxAdditive) {
+            this.clearNodeSelection();
+            this.clearElementSelection();
+        }
+
+        for (const element of this.sceneManager.getElements()) {
+            const nodes = element.getTransformWorldNodes();
+            const positions: THREE.Vector3[] = [];
+            if (nodes.length > 0) {
+                for (const node of nodes) {
+                    const position = new THREE.Vector3();
+                    node.mesh.getWorldPosition(position);
+                    positions.push(position);
+                }
+            } else {
+                const position = new THREE.Vector3();
+                element.mesh.getWorldPosition(position);
+                positions.push(position);
+            }
+
+            const isInside = positions.some((position) => {
+                const projected = position.project(this.camera.instance);
+                if (projected.z < -1 || projected.z > 1) return false;
+                const x = (projected.x + 1) * 0.5 * window.innerWidth;
+                const y = (1 - projected.y) * 0.5 * window.innerHeight;
+                return x >= left && x <= right && y >= top && y <= bottom;
+            });
+            if (isInside) this.selectElementAdd(element);
+        }
+
+        this.emitSelectionChanged();
+    };
+
+    private updateSelectionBoxVisual(): void {
+        const left = Math.min(this.boxStart.x, this.boxCurrent.x);
+        const top = Math.min(this.boxStart.y, this.boxCurrent.y);
+        const width = Math.abs(this.boxCurrent.x - this.boxStart.x);
+        const height = Math.abs(this.boxCurrent.y - this.boxStart.y);
+        this.selectionBox.style.left = `${left}px`;
+        this.selectionBox.style.top = `${top}px`;
+        this.selectionBox.style.width = `${width}px`;
+        this.selectionBox.style.height = `${height}px`;
+        this.selectionBox.classList.toggle('visible', width >= 4 || height >= 4);
+    }
 
     private onDeleteSelection = (): void => {
         this.deleteSelection();
@@ -391,8 +482,11 @@ export default class SelectionManager {
 
     public dispose(): void {
         window.removeEventListener('mousedown', this.onMouseDown, { capture: true });
+        window.removeEventListener('mousemove', this.onBoxMouseMove);
+        window.removeEventListener('mouseup', this.onBoxMouseUp);
         window.removeEventListener('keydown', this.onKeyDown);
         window.removeEventListener('history-restored', this.onHistoryRestored);
         window.removeEventListener('delete-selection', this.onDeleteSelection);
+        this.selectionBox.remove();
     }
 }
