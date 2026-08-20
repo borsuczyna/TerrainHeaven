@@ -68,9 +68,11 @@ export default class ViewGizmoMenu {
             const button = this.ends[index];
             button.style.left = `${x}%`;
             button.style.top = `${y}%`;
-            button.style.zIndex = `${Math.round((1 - cameraSpace.z) * 10)}`;
-            button.style.opacity = `${THREE.MathUtils.lerp(0.38, 1, (1 - cameraSpace.z) / 2)}`;
-            button.classList.toggle('facing', cameraSpace.z < -0.85);
+            // Camera space looks down -Z. The endpoint pointing back toward the camera
+            // has the larger Z value and must be painted above the far endpoint.
+            button.style.zIndex = `${Math.round((1 + cameraSpace.z) * 10)}`;
+            button.style.opacity = `${THREE.MathUtils.lerp(0.38, 1, (1 + cameraSpace.z) / 2)}`;
+            button.classList.toggle('facing', cameraSpace.z > 0.85);
             return { end, x, y };
         });
 

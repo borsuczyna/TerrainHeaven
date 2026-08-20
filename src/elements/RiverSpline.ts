@@ -7,16 +7,16 @@ import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition } from '../editor/Properties';
 
 const WATER_COLOR = 0x2f6fa8;
+const WATER_SURFACE_OFFSET = 0.025;
 
-// A river works like a Road: nodes, curve points, Divisions, connectable ends, adjustable
-// Width. Like a Road it cuts a real hole in the terrain at its full width - but instead of
-// leaving that hole for a separate deck mesh, the river's own surface fills it directly at
-// the curve's height, so terrain and water always meet with a seamless, matching edge.
+// A river works like a Road: nodes, curve points, Divisions, connectable ends and adjustable
+// width. Its water is an overlay; unlike roads it keeps the terrain surface intact below it.
 export default class RiverSpline extends WorldElement {
     public get nodeA(): WorldNode { return this.nodes[0]; }
     public get nodeB(): WorldNode { return this.nodes[1]; }
 
     public width: number = 4;
+    public override cutsTerrainSurface(): boolean { return false; }
     // How steeply the surrounding terrain drops down to meet the water. Higher = a narrow,
     // steep-banked channel; lower = a wide, gently sloped valley.
     public bankSlope: number = 70;
@@ -104,6 +104,8 @@ export default class RiverSpline extends WorldElement {
             material.userData.baseColor = material.color.clone();
             material.transparent = true;
             material.opacity = 0.8;
+            material.depthWrite = false;
+            material.side = THREE.DoubleSide;
             material.roughness = 0.15;
             material.metalness = 0.05;
             material.needsUpdate = true;
@@ -143,6 +145,10 @@ export default class RiverSpline extends WorldElement {
             const aRight = points[i].clone().addScaledVector(rightA, halfWidth);
             const bLeft = points[i + 1].clone().addScaledVector(rightB, -halfWidth);
             const bRight = points[i + 1].clone().addScaledVector(rightB, halfWidth);
+            aLeft.y += WATER_SURFACE_OFFSET;
+            aRight.y += WATER_SURFACE_OFFSET;
+            bLeft.y += WATER_SURFACE_OFFSET;
+            bRight.y += WATER_SURFACE_OFFSET;
             const uA = i / (points.length - 1);
             const uB = (i + 1) / (points.length - 1);
             triangles.push(new Triangle(

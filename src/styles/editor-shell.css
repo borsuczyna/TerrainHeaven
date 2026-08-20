@@ -863,6 +863,10 @@ body:has(#properties-panel.visible) #history-panel {
     user-select: none;
 }
 
+body:has(#properties-panel.visible) #view-gizmo {
+    right: 350px;
+}
+
 #viewport-selection-box {
     position: fixed;
     display: none;
@@ -1304,6 +1308,12 @@ body:has(#properties-panel.visible) #history-panel {
     }
 
     #viewport-help {
+        display: none;
+    }
+}
+
+@media (max-width: 520px) {
+    body:has(#properties-panel.visible) #view-gizmo {
         display: none;
     }
 }

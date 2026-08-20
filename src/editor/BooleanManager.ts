@@ -57,6 +57,7 @@ export default class BooleanManager {
         for (const element of elements) {
             if (element === terrain) continue;
             if (element.constructor.name === 'Terrain') continue;
+            if (!element.cutsTerrainSurface()) continue;
             const occupied = element.getOccupiedArea();
             if (occupied.length === 0) continue;
             if (!this.boundsOverlap(terrainBounds, this.getBounds(occupied))) continue;

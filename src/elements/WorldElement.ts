@@ -261,6 +261,7 @@ export default abstract class WorldElement {
     public getSidewalkWidth(): number { return 0; }
     public getCurbHeight(): number { return 0; }
     public isTerrainSurface(): boolean { return false; }
+    public cutsTerrainSurface(): boolean { return true; }
     public dependsOnTerrainSurface(): boolean { return false; }
 
     public getResolvedHalfWidth(index: number): number {
