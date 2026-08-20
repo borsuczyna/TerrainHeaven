@@ -11,6 +11,7 @@ import UVTool from './tools/UVTool';
 import TextureBrowser from './panels/TextureBrowser';
 import WireframeManager from './WireframeManager';
 import XRayManager from './XRayManager';
+import FoliageTool from './tools/FoliageTool';
 
 @singleton()
 export default class LeftToolbarManager {
@@ -26,6 +27,7 @@ export default class LeftToolbarManager {
         @inject(TextureBrowser) private readonly textureBrowser: TextureBrowser,
         @inject(WireframeManager) private readonly wireframeManager: WireframeManager,
         @inject(XRayManager) private readonly xrayManager: XRayManager,
+        @inject(FoliageTool) private readonly foliageTool: FoliageTool,
     ) {}
 
     public init(): void {
@@ -43,6 +45,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.terrainCutSplineTool);
         this.toolManager.registerTool(this.riverSplineTool);
         this.toolManager.registerTool(this.uvTool);
+        this.toolManager.registerTool(this.foliageTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
@@ -70,6 +73,7 @@ export default class LeftToolbarManager {
             'T',
         );
         this.toolManager.bindButton('uv', document.getElementById('btn-uv') as HTMLButtonElement, 'UV Mapper', 'U');
+        this.toolManager.bindButton('foliage', document.getElementById('btn-foliage') as HTMLButtonElement, 'Foliage Editor', 'F');
         this.toolManager.setActive('select');
 
         const btnWireframe = document.getElementById('btn-wireframe') as HTMLButtonElement;
