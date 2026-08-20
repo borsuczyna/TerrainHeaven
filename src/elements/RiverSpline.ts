@@ -5,6 +5,7 @@ import Triangle from './Vertex';
 import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition } from '../editor/Properties';
+import type { TerrainCutPointInput } from '../terrain/TerrainMesher';
 
 const WATER_COLOR = 0x2f6fa8;
 const WATER_SURFACE_OFFSET = 0.025;
@@ -120,6 +121,40 @@ export default class RiverSpline extends WorldElement {
             this.nodeB.mesh.position,
             this._divisions,
         );
+    }
+
+    // Keep a real terrain mesh below the water instead of opening a boolean hole. Samples
+    // cover the full channel width, while bankSlope controls how quickly terrain outside
+    // the channel blends back to its original height.
+    public getSampledTerrainPoints(): TerrainCutPointInput[] {
+        const p0 = this.nodeA.mesh.position;
+        const p1 = this.curvePointA?.mesh.position ?? p0;
+        const p2 = this.curvePointB?.mesh.position ?? this.nodeB.mesh.position;
+        const p3 = this.nodeB.mesh.position;
+        const controlLength = p0.distanceTo(p1) + p1.distanceTo(p2) + p2.distanceTo(p3);
+        const longitudinalDivisions = Math.min(64, Math.max(this._divisions, Math.ceil(controlLength / 1.5) - 1));
+        const points = sampleCubicBezier(p0, p1, p2, p3, longitudinalDivisions);
+        const halfWidth = Math.max(0.05, this.width / 2);
+        const crossSteps = Math.min(6, Math.max(2, Math.ceil(this.width / 1.5)));
+        const bankRadius = Math.max(0.5, halfWidth * (90 - THREE.MathUtils.clamp(this.bankSlope, 1, 89)) / 45);
+        const samples: TerrainCutPointInput[] = [];
+
+        for (let index = 0; index < points.length; index++) {
+            const previous = points[Math.max(0, index - 1)];
+            const next = points[Math.min(points.length - 1, index + 1)];
+            const forward = new THREE.Vector3().subVectors(next, previous).normalize();
+            const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+            if (right.lengthSq() < 1e-8) right.copy(this.getRightAtIndex(points, index));
+
+            for (let cross = 0; cross <= crossSteps; cross++) {
+                const offset = THREE.MathUtils.lerp(-halfWidth, halfWidth, cross / crossSteps);
+                samples.push({
+                    position: points[index].clone().addScaledVector(right, offset),
+                    radius: bankRadius,
+                });
+            }
+        }
+        return samples;
     }
 
     private getRightAtIndex(points: THREE.Vector3[], index: number): THREE.Vector3 {

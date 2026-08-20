@@ -8,6 +8,7 @@ import SceneManager from '../editor/SceneManager';
 import TerrainCutPointManager from '../editor/TerrainCutPointManager';
 import TerrainMesher, { type TerrainCutPointInput } from '../terrain/TerrainMesher';
 import TerrainCutSpline from './TerrainCutSpline';
+import RiverSpline from './RiverSpline';
 
 export default class Terrain extends WorldElement {
     public override isTerrainSurface(): boolean { return true; }
@@ -260,6 +261,7 @@ export default class Terrain extends WorldElement {
         const cutPoints: TerrainCutPointInput[] = cutPointManager.getPointsWithRadius();
         for (const element of scene.getElements()) {
             if (element instanceof TerrainCutSpline) cutPoints.push(...element.getSampledCutPoints());
+            if (element instanceof RiverSpline) cutPoints.push(...element.getSampledTerrainPoints());
         }
         const area = this.terrainMesher.build({
             center: this.center,

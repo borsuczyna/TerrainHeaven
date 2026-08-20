@@ -11,6 +11,7 @@ import PropertiesPanel from './PropertiesPanel';
 import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
 import TerrainCutPointManager from './TerrainCutPointManager';
+import XRayManager from './XRayManager';
 
 @singleton()
 export default class SelectionManager {
@@ -51,6 +52,7 @@ export default class SelectionManager {
         @inject(CopyManager) copyManager: CopyManager,
         @inject(HistoryManager) history: HistoryManager,
         @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
+        @inject(XRayManager) private readonly xray: XRayManager,
     ) {
         this.cameraController = camera;
         this.sceneManager = scene;
@@ -103,7 +105,16 @@ export default class SelectionManager {
 
         let hitNode: WorldNode | null = null;
         let hitElement: WorldElement | null = null;
+
+        // X-ray nodes are drawn without depth testing. Match picking to that visual
+        // contract by prioritizing any node under the cursor over occluding surfaces.
+        if (this.xray.isEnabled()) {
+            const xrayHit = intersects.find((hit) => hit.object.userData.worldNode as WorldNode | undefined);
+            hitNode = (xrayHit?.object.userData.worldNode as WorldNode | undefined) ?? null;
+        }
+
         for (const hit of intersects) {
+            if (hitNode) break;
             const node = hit.object.userData.worldNode as WorldNode | undefined;
             if (node) {
                 hitNode = node;
