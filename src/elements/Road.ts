@@ -328,45 +328,29 @@ export default class Road extends WorldElement {
             return [];
         }
 
-        const edge = this.computeEdgeData();
-        const triangles: OccupiedTriangle[] = [];
-        const swStart = this.getResolvedSidewalkWidth(0);
-        const swEnd = this.getResolvedSidewalkWidth(1);
+        const projected: OccupiedTriangle[] = [];
+        const groups = this.getGeometry();
 
-        for (let i = 0; i < edge.points.length - 1; i++) {
-            const tCurr = i / (edge.points.length - 1);
-            const tNext = (i + 1) / (edge.points.length - 1);
-            const swCurr = swStart + (swEnd - swStart) * tCurr;
-            const swNext = swStart + (swEnd - swStart) * tNext;
-            const extraCurr = this.edgeType === 'sidewalk' ? swCurr : 0;
-            const extraNext = this.edgeType === 'sidewalk' ? swNext : 0;
+        for (const group of groups) {
+            for (const tri of group.triangles) {
+                const area = Math.abs(
+                    (tri.b.x - tri.a.x) * (tri.c.z - tri.a.z)
+                    - (tri.b.z - tri.a.z) * (tri.c.x - tri.a.x),
+                ) * 0.5;
+                if (area < 1e-8) continue;
 
-            const hwCurr = edge.halfWidths[i] + extraCurr;
-            const hwNext = edge.halfWidths[i + 1] + extraNext;
-
-            const curr = edge.points[i];
-            const next = edge.points[i + 1];
-            const rightCurr = edge.rightVecs[i];
-            const rightNext = edge.rightVecs[i + 1];
-
-            const bl = curr.clone().sub(rightCurr.clone().multiplyScalar(hwCurr));
-            const br = curr.clone().add(rightCurr.clone().multiplyScalar(hwCurr));
-            const tl = next.clone().sub(rightNext.clone().multiplyScalar(hwNext));
-            const tr = next.clone().add(rightNext.clone().multiplyScalar(hwNext));
-
-            triangles.push({
-                a: bl,
-                b: br,
-                c: tr,
-            });
-            triangles.push({
-                a: bl.clone(),
-                b: tr.clone(),
-                c: tl,
-            });
+                // Preserve the real surface heights. In particular, sidewalk
+                // tops stay at curb height while an open road end remains at
+                // the road profile instead of lifting the whole cut outline.
+                projected.push({
+                    a: tri.a.clone(),
+                    b: tri.b.clone(),
+                    c: tri.c.clone(),
+                });
+            }
         }
 
-        return triangles;
+        return projected;
     }
 
     public override serialize(id: number): ElementData {

@@ -248,12 +248,16 @@ export default abstract class WorldElement {
     public getResolvedSidewalkWidth(index: number): number {
         const conn = this.connections.get(index);
         if (!conn) return this.getSidewalkWidth();
-        return (this.getSidewalkWidth() + conn.element.getSidewalkWidth()) / 2;
+        const ownWidth = this.getSidewalkWidth();
+        const otherWidth = conn.element.getSidewalkWidth();
+        if (ownWidth <= 0 || otherWidth <= 0) return 0;
+        return (ownWidth + otherWidth) / 2;
     }
 
     public getResolvedCurbHeight(index: number): number {
         const conn = this.connections.get(index);
         if (!conn) return this.getCurbHeight();
+        if (this.getSidewalkWidth() <= 0 || conn.element.getSidewalkWidth() <= 0) return 0;
         return (this.getCurbHeight() + conn.element.getCurbHeight()) / 2;
     }
 
