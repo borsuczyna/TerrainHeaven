@@ -147,12 +147,13 @@ export default class RiverSpline extends WorldElement {
         const p2 = this.curvePointB?.mesh.position ?? this.nodeB.mesh.position;
         const p3 = this.nodeB.mesh.position;
         const controlLength = p0.distanceTo(p1) + p1.distanceTo(p2) + p2.distanceTo(p3);
-        const detailLevel = THREE.MathUtils.clamp(Math.round(this.detailLevel), 1, 4);
+        const detailLevel = THREE.MathUtils.clamp(this.detailLevel, 0.1, 4);
         const targetSpacing = 1.5 / detailLevel;
         const longitudinalDivisions = Math.min(64, Math.max(this._divisions, Math.ceil(controlLength / targetSpacing) - 1));
         const points = sampleCubicBezier(p0, p1, p2, p3, longitudinalDivisions);
         const halfWidth = Math.max(0.05, this.width / 2);
-        const crossSteps = Math.min(12, Math.max(2, Math.ceil(this.width / targetSpacing)));
+        const minimumCrossSteps = detailLevel < 0.5 ? 1 : 2;
+        const crossSteps = Math.min(12, Math.max(minimumCrossSteps, Math.ceil(this.width / targetSpacing)));
         const bedDepth = THREE.MathUtils.clamp(this.width * 0.25, 0.35, 4);
         const bankSlopeDegrees = THREE.MathUtils.clamp(this.bankSlope, 1, 89);
         const bankSmoothing = THREE.MathUtils.clamp(this.bankSmoothing, 0, 1);
@@ -194,7 +195,7 @@ export default class RiverSpline extends WorldElement {
 
             // Explicit bank rows prevent a narrow river from being represented by
             // one huge triangle when terrain Mesh Detail is coarser than the bank.
-            const profileSteps = detailLevel + 2;
+            const profileSteps = Math.min(6, Math.max(1, Math.round(detailLevel * 2 + 1)));
             for (const side of [-1, 1]) {
                 const sideNoise = side < 0 ? leftNoise : rightNoise;
                 const sideBankRun = side < 0 ? leftBankRun : rightBankRun;
@@ -392,10 +393,10 @@ export default class RiverSpline extends WorldElement {
                         type: 'number',
                         label: 'Detail Level',
                         get: () => self.detailLevel,
-                        set: (v: number) => { self.detailLevel = THREE.MathUtils.clamp(Math.round(v), 1, 4); self.update(); },
-                        min: 1,
+                        set: (v: number) => { self.detailLevel = THREE.MathUtils.clamp(v, 0.1, 4); self.update(); },
+                        min: 0.1,
                         max: 4,
-                        step: 1,
+                        step: 0.1,
                     },
                 ],
             }],
@@ -436,7 +437,7 @@ export default class RiverSpline extends WorldElement {
         river.bankSlope = THREE.MathUtils.clamp(data.riverBankSlope ?? 70, 1, 89);
         river.bankSmoothing = THREE.MathUtils.clamp(data.riverBankSmoothing ?? 0.65, 0, 1);
         river.irregularityLevel = THREE.MathUtils.clamp(data.riverIrregularityLevel ?? 0, 0, 1);
-        river.detailLevel = THREE.MathUtils.clamp(Math.round(data.riverDetailLevel ?? 1), 1, 4);
+        river.detailLevel = THREE.MathUtils.clamp(data.riverDetailLevel ?? 1, 0.1, 4);
         if (data.divisions && data.divisions > 0) {
             river.divisions = data.divisions;
             if (data.curvePointA) river.setCurvePointA(new THREE.Vector3(data.curvePointA.x, data.curvePointA.y, data.curvePointA.z));

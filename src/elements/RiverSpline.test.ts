@@ -94,7 +94,7 @@ describe('RiverSpline', () => {
         river.width = 4;
         river.bankSlope = 45;
         river.bankSmoothing = 0.65;
-        river.detailLevel = 1;
+        river.detailLevel = 0.1;
         river.irregularityLevel = 0;
         const regularLowDetail = river.getSampledTerrainPoints(0);
 
@@ -103,7 +103,7 @@ describe('RiverSpline', () => {
         const irregularHighDetail = river.getSampledTerrainPoints(0);
         const repeated = river.getSampledTerrainPoints(0);
 
-        expect(irregularHighDetail.length).toBeGreaterThan(regularLowDetail.length * 4);
+        expect(irregularHighDetail.length).toBeGreaterThan(regularLowDetail.length * 10);
         expect(repeated.map((sample) => sample.position.toArray()))
             .toEqual(irregularHighDetail.map((sample) => sample.position.toArray()));
 
@@ -115,6 +115,18 @@ describe('RiverSpline', () => {
         const restored = RiverSpline.deserialize(river.serialize(1));
         expect(restored.irregularityLevel).toBe(1);
         expect(restored.detailLevel).toBe(4);
+    });
+
+    it('accepts fractional detail below the baseline and persists it', () => {
+        const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(12, 0, 0));
+        river.detailLevel = 0.1;
+        const sparse = river.getSampledTerrainPoints(0);
+        river.detailLevel = 1;
+        const baseline = river.getSampledTerrainPoints(0);
+
+        expect(sparse.length).toBeLessThan(baseline.length / 2);
+        river.detailLevel = 0.3;
+        expect(RiverSpline.deserialize(river.serialize(1)).detailLevel).toBeCloseTo(0.3, 8);
     });
 
     it('keeps both meshes valid when two river paths are connected', () => {
