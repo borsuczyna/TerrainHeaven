@@ -59,7 +59,7 @@ export default class ProjectSettings {
     private readonly nightGroundFill = new THREE.Color(0x262c31);
     private readonly cloudDay = new THREE.Color(0xd8d4c9);
     private readonly cloudNight = new THREE.Color(0x697385);
-    private camera: THREE.PerspectiveCamera | null = null;
+    private camera: THREE.Camera | null = null;
     private environmentAccumulator = 0;
     private readonly environmentUpdateInterval = 0.1;
 
@@ -115,7 +115,11 @@ export default class ProjectSettings {
         this.apply();
     }
 
-    public setCamera(camera: THREE.PerspectiveCamera): void {
+    public setCamera(camera: THREE.Camera): void {
+        if (this.camera) {
+            this.camera = camera;
+            return;
+        }
         this.camera = camera;
         this.apply();
     }

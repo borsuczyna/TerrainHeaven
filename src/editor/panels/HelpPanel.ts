@@ -37,10 +37,14 @@ const SECTIONS: ShortcutSection[] = [
     {
         title: 'Viewport',
         entries: [
+            { keys: ['MMB', 'Drag'], label: 'Orbit around view target' },
+            { keys: ['Shift', 'MMB', 'Drag'], label: 'Pan view' },
+            { keys: ['Scroll'], label: 'Zoom in / out' },
             { keys: ['RMB', 'Drag'], label: 'Look around' },
+            { keys: ['Numpad 5'], label: 'Toggle perspective / orthographic' },
             { keys: ['W', 'A', 'S', 'D'], label: 'Fly move' },
             { keys: ['Space'], label: 'Fly up' },
-            { keys: ['Shift'], label: 'Fly down' },
+            { keys: ['Q'], label: 'Fly down' },
             { keys: ['X'], label: 'Toggle X-ray node view (see nodes through walls)' },
             { keys: ['?'], label: 'Toggle this help screen' },
         ],

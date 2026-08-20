@@ -12,7 +12,7 @@ export default class RoadTool implements Tool {
     public readonly name = 'road';
     public readonly blocksCamera = true;
     private scene: SceneManager;
-    private camera: THREE.PerspectiveCamera;
+    private camera: Camera;
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
     private startNode: WorldNode | null = null;
@@ -26,7 +26,7 @@ export default class RoadTool implements Tool {
         @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
         this.scene = scene;
-        this.camera = camera.instance;
+        this.camera = camera;
     }
 
     activate(): void {
@@ -59,7 +59,7 @@ export default class RoadTool implements Tool {
     private updateMouse(e: MouseEvent): void {
         this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-        this.raycaster.setFromCamera(this.mouse, this.camera);
+        this.raycaster.setFromCamera(this.mouse, this.camera.instance);
     }
 
     private findHitNode(): WorldNode | null {

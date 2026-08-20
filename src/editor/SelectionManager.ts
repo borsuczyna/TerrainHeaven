@@ -20,7 +20,7 @@ export default class SelectionManager {
     private mouse = new THREE.Vector2();
     private cameraController: Camera;
     private sceneManager: SceneManager;
-    private camera: THREE.PerspectiveCamera;
+    private camera: Camera;
     private scene: THREE.Scene;
     private gizmo: GizmoManager;
     private toolManager: ToolManager;
@@ -49,7 +49,7 @@ export default class SelectionManager {
     ) {
         this.cameraController = camera;
         this.sceneManager = scene;
-        this.camera = camera.instance;
+        this.camera = camera;
         this.scene = scene.instance;
         this.gizmo = gizmo;
         this.toolManager = toolManager;
@@ -79,7 +79,7 @@ export default class SelectionManager {
         this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
-        this.raycaster.setFromCamera(this.mouse, this.camera);
+        this.raycaster.setFromCamera(this.mouse, this.camera.instance);
 
         // Collect non-gizmo objects for raycasting
         const targets: THREE.Object3D[] = [];

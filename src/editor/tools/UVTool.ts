@@ -18,7 +18,7 @@ export default class UVTool implements Tool {
     public blocksCamera = false;
 
     private scene: THREE.Scene;
-    private camera: THREE.PerspectiveCamera;
+    private camera: Camera;
     private uvEditor: UVEditorPanel;
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
@@ -33,7 +33,7 @@ export default class UVTool implements Tool {
         @inject(UVEditorPanel) uvEditor: UVEditorPanel,
     ) {
         this.scene = scene.instance;
-        this.camera = camera.instance;
+        this.camera = camera;
         this.uvEditor = uvEditor;
     }
 
@@ -83,7 +83,7 @@ export default class UVTool implements Tool {
     private pickUVHit(clientX: number, clientY: number): UVHoverHit | null {
         this.mouse.x = (clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-        this.raycaster.setFromCamera(this.mouse, this.camera);
+        this.raycaster.setFromCamera(this.mouse, this.camera.instance);
 
         const intersects = this.raycaster.intersectObjects(this.getSceneTargets(), true);
         for (const hit of intersects) {

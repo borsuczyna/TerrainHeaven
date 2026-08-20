@@ -21,10 +21,9 @@ export default class HeaderManager {
         const btnSettings = document.getElementById('header-settings') as HTMLButtonElement;
         const btnSave = document.getElementById('header-save') as HTMLButtonElement;
         const btnLoad = document.getElementById('header-load') as HTMLButtonElement;
-        const btnView = document.getElementById('header-view') as HTMLButtonElement;
         const btnHelp = document.getElementById('header-help') as HTMLButtonElement;
 
-        this.viewGizmoMenu.init(btnView);
+        this.viewGizmoMenu.init();
 
         this.helpPanel.onHide = () => btnHelp.classList.remove('active');
         btnHelp.addEventListener('click', () => {

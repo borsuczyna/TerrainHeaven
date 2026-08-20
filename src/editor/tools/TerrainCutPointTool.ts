@@ -20,10 +20,10 @@ export default class TerrainCutPointTool implements Tool {
         @inject(HistoryManager) private readonly history: HistoryManager,
         @inject(TerrainCutPointManager) private readonly cutPointManager: TerrainCutPointManager,
     ) {
-        this.camera = camera.instance;
+        this.camera = camera;
     }
 
-    private readonly camera: THREE.PerspectiveCamera;
+    private readonly camera: Camera;
 
     activate(): void {}
     deactivate(): void {}
@@ -35,7 +35,7 @@ export default class TerrainCutPointTool implements Tool {
 
         this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-        this.raycaster.setFromCamera(this.mouse, this.camera);
+        this.raycaster.setFromCamera(this.mouse, this.camera.instance);
 
         const targets: THREE.Object3D[] = [];
         for (const child of this.scene.instance.children) {

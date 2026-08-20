@@ -37,6 +37,9 @@ export default class GizmoManager {
     ) {
         this.sceneManager = scene;
         this.controls = new TransformControls(camera.instance, renderer.domElement);
+        camera.onChanged(() => {
+            this.controls.camera = camera.instance;
+        });
         this.controls.setMode('translate');
         this.controls.setSize(0.8);
         scene.instance.add(this.helper);

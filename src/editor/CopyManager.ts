@@ -103,7 +103,7 @@ export default class CopyManager {
     }
 
     /** Spawn a new element in front of the camera and apply the snapshot. Returns the new element or null. */
-    public pasteElement(camera: THREE.PerspectiveCamera, scene: SceneManager): WorldElement | null {
+    public pasteElement(camera: THREE.Camera, scene: SceneManager): WorldElement | null {
         if (this.mode === null || this.sourceType === null) return null;
 
         const forward = new THREE.Vector3();

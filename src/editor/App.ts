@@ -57,6 +57,7 @@ export default class App {
 
         // Post-construction wiring
         this.projectSettings.setCamera(this.camera.instance);
+        this.camera.onChanged(() => this.projectSettings.setCamera(this.camera.instance));
         this.camera.setGizmoManager(this.gizmo);
 
         this.leftToolbarManager.init();
