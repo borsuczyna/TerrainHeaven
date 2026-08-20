@@ -17,6 +17,9 @@ export default class RiverSpline extends WorldElement {
     public get nodeB(): WorldNode { return this.nodes[1]; }
 
     public width: number = 4;
+    // How steeply the surrounding terrain drops down to meet the water. Higher = a narrow,
+    // steep-banked channel; lower = a wide, gently sloped valley.
+    public bankSlope: number = 70;
 
     private _divisions: number = 0;
     private curvePointA: WorldNode | null = null;
@@ -160,13 +163,14 @@ export default class RiverSpline extends WorldElement {
 
     public override getOccupiedArea(): OccupiedTriangle[] {
         const projected: OccupiedTriangle[] = [];
+        const bankSlopeDegrees = THREE.MathUtils.clamp(this.bankSlope, 1, 89);
         for (const tri of this.buildSurfaceTriangles()) {
             const area = Math.abs(
                 (tri.b.x - tri.a.x) * (tri.c.z - tri.a.z)
                 - (tri.b.z - tri.a.z) * (tri.c.x - tri.a.x),
             ) * 0.5;
             if (area < 1e-8) continue;
-            projected.push({ a: tri.a.clone(), b: tri.b.clone(), c: tri.c.clone() });
+            projected.push({ a: tri.a.clone(), b: tri.b.clone(), c: tri.c.clone(), bankSlopeDegrees });
         }
         return projected;
     }
@@ -251,6 +255,15 @@ export default class RiverSpline extends WorldElement {
                         max: 32,
                         step: 1,
                     },
+                    {
+                        type: 'number',
+                        label: 'Bank Slope',
+                        get: () => self.bankSlope,
+                        set: (v: number) => { self.bankSlope = THREE.MathUtils.clamp(v, 1, 89); self.update(); },
+                        min: 1,
+                        max: 89,
+                        step: 1,
+                    },
                 ],
             }],
         };
@@ -272,6 +285,7 @@ export default class RiverSpline extends WorldElement {
             divisions: this.divisions,
             curvePointA: curveA ? { x: curveA.x, y: curveA.y, z: curveA.z } : null,
             curvePointB: curveB ? { x: curveB.x, y: curveB.y, z: curveB.z } : null,
+            riverBankSlope: this.bankSlope,
         };
     }
 
@@ -283,6 +297,7 @@ export default class RiverSpline extends WorldElement {
             new THREE.Vector3(b.x, b.y, b.z),
         );
         river.width = Math.max(0.1, data.width ?? 4);
+        river.bankSlope = THREE.MathUtils.clamp(data.riverBankSlope ?? 70, 1, 89);
         if (data.divisions && data.divisions > 0) {
             river.divisions = data.divisions;
             if (data.curvePointA) river.setCurvePointA(new THREE.Vector3(data.curvePointA.x, data.curvePointA.y, data.curvePointA.z));

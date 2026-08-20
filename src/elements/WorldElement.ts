@@ -28,6 +28,9 @@ export interface OccupiedTriangle {
     a: THREE.Vector3;
     b: THREE.Vector3;
     c: THREE.Vector3;
+    // Overrides the terrain's global max slope for blending height near this triangle's
+    // boundary. Lets an element (e.g. a river) demand a steeper bank than roads would want.
+    bankSlopeDegrees?: number;
 }
 
 export interface ElementData {
@@ -74,6 +77,8 @@ export interface ElementData {
     terrainMaxSlope?: number;
     // Terrain cut spline-specific
     terrainCutDistance?: number;
+    // River-specific
+    riverBankSlope?: number;
 }
 
 interface Connection {

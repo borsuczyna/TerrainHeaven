@@ -20,6 +20,7 @@ interface Segment2 {
 interface HeightSegment extends Segment2 {
     heightA: number;
     heightB: number;
+    maxSlope: number;
 }
 
 interface SamplingTier {
@@ -612,11 +613,15 @@ export default class TerrainMesher {
         const roadHeightSegments: HeightSegment[] = [];
         for (const segment of topology.roadSegments) {
             const midpoint: Point2 = [(segment.a[0] + segment.b[0]) / 2, (segment.a[1] + segment.b[1]) / 2];
-            const fallback = this.sampleCutBoundaryHeight(midpoint, input.cutAreas);
-            const heightA = this.sampleCutBoundaryHeight(segment.a, input.cutAreas) ?? fallback;
-            const heightB = this.sampleCutBoundaryHeight(segment.b, input.cutAreas) ?? fallback;
-            if (heightA === null || heightB === null) continue;
-            roadHeightSegments.push({ ...segment, heightA, heightB });
+            const fallback = this.sampleCutBoundary(midpoint, input.cutAreas);
+            const sampleA = this.sampleCutBoundary(segment.a, input.cutAreas) ?? fallback;
+            const sampleB = this.sampleCutBoundary(segment.b, input.cutAreas) ?? fallback;
+            if (!sampleA || !sampleB) continue;
+            // A boundary triangle can override the terrain's global max slope (e.g. a river
+            // wanting a steep bank instead of the wide, gentle blend a road would want).
+            const slopeDegrees = sampleA.slopeDegrees ?? sampleB.slopeDegrees ?? input.settings.maxSlopeDegrees;
+            const segmentMaxSlope = Math.max(0.01, Math.tan(THREE.MathUtils.degToRad(THREE.MathUtils.clamp(slopeDegrees, 1, 89))));
+            roadHeightSegments.push({ ...segment, heightA: sampleA.height, heightB: sampleB.height, maxSlope: segmentMaxSlope });
         }
         const heightCache = new Map<string, number>();
         const heightOf = (point: Point2): number => {
@@ -644,7 +649,7 @@ export default class TerrainMesher {
             let weightedDelta = 0;
             let weightSum = 0;
             if (road) {
-                const width = Math.max(input.settings.smoothingRadius, 1.5 * Math.abs(road.height - input.center.y) / maxSlope);
+                const width = Math.max(input.settings.smoothingRadius, 1.5 * Math.abs(road.height - input.center.y) / road.maxSlope);
                 const weight = this.smoothInfluence(road.distance, width);
                 weightedDelta += (road.height - input.center.y) * weight;
                 weightSum += weight;
@@ -674,33 +679,34 @@ export default class TerrainMesher {
         return result;
     }
 
-    private getNearestRoadConstraint(point: Point2, segments: HeightSegment[]): { distance: number; height: number } | null {
-        let best: { distance: number; height: number } | null = null;
+    private getNearestRoadConstraint(point: Point2, segments: HeightSegment[]): { distance: number; height: number; maxSlope: number } | null {
+        let best: { distance: number; height: number; maxSlope: number } | null = null;
         for (const segment of segments) {
             const projection = this.projectToSegment(point, segment.a, segment.b);
             const height = segment.heightA + (segment.heightB - segment.heightA) * projection.t;
-            if (!best || projection.distance < best.distance) best = { distance: projection.distance, height };
+            if (!best || projection.distance < best.distance) best = { distance: projection.distance, height, maxSlope: segment.maxSlope };
         }
         return best;
     }
 
-    private sampleCutHeight(point: Point2, triangles: OccupiedTriangle[]): number | null {
-        let best: number | null = null;
+    private sampleCutContainedBoundary(point: Point2, triangles: OccupiedTriangle[]): { height: number; slopeDegrees?: number } | null {
+        let best: { height: number; slopeDegrees?: number } | null = null;
         for (const tri of triangles) {
             const barycentric = this.getBarycentric(point, tri);
             if (!barycentric) continue;
             const height = tri.a.y * barycentric.u + tri.b.y * barycentric.v + tri.c.y * barycentric.w;
-            best = best === null ? height : Math.max(best, height);
+            if (!best || height > best.height) best = { height, slopeDegrees: tri.bankSlopeDegrees };
         }
         return best;
     }
 
-    private sampleCutBoundaryHeight(point: Point2, triangles: OccupiedTriangle[]): number | null {
-        const containedHeight = this.sampleCutHeight(point, triangles);
-        if (containedHeight !== null) return containedHeight;
+    private sampleCutBoundary(point: Point2, triangles: OccupiedTriangle[]): { height: number; slopeDegrees?: number } | null {
+        const contained = this.sampleCutContainedBoundary(point, triangles);
+        if (contained !== null) return contained;
 
         let bestDistance = Number.POSITIVE_INFINITY;
         let bestHeight: number | null = null;
+        let bestSlope: number | undefined;
         for (const tri of triangles) {
             const vertices = [tri.a, tri.b, tri.c];
             for (let i = 0; i < 3; i++) {
@@ -711,12 +717,16 @@ export default class TerrainMesher {
                 if (projection.distance < bestDistance - TerrainMesher.EPSILON) {
                     bestDistance = projection.distance;
                     bestHeight = height;
+                    bestSlope = tri.bankSlopeDegrees;
                 } else if (Math.abs(projection.distance - bestDistance) <= TerrainMesher.EPSILON) {
-                    bestHeight = bestHeight === null ? height : Math.max(bestHeight, height);
+                    if (bestHeight === null || height > bestHeight) {
+                        bestHeight = height;
+                        bestSlope = tri.bankSlopeDegrees;
+                    }
                 }
             }
         }
-        return bestHeight;
+        return bestHeight === null ? null : { height: bestHeight, slopeDegrees: bestSlope };
     }
 
     private getBarycentric(point: Point2, tri: OccupiedTriangle): { u: number; v: number; w: number } | null {
