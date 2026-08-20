@@ -109,8 +109,10 @@ export default class FoliageTool implements Tool {
 
     private getFirstSurfaceHit(raycaster: THREE.Raycaster): THREE.Intersection | null {
         const targets = this.scene.getElements().map((element) => element.mesh);
-        const hits = raycaster.intersectObjects(targets, true);
-        return hits.find((hit) => !hit.object.userData.worldNode) ?? null;
+        // WorldElement.mesh is the generated final surface. Its children are editor-only
+        // nodes, Bezier handles and guide lines, so recursive raycasts would paint on helpers.
+        const hits = raycaster.intersectObjects(targets, false);
+        return hits.find((hit) => hit.face !== null) ?? null;
     }
 
     private applyBrush(center: THREE.Vector3, erase: boolean): void {

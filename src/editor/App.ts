@@ -11,6 +11,7 @@ import ProjectSettings from "./ProjectSettings";
 import HeaderManager from "./HeaderManager";
 import TransformToolbarManager from "./TransformToolbarManager";
 import HistoryManager from './HistoryManager';
+import FoliageManager from './FoliageManager';
 
 @injectable()
 export default class App {
@@ -41,6 +42,7 @@ export default class App {
         @inject(TextureDropManager) textureDropManager: TextureDropManager,
         @inject(HeaderManager) headerManager: HeaderManager,
         @inject(TransformToolbarManager) transformToolbarManager: TransformToolbarManager,
+        @inject(FoliageManager) private readonly foliage: FoliageManager,
     ) {
         this.renderer = renderer;
         this.camera = camera;
@@ -105,6 +107,7 @@ export default class App {
 
         this.projectSettings.update(delta);
         this.scene.flushDirty();
+        this.foliage.update(delta);
         this.renderer.render(this.scene.instance, this.camera.instance);
         this.camera.update(delta);
 

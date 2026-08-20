@@ -91,6 +91,10 @@ body:has(#foliage-panel.visible) #transform-toolbar {
 .foliage-inspector-section input[type="color"] { padding: 2px; cursor: pointer; }
 .foliage-inspector-section input:focus, .foliage-inspector-section select:focus { border-color: #4c9eea; box-shadow: 0 0 0 2px rgba(76,158,234,.14); }
 .foliage-inspector-section .foliage-check input { justify-self: end; }
+.foliage-wind-preview { margin: 0 0 11px; padding: 8px; border: 1px solid rgba(91,174,255,.22); border-radius: 8px; background: rgba(61,139,211,.08); }
+.foliage-wind-preview label { grid-template-columns: 1fr 120px; margin: 5px 0; }
+.foliage-wind-preview .foliage-wind-toggle { color: #a9d4ff; font-weight: 650; }
+.foliage-wind-preview .foliage-wind-toggle input { justify-self: end; accent-color: #57aaff; }
 .foliage-library-link { width: 170px; margin: 7px 0 0 auto; border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.04); color: #aeb7c2; font-size: 10px; }
 .foliage-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 14px; border: 1px dashed rgba(255,255,255,.1); border-radius: 9px; color: #747e8a; text-align: center; }
 .foliage-empty > svg { width: 22px; color: #619acb; }

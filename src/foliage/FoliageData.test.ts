@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultFoliageType, FoliageStore } from './FoliageData';
+import { createDefaultFoliageType, FoliageStore, resolveFoliageDimensions } from './FoliageData';
 
 describe('foliage exporter compatibility', () => {
     it('starts empty and keeps the Unity instance contract for user presets', () => {
@@ -48,5 +48,24 @@ describe('foliage exporter compatibility', () => {
         expect(store.types.map((type) => type.DisplayName)).toEqual(['Bush', 'Grass Copy']);
         expect(store.types[0].MaxSize).toBe(3);
         expect(store.getInstances(0)[0].TypeIndex).toBe(0);
+    });
+
+    it('stores normalized factors and resolves placed size from the current preset', () => {
+        const preset = createDefaultFoliageType('Tree');
+        preset.MinSize = 2;
+        preset.MaxSize = 4;
+        preset.LengthFactor = 0.5;
+        const store = new FoliageStore([preset]);
+        store.addInstance(0, { Position: { x: 0, y: 0, z: 0 }, RotationY: 0, ScaleT: 3.5, ColorT: -2, TypeIndex: 99 });
+
+        const instance = store.getInstances(0)[0];
+        expect(instance.ScaleT).toBe(1);
+        expect(instance.ColorT).toBe(0);
+        expect(instance.TypeIndex).toBe(0);
+        expect(resolveFoliageDimensions(store.types[0], instance.ScaleT)).toEqual({ width: 2, height: 4 });
+
+        store.updateType(0, { MinSize: 6, MaxSize: 10, LengthFactor: 0.25 });
+        expect(instance.ScaleT).toBe(1);
+        expect(resolveFoliageDimensions(store.types[0], instance.ScaleT)).toEqual({ width: 2.5, height: 10 });
     });
 });

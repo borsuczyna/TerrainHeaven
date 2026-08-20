@@ -303,6 +303,13 @@ export default class FoliagePanel {
             </section>
             <section class="foliage-inspector-section">
                 <h3>Wind</h3>
+                <div class="foliage-wind-preview">
+                    <label class="foliage-wind-toggle"><span>Preview Wind</span><input type="checkbox" data-wind-preview="enabled"></label>
+                    <label><span>Direction</span><input type="number" min="0" max="359" step="1" data-wind-preview="directionDegrees"></label>
+                    <label><span>Strength</span><input type="number" min="0" max="3" step="0.05" data-wind-preview="strength"></label>
+                    <label><span>Speed</span><input type="number" min="0" max="10" step="0.05" data-wind-preview="speed"></label>
+                    <label><span>Turbulence</span><input type="number" min="0" max="2" step="0.05" data-wind-preview="turbulence"></label>
+                </div>
                 <label><span>Wind Effectiveness</span><input type="number" min="0" max="10" step="0.01" data-type-field="WindEffectiveness"></label>
                 <label><span>Wind Height Offset</span><input type="number" min="-100" max="100" step="0.01" data-type-field="WindHeightOffset"></label>
                 <label><span>Wind Base Offset</span><input type="number" min="-100" max="100" step="0.01" data-type-field="WindBaseOffset"></label>
@@ -347,6 +354,18 @@ export default class FoliagePanel {
             (document.getElementById('btn-textures') as HTMLButtonElement | null)?.click();
         });
 
+        const previewEnabled = this.presetEditor.querySelector<HTMLInputElement>('[data-wind-preview="enabled"]')!;
+        previewEnabled.checked = this.foliage.windPreview.enabled;
+        previewEnabled.addEventListener('change', () => this.foliage.setWindPreview({ enabled: previewEnabled.checked }));
+        (['directionDegrees', 'strength', 'speed', 'turbulence'] as const).forEach((field) => {
+            const input = this.presetEditor.querySelector<HTMLInputElement>(`[data-wind-preview="${field}"]`)!;
+            input.value = String(this.foliage.windPreview[field]);
+            input.addEventListener('input', () => {
+                const value = Number(input.value);
+                if (Number.isFinite(value)) this.foliage.setWindPreview({ [field]: value });
+            });
+        });
+
         const numberFields: Array<keyof FoliageTypeData> = [
             'MinSize', 'MaxSize', 'LengthFactor', 'WindEffectiveness', 'WindHeightOffset',
             'WindBaseOffset', 'MaxDrawDistance', 'AlphaCutoff',
@@ -365,7 +384,7 @@ export default class FoliagePanel {
                 const min = input.min === '' ? -Infinity : Number(input.min);
                 const max = input.max === '' ? Infinity : Number(input.max);
                 this.foliage.updateType(this.editingTypeIndex, { [field]: Math.min(max, Math.max(min, parsed)) });
-                this.foliage.rebuild();
+                this.foliage.previewChanges();
             });
             input.addEventListener('blur', () => {
                 if (!fieldEditing) return;

@@ -4,21 +4,55 @@ import SceneManager from './SceneManager';
 import TextureLibrary from './TextureLibrary';
 import {
     FoliageStore,
+    resolveFoliageDimensions,
     type FoliageInstanceData,
     type FoliageProjectData,
     type FoliageTypeData,
     type FoliageVector3,
 } from '../foliage/FoliageData';
 
+export interface FoliageWindPreviewSettings {
+    enabled: boolean;
+    directionDegrees: number;
+    strength: number;
+    speed: number;
+    turbulence: number;
+}
+
+interface FoliageWindUniforms {
+    time: { value: number };
+    direction: { value: THREE.Vector2 };
+    strength: { value: number };
+    speed: { value: number };
+    turbulence: { value: number };
+    effectiveness: { value: number };
+    heightInfluence: { value: number };
+    baseOffset: { value: number };
+}
+
 @singleton()
 export default class FoliageManager {
     public readonly store = new FoliageStore();
+    public readonly windPreview: FoliageWindPreviewSettings = {
+        enabled: false,
+        directionDegrees: 0,
+        strength: 0.25,
+        speed: 0.75,
+        turbulence: 0.2,
+    };
     public onChanged: (() => void) | null = null;
 
     private readonly root = new THREE.Group();
     private readonly meshes = new Map<number, THREE.InstancedMesh>();
     private readonly fallbackTextures = new Map<number, THREE.CanvasTexture>();
+    private readonly textureCache = new Map<string, THREE.Texture>();
+    private readonly textureLoads = new Map<string, Promise<THREE.Texture | null>>();
+    private readonly textureVersions = new Map<string, number>();
+    private readonly dirtyTypes = new Set<number>();
+    private readonly windMaterials = new Set<THREE.MeshBasicMaterial>();
     private readonly geometry = this.createCrossQuadGeometry();
+    private structureDirty = false;
+    private windTime = 0;
 
     constructor(
         @inject(SceneManager) private readonly scene: SceneManager,
@@ -37,22 +71,30 @@ export default class FoliageManager {
 
     public addInstance(typeIndex: number, instance: FoliageInstanceData): void {
         this.store.addInstance(typeIndex, instance);
+        this.dirtyTypes.add(typeIndex);
     }
 
     public addType(type?: FoliageTypeData): number {
-        return this.store.addType(type);
+        const index = this.store.addType(type);
+        this.structureDirty = true;
+        return index;
     }
 
     public duplicateType(typeIndex: number): number {
-        return this.store.duplicateType(typeIndex);
+        const index = this.store.duplicateType(typeIndex);
+        if (index >= 0) this.structureDirty = true;
+        return index;
     }
 
     public updateType(typeIndex: number, patch: Partial<FoliageTypeData>): void {
         this.store.updateType(typeIndex, patch);
+        this.dirtyTypes.add(typeIndex);
     }
 
     public removeType(typeIndex: number): boolean {
-        return this.store.removeType(typeIndex);
+        const removed = this.store.removeType(typeIndex);
+        if (removed) this.structureDirty = true;
+        return removed;
     }
 
     public isTooClose(typeIndex: number, point: FoliageVector3, spacing: number): boolean {
@@ -60,12 +102,50 @@ export default class FoliageManager {
     }
 
     public removeInstancesNear(position: FoliageVector3, radius: number): number {
-        return this.store.removeInstancesNear(position, radius);
+        const counts = this.types.map((_, index) => this.getInstances(index).length);
+        const removed = this.store.removeInstancesNear(position, radius);
+        counts.forEach((count, index) => {
+            if (this.getInstances(index).length !== count) this.dirtyTypes.add(index);
+        });
+        return removed;
     }
 
     public commitChanges(): void {
-        this.rebuild();
+        this.flushDirty();
         this.onChanged?.();
+    }
+
+    public previewChanges(): void {
+        this.flushDirty();
+    }
+
+    public setWindPreview(patch: Partial<FoliageWindPreviewSettings>): void {
+        Object.assign(this.windPreview, patch);
+        this.windPreview.directionDegrees = ((this.windPreview.directionDegrees % 360) + 360) % 360;
+        this.windPreview.strength = THREE.MathUtils.clamp(this.windPreview.strength, 0, 3);
+        this.windPreview.speed = THREE.MathUtils.clamp(this.windPreview.speed, 0, 10);
+        this.windPreview.turbulence = THREE.MathUtils.clamp(this.windPreview.turbulence, 0, 2);
+        this.syncWindUniforms();
+    }
+
+    public update(deltaSeconds: number): void {
+        if (!this.windPreview.enabled) return;
+        this.windTime += Math.max(0, deltaSeconds);
+        for (const material of this.windMaterials) {
+            const uniforms = material.userData.foliageWindUniforms as FoliageWindUniforms | undefined;
+            if (uniforms) uniforms.time.value = this.windTime;
+        }
+    }
+
+    public invalidateTexture(path: string): void {
+        const key = this.textureKey(path);
+        this.textureVersions.set(key, (this.textureVersions.get(key) ?? 0) + 1);
+        this.textureLoads.delete(key);
+        this.textureCache.get(key)?.dispose();
+        this.textureCache.delete(key);
+        this.types.forEach((type, index) => {
+            if (this.textureKey(type.TexturePath) === key) this.dirtyTypes.add(index);
+        });
     }
 
     public serialize(): FoliageProjectData {
@@ -85,71 +165,125 @@ export default class FoliageManager {
     }
 
     public rebuild(): void {
-        for (const mesh of this.meshes.values()) {
-            this.root.remove(mesh);
-            mesh.dispose();
-            (mesh.material as THREE.Material).dispose();
-        }
+        for (const typeIndex of [...this.meshes.keys()]) this.removeMesh(typeIndex);
         this.meshes.clear();
         for (const texture of this.fallbackTextures.values()) texture.dispose();
         this.fallbackTextures.clear();
+        this.dirtyTypes.clear();
+        this.structureDirty = false;
 
-        for (let typeIndex = 0; typeIndex < this.types.length; typeIndex++) {
-            const instances = this.getInstances(typeIndex);
-            if (instances.length === 0) continue;
+        for (let typeIndex = 0; typeIndex < this.types.length; typeIndex++) this.rebuildType(typeIndex);
+    }
 
-            const type = this.types[typeIndex];
-            const material = this.createMaterial(typeIndex, type);
-            const mesh = new THREE.InstancedMesh(this.geometry, material, instances.length);
-            mesh.name = `Foliage: ${type.DisplayName}`;
-            mesh.castShadow = type.CastShadows;
-            mesh.receiveShadow = true;
-            mesh.frustumCulled = false;
+    private flushDirty(): void {
+        if (this.structureDirty) {
+            this.rebuild();
+            return;
+        }
+        const dirty = [...this.dirtyTypes];
+        this.dirtyTypes.clear();
+        dirty.forEach((typeIndex) => this.rebuildType(typeIndex));
+    }
 
-            const matrix = new THREE.Matrix4();
-            const quaternion = new THREE.Quaternion();
-            const position = new THREE.Vector3();
-            const scale = new THREE.Vector3();
-            const instanceColor = new THREE.Color();
-            const colorA = new THREE.Color(type.ColorA.r, type.ColorA.g, type.ColorA.b);
-            const colorB = new THREE.Color(type.ColorB.r, type.ColorB.g, type.ColorB.b);
+    private rebuildType(typeIndex: number): void {
+        this.removeMesh(typeIndex);
+        const fallback = this.fallbackTextures.get(typeIndex);
+        fallback?.dispose();
+        this.fallbackTextures.delete(typeIndex);
 
-            instances.forEach((instance, index) => {
-                const height = THREE.MathUtils.lerp(type.MinSize, type.MaxSize, instance.ScaleT);
-                const width = height * type.LengthFactor;
-                position.set(instance.Position.x, instance.Position.y, instance.Position.z);
-                quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(instance.RotationY));
-                scale.set(width, height, width);
-                matrix.compose(position, quaternion, scale);
-                mesh.setMatrixAt(index, matrix);
-                instanceColor.copy(colorA).lerp(colorB, instance.ColorT);
-                mesh.setColorAt(index, instanceColor);
-            });
-            mesh.instanceMatrix.needsUpdate = true;
-            if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-            this.root.add(mesh);
-            this.meshes.set(typeIndex, mesh);
+        const type = this.types[typeIndex];
+        const instances = this.getInstances(typeIndex);
+        if (!type || instances.length === 0) return;
 
-            if (!type.TexturePath) continue;
-            void this.textureLibrary.loadTexture(type.TexturePath).then((texture) => {
-                if (!texture || this.meshes.get(typeIndex) !== mesh) return;
+        const material = this.createMaterial(typeIndex, type);
+        const mesh = new THREE.InstancedMesh(this.geometry, material, instances.length);
+        mesh.name = `Foliage: ${type.DisplayName}`;
+        mesh.castShadow = type.CastShadows;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+
+        const matrix = new THREE.Matrix4();
+        const quaternion = new THREE.Quaternion();
+        const position = new THREE.Vector3();
+        const scale = new THREE.Vector3();
+        const instanceColor = new THREE.Color();
+        const colorA = new THREE.Color(type.ColorA.r, type.ColorA.g, type.ColorA.b);
+        const colorB = new THREE.Color(type.ColorB.r, type.ColorB.g, type.ColorB.b);
+
+        instances.forEach((instance, index) => {
+            const dimensions = resolveFoliageDimensions(type, instance.ScaleT);
+            position.set(instance.Position.x, instance.Position.y, instance.Position.z);
+            quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(instance.RotationY));
+            scale.set(dimensions.width, dimensions.height, dimensions.width);
+            matrix.compose(position, quaternion, scale);
+            mesh.setMatrixAt(index, matrix);
+            instanceColor.copy(colorA).lerp(colorB, instance.ColorT);
+            mesh.setColorAt(index, instanceColor);
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        this.root.add(mesh);
+        this.meshes.set(typeIndex, mesh);
+
+        if (!type.TexturePath) return;
+        void this.getCachedTexture(type.TexturePath).then((texture) => {
+            if (!texture || this.meshes.get(typeIndex) !== mesh) return;
+            material.map = texture;
+            material.alphaMap = null;
+            material.color.setHex(0xffffff);
+            material.alphaTest = type.AlphaCutoff;
+            material.needsUpdate = true;
+        });
+    }
+
+    private removeMesh(typeIndex: number): void {
+        const mesh = this.meshes.get(typeIndex);
+        if (!mesh) return;
+        this.root.remove(mesh);
+        mesh.dispose();
+        const material = mesh.material as THREE.MeshBasicMaterial;
+        this.windMaterials.delete(material);
+        material.dispose();
+        this.meshes.delete(typeIndex);
+    }
+
+    private getCachedTexture(path: string): Promise<THREE.Texture | null> {
+        const key = this.textureKey(path);
+        const cached = this.textureCache.get(key);
+        if (cached) return Promise.resolve(cached);
+        const pending = this.textureLoads.get(key);
+        if (pending) return pending;
+
+        const version = this.textureVersions.get(key) ?? 0;
+        let load: Promise<THREE.Texture | null>;
+        load = this.textureLibrary.loadTexture(path)
+            .then((texture) => {
+                if (!texture) return null;
+                if ((this.textureVersions.get(key) ?? 0) !== version) {
+                    texture.dispose();
+                    return null;
+                }
                 texture.wrapS = THREE.ClampToEdgeWrapping;
                 texture.wrapT = THREE.ClampToEdgeWrapping;
                 texture.flipY = true;
-                material.map = texture;
-                material.alphaMap = null;
-                material.color.setHex(0xffffff);
-                material.vertexColors = true;
-                material.alphaTest = type.AlphaCutoff;
-                material.needsUpdate = true;
+                this.textureCache.set(key, texture);
+                return texture;
+            })
+            .finally(() => {
+                if (this.textureLoads.get(key) === load) this.textureLoads.delete(key);
             });
-        }
+        this.textureLoads.set(key, load);
+        return load;
+    }
+
+    private textureKey(path: string): string {
+        return path.replace(/\\/g, '/').replace(/^\.\//, '').trim();
     }
 
     private createMaterial(typeIndex: number, type: FoliageTypeData): THREE.MeshBasicMaterial {
         const fallbackColor = new THREE.Color(type.ColorA.r, type.ColorA.g, type.ColorA.b)
             .lerp(new THREE.Color(type.ColorB.r, type.ColorB.g, type.ColorB.b), 0.5);
-        return new THREE.MeshBasicMaterial({
+        const material = new THREE.MeshBasicMaterial({
             alphaMap: this.getFallbackTexture(typeIndex, type),
             color: fallbackColor,
             // Keep compatibility ColorT in data; the editor preview uses the type
@@ -161,6 +295,85 @@ export default class FoliageManager {
             side: THREE.DoubleSide,
             toneMapped: false,
         });
+        this.configureWindMaterial(material, type);
+        return material;
+    }
+
+    private configureWindMaterial(material: THREE.MeshBasicMaterial, type: FoliageTypeData): void {
+        const angle = THREE.MathUtils.degToRad(this.windPreview.directionDegrees);
+        const uniforms: FoliageWindUniforms = {
+            time: { value: this.windTime },
+            direction: { value: new THREE.Vector2(Math.cos(angle), Math.sin(angle)) },
+            strength: { value: this.windPreview.enabled ? this.windPreview.strength : 0 },
+            speed: { value: this.windPreview.speed },
+            turbulence: { value: this.windPreview.turbulence },
+            effectiveness: { value: type.WindEffectiveness },
+            heightInfluence: { value: type.WindHeightOffset },
+            baseOffset: { value: type.WindBaseOffset },
+        };
+        material.userData.foliageWindUniforms = uniforms;
+        material.onBeforeCompile = (shader) => {
+            shader.uniforms.uFoliageTime = uniforms.time;
+            shader.uniforms.uFoliageDirection = uniforms.direction;
+            shader.uniforms.uFoliageStrength = uniforms.strength;
+            shader.uniforms.uFoliageSpeed = uniforms.speed;
+            shader.uniforms.uFoliageTurbulence = uniforms.turbulence;
+            shader.uniforms.uFoliageEffectiveness = uniforms.effectiveness;
+            shader.uniforms.uFoliageHeightInfluence = uniforms.heightInfluence;
+            shader.uniforms.uFoliageBaseOffset = uniforms.baseOffset;
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <common>',
+                `#include <common>
+                uniform float uFoliageTime;
+                uniform vec2 uFoliageDirection;
+                uniform float uFoliageStrength;
+                uniform float uFoliageSpeed;
+                uniform float uFoliageTurbulence;
+                uniform float uFoliageEffectiveness;
+                uniform float uFoliageHeightInfluence;
+                uniform float uFoliageBaseOffset;`,
+            );
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <project_vertex>',
+                `vec4 foliageLocalPosition = vec4(transformed, 1.0);
+                #ifdef USE_INSTANCING
+                    vec4 foliageWorldPosition = modelMatrix * instanceMatrix * foliageLocalPosition;
+                    vec4 foliageWorldPivot = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+                #else
+                    vec4 foliageWorldPosition = modelMatrix * foliageLocalPosition;
+                    vec4 foliageWorldPivot = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+                #endif
+                float foliageHeight = (foliageWorldPosition.y - foliageWorldPivot.y) + uFoliageBaseOffset;
+                float foliageHeightFactor = clamp(foliageHeight * uFoliageHeightInfluence, 0.0, 1.0);
+                foliageHeightFactor *= foliageHeightFactor;
+                vec2 foliageDirection = normalize(uFoliageDirection + vec2(0.001));
+                vec2 foliagePerpendicular = vec2(-foliageDirection.y, foliageDirection.x);
+                float foliagePhase = uFoliageTime * uFoliageSpeed;
+                float foliageWave1 = sin(foliagePhase + foliageWorldPosition.x * 0.5 + foliageWorldPosition.z * 0.3);
+                float foliageWave2 = sin(foliagePhase * 1.3 + foliageWorldPosition.x * 0.8) * 0.45;
+                float foliageTurbulenceWave = sin(foliagePhase * 2.1 + foliageWorldPosition.z * 1.5) * uFoliageTurbulence;
+                float foliageSway = (foliageWave1 + foliageWave2 + foliageTurbulenceWave)
+                    * uFoliageStrength * uFoliageEffectiveness * foliageHeightFactor;
+                foliageWorldPosition.xz += foliageDirection * foliageSway
+                    + foliagePerpendicular * (foliageSway * 0.3 * sin(foliagePhase * 0.7 + foliageWorldPosition.z));
+                vec4 mvPosition = viewMatrix * foliageWorldPosition;
+                gl_Position = projectionMatrix * mvPosition;`,
+            );
+        };
+        material.customProgramCacheKey = () => 'foliage-wind-preview-v1';
+        this.windMaterials.add(material);
+    }
+
+    private syncWindUniforms(): void {
+        const angle = THREE.MathUtils.degToRad(this.windPreview.directionDegrees);
+        for (const material of this.windMaterials) {
+            const uniforms = material.userData.foliageWindUniforms as FoliageWindUniforms | undefined;
+            if (!uniforms) continue;
+            uniforms.direction.value.set(Math.cos(angle), Math.sin(angle));
+            uniforms.strength.value = this.windPreview.enabled ? this.windPreview.strength : 0;
+            uniforms.speed.value = this.windPreview.speed;
+            uniforms.turbulence.value = this.windPreview.turbulence;
+        }
     }
 
     private getFallbackTexture(typeIndex: number, type: FoliageTypeData): THREE.CanvasTexture {

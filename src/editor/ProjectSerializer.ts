@@ -47,6 +47,7 @@ export default class ProjectSerializer {
         this.settings = settings;
         this.textureLibrary.onAssetAvailable = (path) => {
             this.reloadTexturePath(path);
+            this.foliage.invalidateTexture(path);
             this.foliage.commitChanges();
         };
     }

@@ -48,6 +48,17 @@ export interface FoliageProjectData {
     Layers: FoliageTypeLayerData[];
 }
 
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+
+export const resolveFoliageDimensions = (
+    type: FoliageTypeData,
+    scaleT: number,
+): { width: number; height: number } => {
+    const normalizedScale = clamp01(scaleT);
+    const height = type.MinSize + (type.MaxSize - type.MinSize) * normalizedScale;
+    return { width: height * type.LengthFactor, height };
+};
+
 const color = (value: number): FoliageColor => ({ r: value, g: value, b: value, a: 1 });
 
 export const createDefaultFoliageType = (displayName = 'New Foliage'): FoliageTypeData => ({
@@ -123,7 +134,13 @@ export class FoliageStore {
 
     public addInstance(typeIndex: number, instance: FoliageInstanceData): void {
         this.ensureLayer(typeIndex);
-        this.layers[typeIndex].Instances.push(instance);
+        this.layers[typeIndex].Instances.push({
+            ...instance,
+            Position: { ...instance.Position },
+            ScaleT: clamp01(instance.ScaleT),
+            ColorT: clamp01(instance.ColorT),
+            TypeIndex: typeIndex,
+        });
     }
 
     public isTooClose(typeIndex: number, point: FoliageVector3, spacing: number): boolean {
@@ -180,9 +197,9 @@ export class FoliageStore {
             Instances: (data.Layers?.[index]?.Instances ?? []).map((instance) => ({
                 Position: { ...instance.Position },
                 RotationY: instance.RotationY,
-                ScaleT: instance.ScaleT,
-                ColorT: instance.ColorT,
-                TypeIndex: instance.TypeIndex,
+                ScaleT: clamp01(instance.ScaleT),
+                ColorT: clamp01(instance.ColorT),
+                TypeIndex: index,
             })),
         }));
     }
