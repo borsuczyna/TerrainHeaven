@@ -27,7 +27,11 @@ describe('RiverSpline', () => {
 
         const samples = river.getSampledTerrainPoints(0);
         expect(samples.length).toBeGreaterThan(6);
-        expect(samples.every((sample) => sample.position.y < -0.3)).toBe(true);
+        const bedSamples = samples.filter((sample) => !sample.profileOnly);
+        const profileSamples = samples.filter((sample) => sample.profileOnly);
+        expect(bedSamples.every((sample) => sample.position.y < -0.3)).toBe(true);
+        expect(profileSamples.length).toBeGreaterThan(0);
+        expect(profileSamples.some((sample) => Math.abs(sample.position.y) < 1e-5)).toBe(true);
         const terrain = new TerrainMesher().build({
             center: new THREE.Vector3(0, 3, 0),
             width: 20,
@@ -63,6 +67,26 @@ describe('RiverSpline', () => {
         expect(shallow[0].radius).toBeGreaterThan(steep[0].radius * 5);
         expect(shallow[0].maxSlopeDegrees).toBe(20);
         expect(steep[0].maxSlopeDegrees).toBe(75);
+    });
+
+    it('rounds and refines the bank profile with Slope Smoothing', () => {
+        const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0));
+        river.bankSlope = 45;
+        river.bankSmoothing = 0;
+        const linear = river.getSampledTerrainPoints(0);
+        river.bankSmoothing = 1;
+        const smooth = river.getSampledTerrainPoints(0);
+
+        const linearBed = linear.find((sample) => !sample.profileOnly)!;
+        const smoothBed = smooth.find((sample) => !sample.profileOnly)!;
+        const smoothProfile = smooth.filter((sample) => sample.profileOnly);
+        expect(smoothBed.radius).toBeCloseTo(linearBed.radius * 1.5, 8);
+        expect(smoothBed.slopeSmoothing).toBe(1);
+        expect(smoothProfile.length).toBeGreaterThan(0);
+        expect(new Set(smoothProfile.map((sample) => sample.position.y.toFixed(5))).size).toBeGreaterThan(2);
+
+        const restored = RiverSpline.deserialize(river.serialize(1));
+        expect(restored.bankSmoothing).toBe(1);
     });
 
     it('keeps both meshes valid when two river paths are connected', () => {

@@ -79,6 +79,7 @@ export interface ElementData {
     terrainCutDistance?: number;
     // River-specific
     riverBankSlope?: number;
+    riverBankSmoothing?: number;
 }
 
 interface Connection {

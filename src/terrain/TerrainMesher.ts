@@ -61,6 +61,12 @@ export interface TerrainCutPointInput {
     // property into a real geometric bank angle instead of relying on the
     // terrain-wide maximum slope setting.
     maxSlopeDegrees?: number;
+    // 0 keeps a straight bank profile, 1 rounds its bottom and top. The bank
+    // radius is expanded by the source so smoothing never exceeds maxSlopeDegrees.
+    slopeSmoothing?: number;
+    // Pins an extra profile vertex without creating another radial influence.
+    // This gives narrow riverbanks enough topology to render smoothly.
+    profileOnly?: boolean;
 }
 
 export interface TerrainMesherInput {
@@ -660,15 +666,20 @@ export default class TerrainMesher {
                 weightSum += weight;
             }
             for (const cutPoint of cutPointMap.values()) {
+                if (cutPoint.profileOnly) continue;
                 const distance = Math.hypot(point[0] - cutPoint.position.x, point[1] - cutPoint.position.z);
                 if (cutPoint.maxSlopeDegrees !== undefined) {
                     if (distance > cutPoint.radius) continue;
-                    const pointSlope = Math.tan(THREE.MathUtils.degToRad(
-                        THREE.MathUtils.clamp(cutPoint.maxSlopeDegrees, 1, 89),
-                    ));
-                    const candidate = cutPoint.position.y < input.center.y
-                        ? Math.min(input.center.y, cutPoint.position.y + distance * pointSlope)
-                        : Math.max(input.center.y, cutPoint.position.y - distance * pointSlope);
+                    const t = cutPoint.radius <= TerrainMesher.EPSILON
+                        ? 1
+                        : THREE.MathUtils.clamp(distance / cutPoint.radius, 0, 1);
+                    const smoothT = t * t * (3 - 2 * t);
+                    const profileT = THREE.MathUtils.lerp(
+                        t,
+                        smoothT,
+                        THREE.MathUtils.clamp(cutPoint.slopeSmoothing ?? 0, 0, 1),
+                    );
+                    const candidate = THREE.MathUtils.lerp(cutPoint.position.y, input.center.y, profileT);
                     if (localSlopeHeight === null
                         || Math.abs(candidate - input.center.y) > Math.abs(localSlopeHeight - input.center.y)) {
                         localSlopeHeight = candidate;
