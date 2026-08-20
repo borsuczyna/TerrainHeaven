@@ -80,6 +80,8 @@ export interface ElementData {
     // River-specific
     riverBankSlope?: number;
     riverBankSmoothing?: number;
+    riverIrregularityLevel?: number;
+    riverDetailLevel?: number;
 }
 
 interface Connection {

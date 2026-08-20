@@ -89,6 +89,34 @@ describe('RiverSpline', () => {
         expect(restored.bankSmoothing).toBe(1);
     });
 
+    it('adds deterministic bank irregularity and locally remeshes at higher detail', () => {
+        const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(12, 0, 0));
+        river.width = 4;
+        river.bankSlope = 45;
+        river.bankSmoothing = 0.65;
+        river.detailLevel = 1;
+        river.irregularityLevel = 0;
+        const regularLowDetail = river.getSampledTerrainPoints(0);
+
+        river.detailLevel = 4;
+        river.irregularityLevel = 1;
+        const irregularHighDetail = river.getSampledTerrainPoints(0);
+        const repeated = river.getSampledTerrainPoints(0);
+
+        expect(irregularHighDetail.length).toBeGreaterThan(regularLowDetail.length * 4);
+        expect(repeated.map((sample) => sample.position.toArray()))
+            .toEqual(irregularHighDetail.map((sample) => sample.position.toArray()));
+
+        const outerBankWidths = irregularHighDetail
+            .filter((sample) => sample.profileOnly && Math.abs(sample.position.y) < 1e-6)
+            .map((sample) => Math.abs(sample.position.z).toFixed(4));
+        expect(new Set(outerBankWidths).size).toBeGreaterThan(4);
+
+        const restored = RiverSpline.deserialize(river.serialize(1));
+        expect(restored.irregularityLevel).toBe(1);
+        expect(restored.detailLevel).toBe(4);
+    });
+
     it('keeps both meshes valid when two river paths are connected', () => {
         const first = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0));
         const second = new RiverSpline(new THREE.Vector3(5, 0, 0), new THREE.Vector3(9, 0, 4));
