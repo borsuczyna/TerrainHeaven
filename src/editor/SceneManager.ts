@@ -9,6 +9,8 @@ export default class SceneManager {
     private elements: WorldElement[] = [];
     private terrainDirty = false;
     private terrainDependentsDirty = false;
+    private terrainSurfaceChangedDirty = false;
+    private readonly terrainSurfaceChangedListeners = new Set<() => void>();
     private isUpdatingAll = false;
     constructor() {
         this.instance = new THREE.Scene();
@@ -37,7 +39,10 @@ export default class SceneManager {
         this.instance.add(object.mesh);
         object.onGeometryChanged = () => {
             if (this.isUpdatingAll) return;
-            if (this.isTerrain(object)) this.terrainDependentsDirty = true;
+            if (this.isTerrain(object)) {
+                this.terrainDependentsDirty = true;
+                this.terrainSurfaceChangedDirty = true;
+            }
             else this.markTerrainDirty();
             this.onSceneGeometryChanged?.();
         };
@@ -56,6 +61,8 @@ export default class SceneManager {
         this.elements = [];
         this.terrainDirty = false;
         this.terrainDependentsDirty = false;
+        this.terrainSurfaceChangedDirty = false;
+        this.notifyTerrainSurfaceChanged();
         this.onSceneGeometryChanged?.();
     }
 
@@ -93,10 +100,17 @@ export default class SceneManager {
             }
             this.terrainDirty = false;
             this.terrainDependentsDirty = false;
+            this.terrainSurfaceChangedDirty = false;
         } finally {
             this.isUpdatingAll = false;
         }
+        this.notifyTerrainSurfaceChanged();
         this.onSceneGeometryChanged?.();
+    }
+
+    public onTerrainSurfaceChanged(listener: () => void): () => void {
+        this.terrainSurfaceChangedListeners.add(listener);
+        return () => this.terrainSurfaceChangedListeners.delete(listener);
     }
 
     public markTerrainDirty(): void {
@@ -104,11 +118,13 @@ export default class SceneManager {
     }
 
     public flushDirty(): void {
-        if ((!this.terrainDirty && !this.terrainDependentsDirty) || this.isUpdatingAll) return;
+        if ((!this.terrainDirty && !this.terrainDependentsDirty && !this.terrainSurfaceChangedDirty) || this.isUpdatingAll) return;
         const rebuildTerrain = this.terrainDirty;
         const rebuildDependents = this.terrainDependentsDirty || rebuildTerrain;
+        const terrainSurfaceChanged = this.terrainSurfaceChangedDirty || rebuildTerrain;
         this.terrainDirty = false;
         this.terrainDependentsDirty = false;
+        this.terrainSurfaceChangedDirty = false;
 
         this.isUpdatingAll = true;
         try {
@@ -125,7 +141,12 @@ export default class SceneManager {
         } finally {
             this.isUpdatingAll = false;
         }
+        if (terrainSurfaceChanged) this.notifyTerrainSurfaceChanged();
         this.onSceneGeometryChanged?.();
+    }
+
+    private notifyTerrainSurfaceChanged(): void {
+        for (const listener of this.terrainSurfaceChangedListeners) listener();
     }
 
     private isTerrain(element: WorldElement): boolean {

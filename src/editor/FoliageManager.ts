@@ -10,6 +10,7 @@ import {
     type FoliageTypeData,
     type FoliageVector3,
 } from '../foliage/FoliageData';
+import SurfaceHeightSampler from '../terrain/SurfaceHeightSampler';
 
 export interface FoliageWindPreviewSettings {
     enabled: boolean;
@@ -61,6 +62,7 @@ export default class FoliageManager {
         this.root.name = 'Foliage';
         this.root.userData.foliageRoot = true;
         this.scene.instance.add(this.root);
+        this.scene.onTerrainSurfaceChanged(() => this.updateSurfaceHeights());
     }
 
     public get types(): readonly FoliageTypeData[] { return this.store.types; }
@@ -117,6 +119,27 @@ export default class FoliageManager {
 
     public previewChanges(): void {
         this.flushDirty();
+    }
+
+    /** Re-samples only Y; painted XZ coordinates and all random preset values stay intact. */
+    public updateSurfaceHeights(): number {
+        const sampler = new SurfaceHeightSampler(this.scene.getElements().map((element) => element.mesh));
+        if (sampler.isEmpty) return 0;
+
+        let changed = 0;
+        for (let typeIndex = 0; typeIndex < this.types.length; typeIndex++) {
+            const instances = this.getInstances(typeIndex);
+            let typeChanged = false;
+            for (const instance of instances) {
+                const height = sampler.sample(instance.Position.x, instance.Position.z);
+                if (height === null || Math.abs(height - instance.Position.y) <= 1e-5) continue;
+                instance.Position.y = height;
+                typeChanged = true;
+                changed++;
+            }
+            if (typeChanged) this.updateInstanceTransforms(typeIndex);
+        }
+        return changed;
     }
 
     public setWindPreview(patch: Partial<FoliageWindPreviewSettings>): void {
@@ -245,6 +268,32 @@ export default class FoliageManager {
         this.windMaterials.delete(material);
         material.dispose();
         this.meshes.delete(typeIndex);
+    }
+
+    private updateInstanceTransforms(typeIndex: number): void {
+        const mesh = this.meshes.get(typeIndex);
+        const type = this.types[typeIndex];
+        const instances = this.getInstances(typeIndex);
+        if (!mesh || !type || mesh.count !== instances.length) {
+            this.dirtyTypes.add(typeIndex);
+            return;
+        }
+
+        const matrix = new THREE.Matrix4();
+        const quaternion = new THREE.Quaternion();
+        const position = new THREE.Vector3();
+        const scale = new THREE.Vector3();
+        const up = new THREE.Vector3(0, 1, 0);
+        for (let index = 0; index < instances.length; index++) {
+            const instance = instances[index];
+            const dimensions = resolveFoliageDimensions(type, instance.ScaleT);
+            position.set(instance.Position.x, instance.Position.y, instance.Position.z);
+            quaternion.setFromAxisAngle(up, THREE.MathUtils.degToRad(instance.RotationY));
+            scale.set(dimensions.width, dimensions.height, dimensions.width);
+            mesh.setMatrixAt(index, matrix.compose(position, quaternion, scale));
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.computeBoundingSphere();
     }
 
     private getCachedTexture(path: string): Promise<THREE.Texture | null> {
