@@ -14,6 +14,7 @@ import XRayManager from './XRayManager';
 import FoliageTool from './tools/FoliageTool';
 import HeightPaintTool from './tools/HeightPaintTool';
 import FenceTool from './tools/FenceTool';
+import MeshTool from './tools/MeshTool';
 import PresetPanel from './panels/PresetPanel';
 
 @singleton()
@@ -33,6 +34,7 @@ export default class LeftToolbarManager {
         @inject(FoliageTool) private readonly foliageTool: FoliageTool,
         @inject(HeightPaintTool) private readonly heightPaintTool: HeightPaintTool,
         @inject(FenceTool) private readonly fenceTool: FenceTool,
+        @inject(MeshTool) private readonly meshTool: MeshTool,
         @inject(PresetPanel) private readonly presetPanel: PresetPanel,
     ) {}
 
@@ -54,6 +56,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.foliageTool);
         this.toolManager.registerTool(this.heightPaintTool);
         this.toolManager.registerTool(this.fenceTool);
+        this.toolManager.registerTool(this.meshTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
@@ -84,6 +87,7 @@ export default class LeftToolbarManager {
         );
         this.toolManager.bindButton('uv', document.getElementById('btn-uv') as HTMLButtonElement, 'UV Mapper', 'U');
         this.toolManager.bindButton('foliage', document.getElementById('btn-foliage') as HTMLButtonElement, 'Foliage Editor', 'F');
+        this.toolManager.bindButton('meshes', document.getElementById('btn-meshes') as HTMLButtonElement, 'Mesh Props', 'M');
         this.toolManager.setActive('select');
 
         const btnWireframe = document.getElementById('btn-wireframe') as HTMLButtonElement;

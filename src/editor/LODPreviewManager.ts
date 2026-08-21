@@ -10,6 +10,7 @@ import SceneManager from './SceneManager';
 @singleton()
 export default class LODPreviewManager {
     private currentLevel = 0;
+    private readonly listeners = new Set<() => void>();
 
     constructor(@inject(SceneManager) private readonly scene: SceneManager) {}
 
@@ -22,5 +23,15 @@ export default class LODPreviewManager {
         if (clamped === this.currentLevel) return;
         this.currentLevel = clamped;
         this.scene.update();
+        for (const listener of this.listeners) listener();
+    }
+
+    // WorldElements pull `.level` themselves inside their own getGeometry(), rebuilt by
+    // the scene.update() call above. MeshManager isn't a WorldElement (it's a top-level
+    // instanced-mesh group like FoliageManager), so it needs an explicit hook instead to
+    // know when to swap each prop's geometry to the matching LOD.
+    public onLevelChanged(listener: () => void): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
     }
 }

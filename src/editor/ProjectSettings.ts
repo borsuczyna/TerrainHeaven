@@ -9,6 +9,7 @@ export interface ProjectSettingsData {
     hour: number;
     enhancedVisuals?: boolean;
     dayLength?: number;
+    lodDistances?: number[];
 }
 
 interface SkyKeyframe {
@@ -68,6 +69,11 @@ export default class ProjectSettings {
     public dayNightCycle = false;
     public hour = 12;
     public dayLength = 240;
+    // Distance (meters, pre-export-scale) at which the Unity importer should switch
+    // LOD0->1, LOD1->2 and LOD2->3. Baked into manifest.json so the importer can build
+    // each LODGroup with real, user-tunable transition distances instead of falling back
+    // to Unity's own defaults, which is what made LOD swaps pop too abruptly.
+    public lodDistances: [number, number, number] = [30, 80, 160];
     public onTimeChanged: ((hour: number) => void) | null = null;
 
     constructor(
@@ -113,6 +119,11 @@ export default class ProjectSettings {
 
         this.scene.onSceneGeometryChanged = () => this.renderer.requestShadowUpdate();
         this.apply();
+    }
+
+    public setLodDistance(index: 0 | 1 | 2, value: number): void {
+        const clamped = THREE.MathUtils.clamp(Number.isFinite(value) ? value : this.lodDistances[index], 1, 5000);
+        this.lodDistances[index] = clamped;
     }
 
     public setCamera(camera: THREE.Camera): void {
@@ -484,6 +495,7 @@ export default class ProjectSettings {
             dayNightCycle: this.dayNightCycle,
             hour: this.hour,
             dayLength: this.dayLength,
+            lodDistances: [...this.lodDistances],
         };
     }
 
@@ -493,6 +505,10 @@ export default class ProjectSettings {
         this.dayNightCycle = data.dayNightCycle ?? false;
         this.hour = THREE.MathUtils.clamp(data.hour ?? 12, 0, 24);
         this.dayLength = THREE.MathUtils.clamp(data.dayLength ?? 240, 30, 1200);
+        const [d0, d1, d2] = data.lodDistances ?? [30, 80, 160];
+        this.setLodDistance(0, d0);
+        this.setLodDistance(1, d1);
+        this.setLodDistance(2, d2);
         this.apply();
     }
 }

@@ -71,6 +71,22 @@ export default class SettingsPanel {
                         </select>
                     </div>
                     <p class="sp-help">Temporarily view terrain/roads/rivers at one of the Unity exporter's LOD levels. Not saved with the project.</p>
+                    <div class="sp-row sp-wide-row">
+                        <label class="sp-label">LOD 0 &rarr; 1 Distance</label>
+                        <input type="range" class="sp-slider" min="1" max="500" step="1" value="${s.lodDistances[0]}" data-prop="lodDistance0">
+                        <span class="sp-value sp-lod-distance-0-value">${Math.round(s.lodDistances[0])}m</span>
+                    </div>
+                    <div class="sp-row sp-wide-row">
+                        <label class="sp-label">LOD 1 &rarr; 2 Distance</label>
+                        <input type="range" class="sp-slider" min="1" max="1000" step="1" value="${s.lodDistances[1]}" data-prop="lodDistance1">
+                        <span class="sp-value sp-lod-distance-1-value">${Math.round(s.lodDistances[1])}m</span>
+                    </div>
+                    <div class="sp-row sp-wide-row">
+                        <label class="sp-label">LOD 2 &rarr; 3 Distance</label>
+                        <input type="range" class="sp-slider" min="1" max="2000" step="1" value="${s.lodDistances[2]}" data-prop="lodDistance2">
+                        <span class="sp-value sp-lod-distance-2-value">${Math.round(s.lodDistances[2])}m</span>
+                    </div>
+                    <p class="sp-help">How far the camera must be before the Unity importer switches to the next LOD. Wider gaps between these three values make the switch less noticeable.</p>
                 </div>
             </div>
         `;
@@ -87,6 +103,10 @@ export default class SettingsPanel {
 
         const lodSelect = this.container.querySelector<HTMLSelectElement>('[data-prop="lodPreview"]');
         lodSelect?.addEventListener('change', () => this.lodPreview.setLevel(Number(lodSelect.value)));
+
+        this.bindLodDistance(0, 'lodDistance0', '.sp-lod-distance-0-value');
+        this.bindLodDistance(1, 'lodDistance1', '.sp-lod-distance-1-value');
+        this.bindLodDistance(2, 'lodDistance2', '.sp-lod-distance-2-value');
 
         createIcons({ icons });
     }
@@ -173,6 +193,18 @@ export default class SettingsPanel {
             this.build();
         });
         this.bindHour();
+    }
+
+    private bindLodDistance(index: 0 | 1 | 2, prop: string, valueSelector: string): void {
+        const label = `Change LOD ${index} Distance`;
+        const input = this.container.querySelector<HTMLInputElement>(`[data-prop="${prop}"]`);
+        input?.addEventListener('input', () => {
+            this.beginAction(label);
+            this.settings.setLodDistance(index, Number(input.value));
+            const value = this.container.querySelector(valueSelector);
+            if (value) value.textContent = `${Math.round(this.settings.lodDistances[index])}m`;
+        });
+        input?.addEventListener('change', () => this.endAction(label));
     }
 
     private bindHour(): void {

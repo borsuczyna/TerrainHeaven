@@ -14,6 +14,9 @@ import TerrainCutPointManager from './TerrainCutPointManager';
 import TextureLibrary from './TextureLibrary';
 import FoliageManager from './FoliageManager';
 import type { FoliageProjectData } from '../foliage/FoliageData';
+import MeshManager from './MeshManager';
+import MeshLibrary from './MeshLibrary';
+import type { MeshProjectData } from '../mesh/MeshData';
 
 interface ConnectionData {
     elementA: number;
@@ -30,6 +33,7 @@ interface ProjectData {
     terrainCutPoints?: { x: number; y: number; z: number; radius?: number }[];
     texturePaths?: string[];
     foliage?: FoliageProjectData;
+    meshes?: MeshProjectData;
 }
 
 @singleton()
@@ -43,6 +47,8 @@ export default class ProjectSerializer {
         @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
         @inject(TextureLibrary) private readonly textureLibrary: TextureLibrary,
         @inject(FoliageManager) private readonly foliage: FoliageManager,
+        @inject(MeshManager) private readonly meshManager: MeshManager,
+        @inject(MeshLibrary) private readonly meshLibrary: MeshLibrary,
     ) {
         this.scene = scene;
         this.settings = settings;
@@ -51,6 +57,7 @@ export default class ProjectSerializer {
             this.foliage.invalidateTexture(path);
             this.foliage.commitChanges();
         };
+        this.meshLibrary.onAssetAvailable = (path) => this.meshManager.notifyAssetAvailable(path);
     }
 
     public save(): string {
@@ -83,6 +90,7 @@ export default class ProjectSerializer {
         }
 
         const foliage = this.foliage.serialize();
+        const meshes = this.meshManager.serialize();
         const projectData: ProjectData = {
             version: 1,
             settings: this.settings.getData(),
@@ -94,6 +102,7 @@ export default class ProjectSerializer {
                 ...foliage.Types.map((type) => type.TexturePath),
             ].filter(Boolean))],
             foliage,
+            meshes,
         };
 
         return JSON.stringify(projectData, null, 2);
@@ -116,6 +125,7 @@ export default class ProjectSerializer {
             ...(data.foliage?.Types ?? []).map((type) => this.normalizeProjectTexturePath(type.TexturePath)),
         ];
         void this.textureLibrary.setProjectReferences(texturePaths);
+        void this.meshLibrary.setProjectReferences((data.meshes?.Assets ?? []).map((asset) => asset.LibraryPath));
 
         // Create elements
         const elements: WorldElement[] = [];
@@ -154,6 +164,7 @@ export default class ProjectSerializer {
 
         this.terrainCutPoints.load(data.terrainCutPoints ?? []);
         this.foliage.load(data.foliage);
+        this.meshManager.load(data.meshes);
 
         // Update all
         this.scene.update();

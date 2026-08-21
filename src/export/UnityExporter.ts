@@ -2,6 +2,9 @@ import { inject, singleton } from 'tsyringe';
 import SceneManager from '../editor/SceneManager';
 import TextureLibrary from '../editor/TextureLibrary';
 import FoliageManager from '../editor/FoliageManager';
+import MeshManager from '../editor/MeshManager';
+import MeshLibrary from '../editor/MeshLibrary';
+import ProjectSettings from '../editor/ProjectSettings';
 import type WorldElement from '../elements/WorldElement';
 import type { GeometryGroup } from '../elements/WorldElement';
 import Terrain from '../elements/Terrain';
@@ -11,6 +14,10 @@ import RiverSpline from '../elements/RiverSpline';
 import Fence from '../elements/Fence';
 import { MAX_LOD_INDEX } from './LODLevels';
 import { buildMtl, buildObj, type ObjGroup, type ObjMaterial } from './ObjWriter';
+import { loadMeshAsset } from '../mesh/MeshLoader';
+import { getLODGroups } from '../mesh/MeshLODGenerator';
+import { calibrateGroups } from '../mesh/MeshCalibration';
+import type { MeshAssetData } from '../mesh/MeshData';
 
 export interface ExportProgress {
     message: string;
@@ -54,12 +61,33 @@ interface ManifestObject {
     lods: ManifestLod[];
 }
 
+// One entry per mesh-prop asset actually placed at least once - never one per placed
+// instance. Placements is the reuse list: the Unity importer builds each Asset's Mesh(es)
+// once and instantiates one GameObject per Placement, all referencing that same asset.
+interface ManifestMeshAsset {
+    id: string;
+    name: string;
+    lods: ManifestLod[];
+}
+
+interface ManifestMeshPlacement {
+    assetId: string;
+    position: { x: number; y: number; z: number };
+    rotation: { x: number; y: number; z: number };
+    scale: number;
+}
+
 interface Manifest {
     version: 1;
     scale: number;
     lodLevels: number;
     objects: ManifestObject[];
     foliageFile: string;
+    meshesFile: string;
+    // Distance (in the same pre-scale units as everything else) at which the Unity
+    // importer should switch LOD0->1, LOD1->2 and LOD2->3 on every LODGroup it builds -
+    // see ProjectSettings.lodDistances for why this exists.
+    lodDistances: number[];
     // Filenames under Textures/, so the Unity importer can check for an already-
     // imported texture with the same name before writing the bundled bytes.
     textures: string[];
@@ -86,6 +114,9 @@ export default class UnityExporter {
         @inject(SceneManager) private readonly scene: SceneManager,
         @inject(TextureLibrary) private readonly textureLibrary: TextureLibrary,
         @inject(FoliageManager) private readonly foliage: FoliageManager,
+        @inject(MeshManager) private readonly meshManager: MeshManager,
+        @inject(MeshLibrary) private readonly meshLibrary: MeshLibrary,
+        @inject(ProjectSettings) private readonly projectSettings: ProjectSettings,
     ) {}
 
     public async export(options: UnityExportOptions, onProgress?: ExportProgressCallback): Promise<void> {
@@ -108,18 +139,30 @@ export default class UnityExporter {
         const exportable = this.scene.getElements()
             .map((element) => ({ element, kind: this.getExportKind(element) }))
             .filter((entry): entry is { element: WorldElement; kind: ExportKind } => entry.kind !== null);
+        const usedMeshAssets = this.meshManager.assets
+            .map((asset, index) => ({ asset, index }))
+            .filter(({ index }) => this.meshManager.getInstances(index).length > 0);
         // Texture count isn't known until the mesh pass has collected every referenced
         // path, so the mesh steps make up the bulk of the total and textures/foliage/
         // manifest are a fixed-size tail reported as it happens.
-        const total = exportable.length * lodLevels + 3;
+        const total = exportable.length * lodLevels + usedMeshAssets.length * (lodLevels + 1) + 4;
         let step = 0;
         const report = (message: string): void => onProgress?.({ message, current: step, total });
 
         const meshesDir = await root.getDirectoryHandle('Meshes', { create: true });
+        const texturesDir = await root.getDirectoryHandle('Textures', { create: true });
+
         const objects = await this.writeObjects(meshesDir, exportable, lodLevels, scale, texturePaths, (message) => {
             report(message);
             step++;
         });
+
+        const { assets: meshAssets, placements: meshPlacements } = await this.writeMeshAssets(
+            meshesDir, texturesDir, usedMeshAssets, lodLevels, (message) => {
+                report(message);
+                step++;
+            },
+        );
 
         report('Writing foliage data...');
         const foliageData = this.foliage.serialize();
@@ -127,7 +170,10 @@ export default class UnityExporter {
         await this.writeFile(root, 'foliage.json', JSON.stringify(foliageData, null, 2));
         step++;
 
-        const texturesDir = await root.getDirectoryHandle('Textures', { create: true });
+        report('Writing mesh prop placements...');
+        await this.writeFile(root, 'meshes.json', JSON.stringify({ version: 1, assets: meshAssets, placements: meshPlacements }, null, 2));
+        step++;
+
         const textureNames = await this.writeTextures(texturesDir, texturePaths, (current, textureTotal) => (
             report(`Writing textures (${current}/${textureTotal})...`)
         ));
@@ -140,11 +186,111 @@ export default class UnityExporter {
             lodLevels,
             objects,
             foliageFile: 'foliage.json',
+            meshesFile: 'meshes.json',
+            lodDistances: [...this.projectSettings.lodDistances],
             textures: textureNames,
         };
         await this.writeFile(root, 'manifest.json', JSON.stringify(manifest, null, 2));
         step++;
         report('Done');
+    }
+
+    // Each placed-prop asset is written once (per LOD) here, regardless of how many
+    // instances of it were painted/lined - Placements below is the reuse list the Unity
+    // importer instantiates against that one shared Mesh, which is the whole point of
+    // treating uploaded props differently from the always-unique procedural geometry
+    // writeObjects() handles. Unlike terrain/road/river (which bake `scale` directly into
+    // exported vertex positions because each becomes its own unparented Unity object),
+    // prop geometry and Placement positions are written unscaled, same as foliage
+    // instances - the importer is expected to apply `scale` once, as the shared parent
+    // transform both systems already rely on to keep placement and geometry scaled together.
+    private async writeMeshAssets(
+        meshesDir: DirectoryHandleLike,
+        texturesDir: DirectoryHandleLike,
+        usedAssets: { asset: MeshAssetData; index: number }[],
+        lodLevels: number,
+        onStep: (message: string) => void,
+    ): Promise<{ assets: ManifestMeshAsset[]; placements: ManifestMeshPlacement[] }> {
+        const assets: ManifestMeshAsset[] = [];
+        const placements: ManifestMeshPlacement[] = [];
+        const writtenTextures = new Map<string, string | null>();
+
+        for (const { asset, index } of usedAssets) {
+            const libraryAsset = this.meshLibrary.getAsset(asset.LibraryPath);
+            if (!libraryAsset) {
+                console.warn(`Unity export: mesh prop "${asset.DisplayName}" is missing from the library; skipping.`);
+                continue;
+            }
+
+            onStep(`Loading ${asset.DisplayName}...`);
+            let loaded;
+            try {
+                loaded = await loadMeshAsset(libraryAsset);
+            } catch (error) {
+                console.warn(`Unity export: failed to load mesh prop "${asset.DisplayName}".`, error);
+                continue;
+            }
+
+            const fileBase = `prop_${asset.Id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+            const lods: ManifestLod[] = [];
+
+            for (let lod = 0; lod < lodLevels; lod++) {
+                onStep(`Building ${asset.DisplayName} (LOD ${lod})...`);
+                const lodGroups = calibrateGroups(getLODGroups(asset.LibraryPath, lod, loaded), asset.BaseScale, asset.PositionOffset);
+                const objGroups: ObjGroup[] = [];
+                const materials: ObjMaterial[] = [];
+                const manifestGroups: ManifestLodGroup[] = [];
+
+                for (let groupIndex = 0; groupIndex < lodGroups.length; groupIndex++) {
+                    const group = lodGroups[groupIndex];
+                    if (group.positions.length === 0) continue;
+                    const materialName = `${fileBase}_g${groupIndex}`;
+
+                    let textureFile: string | null | undefined = group.textureUrl ? writtenTextures.get(group.textureUrl) : null;
+                    if (textureFile === undefined) {
+                        textureFile = await this.writeMeshTexture(texturesDir, group.textureUrl!, `${fileBase}_g${groupIndex}`);
+                        writtenTextures.set(group.textureUrl!, textureFile);
+                    }
+
+                    objGroups.push({ name: group.name, materialName, positions: group.positions, uvs: group.uvs });
+                    materials.push({ name: materialName, textureRelativePath: textureFile ? `../Textures/${textureFile}` : null });
+                    manifestGroups.push({ name: group.name, texture: textureFile });
+                }
+
+                const lodFileBase = `${fileBase}_lod${lod}`;
+                await this.writeFile(meshesDir, `${lodFileBase}.obj`, buildObj(`${lodFileBase}.mtl`, lodFileBase, objGroups));
+                await this.writeFile(meshesDir, `${lodFileBase}.mtl`, buildMtl(materials));
+                lods.push({ objFile: `Meshes/${lodFileBase}.obj`, mtlFile: `Meshes/${lodFileBase}.mtl`, groups: manifestGroups });
+            }
+
+            assets.push({ id: asset.Id, name: asset.DisplayName, lods });
+            for (const instance of this.meshManager.getInstances(index)) {
+                placements.push({
+                    assetId: asset.Id,
+                    position: { ...instance.Position },
+                    rotation: { x: instance.RotationX, y: instance.RotationY, z: instance.RotationZ },
+                    scale: instance.Scale,
+                });
+            }
+        }
+
+        return { assets, placements };
+    }
+
+    // Mirrors src/editor/TextureLibrary asset writing below (fetch -> raw bytes to disk),
+    // but the source is a THREE.Texture's own image (a blob:/data: URL from MeshLoader)
+    // rather than a TextureLibrary path, so it can't reuse writeTextures() directly.
+    private async writeMeshTexture(texturesDir: DirectoryHandleLike, textureUrl: string, fileNameHint: string): Promise<string | null> {
+        try {
+            const response = await fetch(textureUrl);
+            const blob = await response.blob();
+            const fileName = `${fileNameHint}.${extensionForMimeType(blob.type)}`;
+            await this.writeFile(texturesDir, fileName, new Uint8Array(await blob.arrayBuffer()));
+            return fileName;
+        } catch (error) {
+            console.warn('Unity export: failed to write a mesh prop texture.', error);
+            return null;
+        }
     }
 
     private async writeObjects(
@@ -275,4 +421,16 @@ export default class UnityExporter {
 function textureFileName(path: string): string {
     const base = path.replace(/\\/g, '/').split('/').pop() ?? path;
     return base || 'texture.png';
+}
+
+const MIME_EXTENSIONS: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+};
+
+function extensionForMimeType(mimeType: string): string {
+    return MIME_EXTENSIONS[mimeType] ?? 'png';
 }

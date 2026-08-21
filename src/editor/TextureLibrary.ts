@@ -17,8 +17,12 @@ interface StoredTexture {
 }
 
 const DB_NAME = 'santown-assets';
-const DB_VERSION = 1;
+// Shared with MeshLibrary, which added the 'meshFiles' store at version 2 - both files
+// must agree on this version and both guard their store creation with contains() checks
+// so whichever one opens the database first performs the same upgrade.
+const DB_VERSION = 2;
 const STORE_NAME = 'textures';
+const MESH_STORE_NAME = 'meshFiles';
 
 @singleton()
 export default class TextureLibrary {
@@ -157,6 +161,9 @@ export default class TextureLibrary {
                 const db = request.result;
                 if (!db.objectStoreNames.contains(STORE_NAME)) {
                     db.createObjectStore(STORE_NAME, { keyPath: 'path' });
+                }
+                if (!db.objectStoreNames.contains(MESH_STORE_NAME)) {
+                    db.createObjectStore(MESH_STORE_NAME, { keyPath: 'key' });
                 }
             };
             request.onsuccess = () => resolve(request.result);

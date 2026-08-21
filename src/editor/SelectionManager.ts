@@ -12,6 +12,7 @@ import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
 import TerrainCutPointManager from './TerrainCutPointManager';
 import XRayManager from './XRayManager';
+import MeshInstanceSelector from './MeshInstanceSelector';
 
 @singleton()
 export default class SelectionManager {
@@ -53,6 +54,7 @@ export default class SelectionManager {
         @inject(HistoryManager) history: HistoryManager,
         @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
         @inject(XRayManager) private readonly xray: XRayManager,
+        @inject(MeshInstanceSelector) private readonly meshInstanceSelector: MeshInstanceSelector,
     ) {
         this.cameraController = camera;
         this.sceneManager = scene;
@@ -87,7 +89,7 @@ export default class SelectionManager {
         if (activeTool?.name !== 'select' && activeTool?.onMouseDown?.(e)) return;
 
         // Ignore when gizmo is being used
-        if (this.gizmo.isDragging) return;
+        if (this.gizmo.isDragging || this.meshInstanceSelector.isDragging) return;
 
         this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -105,6 +107,7 @@ export default class SelectionManager {
 
         let hitNode: WorldNode | null = null;
         let hitElement: WorldElement | null = null;
+        let hitMeshInstance: { assetIndex: number; instanceIndex: number } | null = null;
 
         // X-ray nodes are drawn without depth testing. Match picking to that visual
         // contract by prioritizing any node under the cursor over occluding surfaces.
@@ -113,6 +116,11 @@ export default class SelectionManager {
             hitNode = (xrayHit?.object.userData.worldNode as WorldNode | undefined) ?? null;
         }
 
+        // Placed props (MeshManager's InstancedMesh objects) are checked in this same
+        // pass, not as a separate fallback - intersects is sorted nearest-first, so
+        // checking mesh props only after exhausting every hit meant a prop sitting on
+        // top of the terrain always lost to the terrain surface further along the same
+        // ray, since the loop used to just skip past any hit matching neither userData key.
         for (const hit of intersects) {
             if (hitNode) break;
             const node = hit.object.userData.worldNode as WorldNode | undefined;
@@ -126,9 +134,16 @@ export default class SelectionManager {
                 hitElement = el;
                 break;
             }
+            const meshAssetIndex = hit.object.userData.meshAssetIndex as number | undefined;
+            if (meshAssetIndex !== undefined && hit.instanceId !== undefined) {
+                hitMeshInstance = { assetIndex: meshAssetIndex, instanceIndex: hit.instanceId };
+                break;
+            }
         }
 
         const ctrlHeld = e.ctrlKey || e.metaKey;
+
+        if (hitNode || hitElement) this.meshInstanceSelector.deselect();
 
         if (hitNode) {
             this._nodeWasHit = true;
@@ -164,7 +179,12 @@ export default class SelectionManager {
                 this.clearElementSelection();
                 this.selectElementAdd(hitElement);
             }
+        } else if (hitMeshInstance) {
+            this.clearNodeSelection();
+            this.clearElementSelection();
+            this.meshInstanceSelector.select(hitMeshInstance.assetIndex, hitMeshInstance.instanceIndex);
         } else {
+            this.meshInstanceSelector.deselect();
             this.startBoxSelection(e, ctrlHeld);
             return;
         }

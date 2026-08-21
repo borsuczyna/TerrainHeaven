@@ -1,0 +1,133 @@
+#mesh-panel {
+    position: fixed;
+    right: 12px;
+    top: 108px;
+    bottom: 12px;
+    width: 360px;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 16;
+    color: #d8dde5;
+    background: rgba(25, 27, 31, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 18px 55px rgba(0, 0, 0, 0.38);
+    font: 12px/1.35 'Segoe UI', system-ui, sans-serif;
+}
+
+#mesh-panel.visible { display: flex; }
+
+body:has(#mesh-panel.visible) #view-gizmo,
+body:has(#mesh-panel.visible) #history-panel,
+body:has(#mesh-panel.visible) #transform-toolbar {
+    right: 390px;
+}
+
+.mesh-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mesh-header > div { display: flex; flex-direction: column; gap: 2px; }
+.mesh-header strong { font-size: 15px; color: #f2f5f8; }
+.mesh-eyebrow { color: #78baff; font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+.mesh-close { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; color: #aeb6c2; background: rgba(255,255,255,.06); cursor: pointer; }
+.mesh-close:hover { background: rgba(255,255,255,.13); color: white; }
+.mesh-close svg { width: 15px; }
+
+.mesh-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.mesh-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; height: 34px; border: 0; border-radius: 7px; background: transparent; color: #858e99; cursor: pointer; font-weight: 650; }
+.mesh-tabs button:hover { color: #dce4ed; background: rgba(255,255,255,.05); }
+.mesh-tabs button.active { color: #8dc7ff; background: rgba(74,157,238,.15); }
+.mesh-tabs svg { width: 14px; }
+.mesh-body { padding: 12px; overflow: auto; }
+.mesh-tab-view { display: none; }
+.mesh-tab-view.active { display: block; }
+.mesh-toggle { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 9px; background: rgba(79, 168, 255, .12); color: #e9f4ff; font-weight: 650; }
+.mesh-toggle input, .mesh-type input { accent-color: #57aaff; }
+.mesh-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.07); }
+.mesh-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.mesh-section h3 { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 9px; color: #f0f2f5; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+.mesh-section h3 span { color: #78818d; font-size: 9px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.mesh-section > label:not(.mesh-type) { display: grid; grid-template-columns: 1fr 92px; align-items: center; gap: 10px; margin: 7px 0; color: #aeb6c1; }
+.mesh-section input[type="number"] { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; outline: none; background: #181a1e; color: #e8ebef; }
+.mesh-section input[type="number"]:focus { border-color: #4c9eea; box-shadow: 0 0 0 2px rgba(76,158,234,.14); }
+.mesh-section .mesh-check input { justify-self: end; accent-color: #57aaff; }
+
+.mesh-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mesh-mode-switch button { display: flex; align-items: center; justify-content: center; gap: 7px; height: 34px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: rgba(255,255,255,.03); color: #9aa3ae; cursor: pointer; font-weight: 650; }
+.mesh-mode-switch button:hover { background: rgba(255,255,255,.07); }
+.mesh-mode-switch button.active { color: #8dc7ff; background: rgba(74,157,238,.15); border-color: rgba(87,170,255,.4); }
+.mesh-mode-switch svg { width: 14px; }
+
+.mesh-types { display: flex; flex-direction: column; gap: 6px; }
+.mesh-type { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; background: rgba(255,255,255,.035); cursor: pointer; }
+.mesh-type:hover { background: rgba(255,255,255,.07); }
+.mesh-type.selected { border-color: rgba(87,170,255,.4); background: rgba(87,170,255,.1); }
+.mesh-type span { color: #e7eaee; font-size: 11px; }
+
+.mesh-help { display: flex; gap: 9px; margin-top: 14px; padding: 10px; border-radius: 9px; color: #8f99a7; background: rgba(0,0,0,.17); font-size: 10px; }
+.mesh-help svg { flex: 0 0 auto; width: 16px; color: #62b0f5; }
+.mesh-help b { color: #cbd3dd; }
+
+.mesh-drop-zone { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 14px; border: 1px dashed rgba(255,255,255,.16); border-radius: 10px; color: #8791a0; text-align: center; }
+.mesh-drop-zone.drag-over { border-color: #57aaff; background: rgba(87,170,255,.08); }
+.mesh-drop-zone > svg { width: 22px; color: #619acb; }
+.mesh-drop-zone strong { color: #dbe1e8; }
+.mesh-drop-zone span { font-size: 10px; }
+.mesh-drop-zone button { margin-top: 6px; min-height: 32px; padding: 0 14px; border: 1px solid rgba(87,170,255,.28); border-radius: 7px; background: rgba(87,170,255,.12); color: #a8d4ff; cursor: pointer; font-weight: 650; }
+.mesh-drop-zone button:hover { background: rgba(87,170,255,.2); color: white; }
+
+.mesh-assets { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.mesh-asset-row { display: grid; grid-template-columns: 34px 1fr 30px 30px; align-items: center; gap: 9px; padding: 7px; border-radius: 9px; background: rgba(255,255,255,.035); }
+.mesh-asset-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; background: rgba(87,170,255,.12); color: #8dc7ff; }
+.mesh-asset-icon svg { width: 16px; }
+.mesh-asset-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mesh-asset-copy input { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #e7eaee; font-size: 11px; }
+.mesh-asset-copy input:hover, .mesh-asset-copy input:focus { border-color: rgba(255,255,255,.14); background: #181a1e; outline: none; }
+.mesh-asset-copy small { color: #747e8b; font-size: 9px; }
+.mesh-asset-remove { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; color: #9aa3ae; background: transparent; cursor: pointer; }
+.mesh-asset-remove:hover { background: rgba(255,70,70,.15); color: #ff8d8d; }
+.mesh-asset-remove svg { width: 14px; }
+
+.mesh-missing { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 10px; border: 1px solid rgba(255,180,60,.3); border-radius: 9px; background: rgba(255,180,60,.08); color: #e8c98a; }
+.mesh-missing-icon { flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: rgba(255,180,60,.15); color: #ffb84c; }
+.mesh-missing-icon svg { width: 14px; }
+.mesh-missing strong { display: block; color: #f4dcae; font-size: 11px; }
+.mesh-missing span { font-size: 9px; color: #c9ab77; }
+
+.mesh-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 14px; border: 1px dashed rgba(255,255,255,.1); border-radius: 9px; color: #747e8a; text-align: center; }
+.mesh-empty > svg { width: 22px; color: #619acb; }
+.mesh-empty strong { color: #cbd2db; }
+.mesh-empty span { font-size: 10px; }
+
+#mesh-instance-label {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    display: none;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(25, 27, 31, 0.92);
+    border: 1px solid rgba(87,170,255,.35);
+    color: #d8dde5;
+    font: 11px/1.2 'Segoe UI', system-ui, sans-serif;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    z-index: 20;
+    pointer-events: none;
+}
+
+#mesh-instance-label.visible { display: block; }
+
+@media (max-width: 800px) {
+    #mesh-panel { width: 280px; }
+
+    body:has(#mesh-panel.visible) #view-gizmo { display: none; }
+    body:has(#mesh-panel.visible) #history-panel { right: 14px; }
+    body:has(#mesh-panel.visible) #transform-toolbar { right: 310px; }
+}
