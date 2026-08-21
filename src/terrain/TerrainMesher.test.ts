@@ -37,6 +37,11 @@ const signedArea = (tri: OccupiedTriangle): number => (
     - (tri.b.z - tri.a.z) * (tri.c.x - tri.a.x)
 );
 
+const vertexHeight = (triangles: OccupiedTriangle[], x: number, z: number): number | undefined => triangles
+    .flatMap((tri) => [tri.a, tri.b, tri.c])
+    .find((point) => Math.abs(point.x - x) < 1e-6 && Math.abs(point.z - z) < 1e-6)
+    ?.y;
+
 const topologyKey = (triangles: OccupiedTriangle[]): string[] => triangles.map((tri) => (
     [tri.a, tri.b, tri.c]
         .map((point) => `${point.x.toFixed(5)},${point.z.toFixed(5)}`)
@@ -108,6 +113,41 @@ describe('TerrainMesher geometry invariants', () => {
             }
         }
         expect([...edges.values()].every((count) => count === 1 || count === 2)).toBe(true);
+    });
+
+    it('reads painted heights in world space so neighbouring tiles agree on a shared edge', () => {
+        const paint = {
+            cellSize: 1,
+            samples: [-15, 15].flatMap((gridZ) => [
+                { gridX: -1, gridZ, height: 3 },
+                { gridX: 0, gridZ, height: 5 },
+                { gridX: 1, gridZ, height: 3 },
+            ]),
+        };
+        // Smoothing off isolates the painted field: every vertex height is the field itself.
+        const settings = { ...makeInput().settings, smoothingEnabled: false };
+        const left = new TerrainMesher().build(makeInput({ center: new THREE.Vector3(-15, 0, 0), paint, settings }));
+        const right = new TerrainMesher().build(makeInput({ center: new THREE.Vector3(15, 0, 0), paint, settings }));
+
+        for (const z of [-15, 15]) {
+            expect(vertexHeight(left, 0, z)).toBeCloseTo(5, 5);
+            expect(vertexHeight(right, 0, z)).toBeCloseTo(5, 5);
+        }
+    });
+
+    it('keeps a cut point shaping a tile its slope reaches from outside', () => {
+        // The point sits 4 units past the edge with a radius of only 2, but dropping 6
+        // units at 35 degrees needs roughly 13 units of run, so the edge has to follow it
+        // down - otherwise the neighbouring tile that does contain the point would meet
+        // this one at a wall.
+        const triangles = new TerrainMesher().build(makeInput({
+            center: new THREE.Vector3(15, 0, 0),
+            length: 8,
+            cutPoints: [cutPoint(new THREE.Vector3(-4, -6, 0), 2)],
+        }));
+
+        expect(vertexHeight(triangles, 0, -4)).toBeLessThan(-0.5);
+        expect(vertexHeight(triangles, 30, -4)).toBeCloseTo(0, 5);
     });
 
     it('applies a local cut-point slope as a geometric angle', () => {

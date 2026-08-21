@@ -1,6 +1,6 @@
 # Terrain remesher — manual verification
 
-The automated suite is defined in `src/terrain/TerrainMesher.test.ts`. Per project instructions, run the checks below manually in the browser.
+The automated suites are `src/terrain/TerrainMesher.test.ts` (one surface) and `src/terrain/TerrainGroupMesher.test.ts` (several tiles meshed as one). Per project instructions, run the checks below manually in the browser.
 
 ## Basic topology
 
@@ -26,6 +26,23 @@ The automated suite is defined in `src/terrain/TerrainMesher.test.ts`. Per proje
 - Move only the cut point Y repeatedly; interaction should remain responsive and the XZ wireframe topology should not change.
 - Place cut points close to a road, on an existing triangle edge, near the terrain boundary, and close to each other.
 - Place a cut point inside a road hole; it must not affect that terrain.
+
+## Neighbouring tiles
+
+Touching tiles are meshed as one surface and the result is cut along the tile borders, so
+there is no seam to reconcile. These checks are about that split behaving, and about the
+group settings.
+
+- Place two tiles edge to edge and run a road, a river, and a terrain cut spline across the shared edge. The surface must be continuous, with no crease, step, or spike, and no slope steeper than `Max Slope` anywhere - especially at the corners where the shared edge ends.
+- Repeat with four tiles meeting at one corner, and with a small tile against the middle of a large tile's edge.
+- Sweep `Mesh Detail` through `0.5`, `2`, `3`, `4`, `5`. The surface may get finer or coarser but must never develop a step or a cliff at any value.
+- Set a different `Mesh Detail` on each tile: the group uses the finest one, so both tiles must change together.
+- Set a different `Max Slope` on each tile: the group uses the most restrictive one.
+- Give tiles different `Center` heights. The whole connected group sits at one base height, taken from its lowest-leftmost tile, so it must not depend on the order tiles were created.
+- Give each tile a different texture. The border between textures must fall exactly on the tile border with no gap or overlap.
+- Paint a hill across the shared edge, then add a new tile next to it, then clear the painted height on one tile only. The surface must stay continuous through all three.
+- Move a painted tile. Its hills travel with it, snapped to the nearest paint cell.
+- Save and reload a scene painted before the lattice became world-aligned (`terrainHeightPaint` without `terrainHeightPaintSpace`). The hills must land where they were.
 
 ## Quality and limits
 

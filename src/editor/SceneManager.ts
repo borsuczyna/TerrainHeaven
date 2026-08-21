@@ -40,6 +40,9 @@ export default class SceneManager {
         object.onGeometryChanged = () => {
             if (this.isUpdatingAll) return;
             if (this.isTerrain(object)) {
+                // Adjacent terrain tiles share explicit edge constraints. Rebuild the
+                // neighbours on the next flush whenever one side changes its shape.
+                this.terrainDirty = true;
                 this.terrainDependentsDirty = true;
                 this.terrainSurfaceChangedDirty = true;
             }

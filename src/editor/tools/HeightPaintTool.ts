@@ -76,7 +76,7 @@ export default class HeightPaintTool implements Tool {
         this.activeTerrain = result.terrain;
         this.lastDab.copy(result.hit.point);
         this.history.beginAction(this.getDirection(event.ctrlKey || event.metaKey) > 0 ? 'Raise Terrain' : 'Lower Terrain');
-        this.applyDab(result.terrain, result.hit.point, event.ctrlKey || event.metaKey);
+        this.applyDab(result.hit.point, event.ctrlKey || event.metaKey);
         event.preventDefault();
         return true;
     }
@@ -91,7 +91,6 @@ export default class HeightPaintTool implements Tool {
             this.brushRing.visible = false;
             return;
         }
-        if (this.painting && this.activeTerrain && result.terrain !== this.activeTerrain) return;
         this.activeTerrain = result.terrain;
         this.updateBrushRing(result.hit, event.ctrlKey || event.metaKey);
         if (!this.painting || (event.buttons & 1) === 0) return;
@@ -105,14 +104,10 @@ export default class HeightPaintTool implements Tool {
         let changed = false;
         while (distance >= spacing) {
             this.lastDab.addScaledVector(direction, spacing);
-            changed = result.terrain.paintHeight(
-                this.lastDab,
-                this.panel.settings.radius,
-                this.panel.settings.strength * this.getDirection(event.ctrlKey || event.metaKey),
-            ) || changed;
+            changed = this.paintAt(this.lastDab, event.ctrlKey || event.metaKey) || changed;
             distance -= spacing;
         }
-        if (changed) result.terrain.update();
+        if (changed) this.activeTerrain = result.terrain;
     };
 
     private onMouseUp = (event: MouseEvent): void => {
@@ -126,10 +121,21 @@ export default class HeightPaintTool implements Tool {
         this.updateRingColor(event.ctrlKey || event.metaKey);
     };
 
-    private applyDab(terrain: Terrain, point: THREE.Vector3, invert: boolean): void {
-        if (terrain.paintHeight(point, this.panel.settings.radius, this.panel.settings.strength * this.getDirection(invert))) {
-            terrain.update();
-        }
+    private applyDab(point: THREE.Vector3, invert: boolean): void {
+        this.paintAt(point, invert);
+    }
+
+    private paintAt(point: THREE.Vector3, invert: boolean): boolean {
+        const terrains = this.scene.getElements()
+            .filter((element): element is Terrain => element instanceof Terrain)
+            .filter((terrain) => terrain.intersectsPaintBrush(point, this.panel.settings.radius));
+        const changed = terrains.filter((terrain) => terrain.paintHeight(
+            point,
+            this.panel.settings.radius,
+            this.panel.settings.strength * this.getDirection(invert),
+        ));
+        for (const terrain of changed) terrain.update();
+        return changed.length > 0;
     }
 
     private getDirection(invert: boolean): number {

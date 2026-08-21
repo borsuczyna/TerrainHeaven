@@ -76,6 +76,8 @@ export interface ElementData {
     terrainSmoothingRadius?: number;
     terrainMaxSlope?: number;
     terrainHeightPaint?: { gridX: number; gridZ: number; height: number }[];
+    // 'local' is the legacy centre-relative paint lattice; 'world' is the shared one.
+    terrainHeightPaintSpace?: 'local' | 'world';
     // Terrain cut spline-specific
     terrainCutDistance?: number;
     // River-specific

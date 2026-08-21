@@ -3,15 +3,19 @@ import { container } from 'tsyringe';
 import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle, type UVTransform } from './WorldElement';
 import Triangle from './Vertex';
 import type { PropertyDefinition } from '../editor/Properties';
-import BooleanManager from '../editor/BooleanManager';
-import SceneManager from '../editor/SceneManager';
-import TerrainCutPointManager from '../editor/TerrainCutPointManager';
-import TerrainMesher, { type TerrainCutPointInput, type TerrainPaintHeightInput } from '../terrain/TerrainMesher';
-import TerrainCutSpline from './TerrainCutSpline';
-import RiverSpline from './RiverSpline';
+import TerrainGroupMesher from '../terrain/TerrainGroupMesher';
+import type { TerrainPaintHeightInput, TerrainRect } from '../terrain/TerrainMesher';
+import type RiverSpline from './RiverSpline';
 
 export default class Terrain extends WorldElement {
-    private static readonly PAINT_CELL_SIZE = 1;
+    public static readonly PAINT_CELL_SIZE = 1;
+    // Painted heights live on one world-aligned lattice instead of a per-tile grid, so
+    // two neighbours always sample the exact same height field along a shared edge.
+    // The margin keeps one ring of cells past every edge, so a bilinear read taken on
+    // the seam never falls back to zero on one side of it.
+    private static readonly PAINT_EDGE_MARGIN = 1;
+    // Slack for deciding whether a paint cell sits inside a tile's footprint.
+    private static readonly CELL_EPSILON = 1e-5;
     public override isTerrainSurface(): boolean { return true; }
     public center: THREE.Vector3;
     public width: number;
@@ -23,7 +27,6 @@ export default class Terrain extends WorldElement {
     public maxSlopeDegrees: number = 35;
     private terrainUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
     private readonly paintedHeights = new Map<string, TerrainPaintHeightInput>();
-    private readonly terrainMesher = new TerrainMesher();
 
     constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
         super();
@@ -47,24 +50,24 @@ export default class Terrain extends WorldElement {
 
     public override translate(delta: THREE.Vector3): void {
         this.center.add(delta);
+        this.shiftPaintedHeights(delta);
         this.update();
     }
 
     public paintHeight(worldPosition: THREE.Vector3, radius: number, amount: number): boolean {
         const cellSize = Terrain.PAINT_CELL_SIZE;
-        const localX = worldPosition.x - this.center.x;
-        const localZ = worldPosition.z - this.center.z;
+        const bounds = this.getPaintBounds();
         const safeRadius = Math.max(cellSize * 0.5, radius);
-        const firstX = Math.max(Math.ceil(-this.width / 2 / cellSize), Math.floor((localX - safeRadius) / cellSize));
-        const lastX = Math.min(Math.floor(this.width / 2 / cellSize), Math.ceil((localX + safeRadius) / cellSize));
-        const firstZ = Math.max(Math.ceil(-this.length / 2 / cellSize), Math.floor((localZ - safeRadius) / cellSize));
-        const lastZ = Math.min(Math.floor(this.length / 2 / cellSize), Math.ceil((localZ + safeRadius) / cellSize));
+        const firstX = Math.max(Math.ceil(bounds.minX / cellSize), Math.floor((worldPosition.x - safeRadius) / cellSize));
+        const lastX = Math.min(Math.floor(bounds.maxX / cellSize), Math.ceil((worldPosition.x + safeRadius) / cellSize));
+        const firstZ = Math.max(Math.ceil(bounds.minZ / cellSize), Math.floor((worldPosition.z - safeRadius) / cellSize));
+        const lastZ = Math.min(Math.floor(bounds.maxZ / cellSize), Math.ceil((worldPosition.z + safeRadius) / cellSize));
         let changed = false;
 
         for (let gridX = firstX; gridX <= lastX; gridX++) {
             for (let gridZ = firstZ; gridZ <= lastZ; gridZ++) {
-                const dx = gridX * cellSize - localX;
-                const dz = gridZ * cellSize - localZ;
+                const dx = gridX * cellSize - worldPosition.x;
+                const dz = gridZ * cellSize - worldPosition.z;
                 const distance = Math.hypot(dx, dz);
                 if (distance > safeRadius) continue;
                 const t = THREE.MathUtils.clamp(distance / safeRadius, 0, 1);
@@ -84,9 +87,119 @@ export default class Terrain extends WorldElement {
     public clearPaintedHeight(): boolean {
         if (this.paintedHeights.size === 0) return false;
         this.paintedHeights.clear();
-        this.terrainMesher.invalidate();
         this.update();
         return true;
+    }
+
+    // Mirrors the padded footprint paintHeight writes into: a brush reaching a
+    // neighbour's margin cells has to paint that neighbour too, or the two tiles end up
+    // holding different values for cells they both read.
+    public intersectsPaintBrush(worldPosition: THREE.Vector3, radius: number): boolean {
+        const bounds = this.getPaintBounds();
+        const closestX = THREE.MathUtils.clamp(worldPosition.x, bounds.minX, bounds.maxX);
+        const closestZ = THREE.MathUtils.clamp(worldPosition.z, bounds.minZ, bounds.maxZ);
+        return Math.hypot(worldPosition.x - closestX, worldPosition.z - closestZ) <= radius;
+    }
+
+    // The painted offset is one field spanning every tile, so a point on a shared edge
+    // resolves to the same height no matter which tile is asking. That is what keeps a
+    // seam flat: the tiles no longer have to agree on an average, they read one value.
+    public static getPaintedHeightOffsetAt(terrains: Terrain[], worldX: number, worldZ: number): number {
+        const cellSize = Terrain.PAINT_CELL_SIZE;
+        const gridX = worldX / cellSize;
+        const gridZ = worldZ / cellSize;
+        const x0 = Math.floor(gridX);
+        const z0 = Math.floor(gridZ);
+        const tx = gridX - x0;
+        const tz = gridZ - z0;
+        const read = (x: number, z: number): number => Terrain.readPaintCell(terrains, x, z);
+        const bottom = THREE.MathUtils.lerp(read(x0, z0), read(x0 + 1, z0), tx);
+        const top = THREE.MathUtils.lerp(read(x0, z0 + 1), read(x0 + 1, z0 + 1), tx);
+        return THREE.MathUtils.lerp(bottom, top, tz);
+    }
+
+    private getPaintBounds(): TerrainRect {
+        const bounds = this.getBounds();
+        const margin = Terrain.PAINT_EDGE_MARGIN * Terrain.PAINT_CELL_SIZE;
+        return {
+            minX: bounds.minX - margin,
+            maxX: bounds.maxX + margin,
+            minZ: bounds.minZ - margin,
+            maxZ: bounds.maxZ + margin,
+        };
+    }
+
+    private static isWithinBounds(
+        bounds: TerrainRect,
+        x: number,
+        z: number,
+        margin: number,
+    ): boolean {
+        const slack = margin + Terrain.CELL_EPSILON;
+        return x >= bounds.minX - slack && x <= bounds.maxX + slack
+            && z >= bounds.minZ - slack && z <= bounds.maxZ + slack;
+    }
+
+    // Whichever tile holds the cell answers for it, so a tile that was never painted
+    // (added after its neighbours, or cleared on its own) still follows the hill that
+    // runs through its edge instead of tearing away from it. A cell on a shared edge is
+    // held by both neighbours, and the tiles actually covering it win, so a stale margin
+    // cell cannot outvote the tile the cell really sits on. Cells left outside a tile's
+    // footprint by a move or a resize are ignored.
+    private static readPaintCell(terrains: Terrain[], gridX: number, gridZ: number): number {
+        const key = `${gridX},${gridZ}`;
+        const x = gridX * Terrain.PAINT_CELL_SIZE;
+        const z = gridZ * Terrain.PAINT_CELL_SIZE;
+        const margin = Terrain.PAINT_EDGE_MARGIN * Terrain.PAINT_CELL_SIZE;
+        let borrowed: number | null = null;
+        for (const terrain of terrains) {
+            const stored = terrain.paintedHeights.get(key);
+            if (stored === undefined) continue;
+            const bounds = terrain.getBounds();
+            if (!Terrain.isWithinBounds(bounds, x, z, margin)) continue;
+            if (Terrain.isWithinBounds(bounds, x, z, 0)) return stored.height;
+            borrowed ??= stored.height;
+        }
+        return borrowed ?? 0;
+    }
+
+    // The resolved field over a group's footprint, following the same owner-first
+    // precedence as readPaintCell so the mesher samples exactly what the field says.
+    public static collectPaintSamples(terrains: Terrain[], footprint: TerrainRect[]): TerrainPaintHeightInput[] {
+        const cellSize = Terrain.PAINT_CELL_SIZE;
+        const margin = Terrain.PAINT_EDGE_MARGIN * cellSize;
+        const owned = new Map<string, TerrainPaintHeightInput>();
+        const borrowed = new Map<string, TerrainPaintHeightInput>();
+        for (const terrain of terrains) {
+            const bounds = terrain.getBounds();
+            for (const sample of terrain.paintedHeights.values()) {
+                const x = sample.gridX * cellSize;
+                const z = sample.gridZ * cellSize;
+                if (!footprint.some((rect) => Terrain.isWithinBounds(rect, x, z, margin))) continue;
+                if (!Terrain.isWithinBounds(bounds, x, z, margin)) continue;
+                const key = `${sample.gridX},${sample.gridZ}`;
+                const target = Terrain.isWithinBounds(bounds, x, z, 0) ? owned : borrowed;
+                if (!target.has(key)) target.set(key, { ...sample });
+            }
+        }
+        for (const [key, sample] of borrowed) if (!owned.has(key)) owned.set(key, sample);
+        return [...owned.values()];
+    }
+
+    // The lattice is world-aligned, so a moved tile has to carry its samples over to
+    // the cells that now sit underneath it, snapped to the nearest cell.
+    private shiftPaintedHeights(delta: THREE.Vector3): void {
+        const cellSize = Terrain.PAINT_CELL_SIZE;
+        const shiftX = Math.round(delta.x / cellSize);
+        const shiftZ = Math.round(delta.z / cellSize);
+        if (this.paintedHeights.size === 0 || (shiftX === 0 && shiftZ === 0)) return;
+        const moved = [...this.paintedHeights.values()].map((sample) => ({
+            gridX: sample.gridX + shiftX,
+            gridZ: sample.gridZ + shiftZ,
+            height: sample.height,
+        }));
+        this.paintedHeights.clear();
+        for (const sample of moved) this.paintedHeights.set(`${sample.gridX},${sample.gridZ}`, sample);
     }
 
     public override getNodeBasis(_index: number): NodeBasis {
@@ -149,6 +262,7 @@ export default class Terrain extends WorldElement {
             terrainSmoothingEnabled: this.smoothingEnabled,
             terrainSmoothingRadius: this.smoothingRadius,
             terrainMaxSlope: this.maxSlopeDegrees,
+            terrainHeightPaintSpace: 'world',
             terrainHeightPaint: [...this.paintedHeights.values()]
                 .sort((a, b) => a.gridZ - b.gridZ || a.gridX - b.gridX)
                 .map((sample) => ({ ...sample })),
@@ -168,10 +282,15 @@ export default class Terrain extends WorldElement {
         terrain.smoothingEnabled = data.terrainSmoothingEnabled ?? true;
         terrain.smoothingRadius = THREE.MathUtils.clamp(data.terrainSmoothingRadius ?? 4, 0.5, 20);
         terrain.maxSlopeDegrees = THREE.MathUtils.clamp(data.terrainMaxSlope ?? 35, 1, 89);
+        // Scenes saved before the lattice became world-aligned stored cells relative to
+        // the tile centre, so shift those onto the shared lattice while loading.
+        const legacyPaint = (data.terrainHeightPaintSpace ?? 'local') !== 'world';
+        const legacyShiftX = legacyPaint ? Math.round(node.x / Terrain.PAINT_CELL_SIZE) : 0;
+        const legacyShiftZ = legacyPaint ? Math.round(node.z / Terrain.PAINT_CELL_SIZE) : 0;
         for (const sample of data.terrainHeightPaint ?? []) {
             if (!Number.isFinite(sample.gridX) || !Number.isFinite(sample.gridZ) || !Number.isFinite(sample.height)) continue;
-            const gridX = Math.round(sample.gridX);
-            const gridZ = Math.round(sample.gridZ);
+            const gridX = Math.round(sample.gridX) + legacyShiftX;
+            const gridZ = Math.round(sample.gridZ) + legacyShiftZ;
             const height = THREE.MathUtils.clamp(sample.height, -100, 100);
             if (Math.abs(height) > 1e-5) terrain.paintedHeights.set(`${gridX},${gridZ}`, { gridX, gridZ, height });
         }
@@ -305,33 +424,9 @@ export default class Terrain extends WorldElement {
     }
 
     protected override getGeometry(): GeometryGroup[] {
-        const scene = container.resolve(SceneManager);
-        const booleanManager = container.resolve(BooleanManager);
-        const cutPointManager = container.resolve(TerrainCutPointManager);
-        const cutAreas = booleanManager.getTerrainCutAreas(this, scene.getElements());
-        const cutPoints: TerrainCutPointInput[] = cutPointManager.getPointsWithRadius();
-        for (const element of scene.getElements()) {
-            if (element instanceof TerrainCutSpline) cutPoints.push(...element.getSampledCutPoints());
-            if (element instanceof RiverSpline) cutPoints.push(...element.getSampledTerrainPoints(this.center.y));
-        }
-        const area = this.terrainMesher.build({
-            center: this.center,
-            width: this.width,
-            length: this.length,
-            cutAreas,
-            cutPoints,
-            paint: {
-                cellSize: Terrain.PAINT_CELL_SIZE,
-                samples: [...this.paintedHeights.values()],
-            },
-            settings: {
-                meshDetail: this.meshDetail,
-                triangleLimit: this.triangleLimit,
-                smoothingEnabled: this.smoothingEnabled,
-                smoothingRadius: this.smoothingRadius,
-                maxSlopeDegrees: this.maxSlopeDegrees,
-            },
-        });
+        // The whole group of touching tiles is meshed as one surface and then cut along
+        // the tile borders, so this tile only has to skin its own share of it.
+        const area = container.resolve(TerrainGroupMesher).getSurfaceFor(this);
 
         const width = Math.max(0.0001, this.width);
         const length = Math.max(0.0001, this.length);
@@ -345,5 +440,42 @@ export default class Terrain extends WorldElement {
             uvFor(tri.a), uvFor(tri.b), uvFor(tri.c),
         ));
         return [{ name: 'terrain', triangles }];
+    }
+
+    // Every tile a river touches has to agree on one water surface, so it is derived
+    // from the river's own footprint rather than from whichever tile is asking.
+    public static getSharedRiverSurfaceHeight(river: RiverSpline, terrains: Terrain[]): number {
+        const occupied = river.getOccupiedArea();
+        if (occupied.length === 0 || terrains.length === 0) return terrains[0]?.center.y ?? 0;
+        let minX = Number.POSITIVE_INFINITY;
+        let maxX = Number.NEGATIVE_INFINITY;
+        let minZ = Number.POSITIVE_INFINITY;
+        let maxZ = Number.NEGATIVE_INFINITY;
+        for (const triangle of occupied) {
+            minX = Math.min(minX, triangle.a.x, triangle.b.x, triangle.c.x);
+            maxX = Math.max(maxX, triangle.a.x, triangle.b.x, triangle.c.x);
+            minZ = Math.min(minZ, triangle.a.z, triangle.b.z, triangle.c.z);
+            maxZ = Math.max(maxZ, triangle.a.z, triangle.b.z, triangle.c.z);
+        }
+        const centerX = (minX + maxX) / 2;
+        const centerZ = (minZ + maxZ) / 2;
+        const affected = terrains.filter((terrain) => {
+            const bounds = terrain.getBounds();
+            return maxX >= bounds.minX && minX <= bounds.maxX && maxZ >= bounds.minZ && minZ <= bounds.maxZ;
+        });
+        const authority = affected[0] ?? terrains[0];
+        const bounds = authority.getBounds();
+        const x = THREE.MathUtils.clamp(centerX, bounds.minX, bounds.maxX);
+        const z = THREE.MathUtils.clamp(centerZ, bounds.minZ, bounds.maxZ);
+        return authority.center.y + Terrain.getPaintedHeightOffsetAt(terrains, x, z);
+    }
+
+    public getBounds(): TerrainRect {
+        return {
+            minX: this.center.x - this.width / 2,
+            maxX: this.center.x + this.width / 2,
+            minZ: this.center.z - this.length / 2,
+            maxZ: this.center.z + this.length / 2,
+        };
     }
 }
