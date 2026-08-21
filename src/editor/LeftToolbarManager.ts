@@ -12,6 +12,7 @@ import TextureBrowser from './panels/TextureBrowser';
 import WireframeManager from './WireframeManager';
 import XRayManager from './XRayManager';
 import FoliageTool from './tools/FoliageTool';
+import HeightPaintTool from './tools/HeightPaintTool';
 
 @singleton()
 export default class LeftToolbarManager {
@@ -28,6 +29,7 @@ export default class LeftToolbarManager {
         @inject(WireframeManager) private readonly wireframeManager: WireframeManager,
         @inject(XRayManager) private readonly xrayManager: XRayManager,
         @inject(FoliageTool) private readonly foliageTool: FoliageTool,
+        @inject(HeightPaintTool) private readonly heightPaintTool: HeightPaintTool,
     ) {}
 
     public init(): void {
@@ -46,6 +48,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.riverSplineTool);
         this.toolManager.registerTool(this.uvTool);
         this.toolManager.registerTool(this.foliageTool);
+        this.toolManager.registerTool(this.heightPaintTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
@@ -62,10 +65,11 @@ export default class LeftToolbarManager {
         this.toolManager.registerSwitcher(
             'terrain-switcher',
             document.getElementById('btn-terrain') as HTMLButtonElement,
-            ['terrain', 'terrain-cut-point', 'terrain-cut-spline', 'river'],
+            ['terrain', 'terrain-height-paint', 'terrain-cut-point', 'terrain-cut-spline', 'river'],
             'terrain',
             {
                 terrain: { label: 'Terrain Tool', icon: 'mountain' },
+                'terrain-height-paint': { label: 'Height Map Painter', icon: 'paintbrush' },
                 'terrain-cut-point': { label: 'Terrain Cut Point Tool', icon: 'plus' },
                 'terrain-cut-spline': { label: 'Terrain Cut Spline Tool', icon: 'spline' },
                 river: { label: 'River Tool', icon: 'waves' },

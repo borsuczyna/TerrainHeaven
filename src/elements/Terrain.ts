@@ -6,11 +6,12 @@ import type { PropertyDefinition } from '../editor/Properties';
 import BooleanManager from '../editor/BooleanManager';
 import SceneManager from '../editor/SceneManager';
 import TerrainCutPointManager from '../editor/TerrainCutPointManager';
-import TerrainMesher, { type TerrainCutPointInput } from '../terrain/TerrainMesher';
+import TerrainMesher, { type TerrainCutPointInput, type TerrainPaintHeightInput } from '../terrain/TerrainMesher';
 import TerrainCutSpline from './TerrainCutSpline';
 import RiverSpline from './RiverSpline';
 
 export default class Terrain extends WorldElement {
+    private static readonly PAINT_CELL_SIZE = 1;
     public override isTerrainSurface(): boolean { return true; }
     public center: THREE.Vector3;
     public width: number;
@@ -21,6 +22,7 @@ export default class Terrain extends WorldElement {
     public smoothingRadius: number = 4;
     public maxSlopeDegrees: number = 35;
     private terrainUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    private readonly paintedHeights = new Map<string, TerrainPaintHeightInput>();
     private readonly terrainMesher = new TerrainMesher();
 
     constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
@@ -46,6 +48,45 @@ export default class Terrain extends WorldElement {
     public override translate(delta: THREE.Vector3): void {
         this.center.add(delta);
         this.update();
+    }
+
+    public paintHeight(worldPosition: THREE.Vector3, radius: number, amount: number): boolean {
+        const cellSize = Terrain.PAINT_CELL_SIZE;
+        const localX = worldPosition.x - this.center.x;
+        const localZ = worldPosition.z - this.center.z;
+        const safeRadius = Math.max(cellSize * 0.5, radius);
+        const firstX = Math.max(Math.ceil(-this.width / 2 / cellSize), Math.floor((localX - safeRadius) / cellSize));
+        const lastX = Math.min(Math.floor(this.width / 2 / cellSize), Math.ceil((localX + safeRadius) / cellSize));
+        const firstZ = Math.max(Math.ceil(-this.length / 2 / cellSize), Math.floor((localZ - safeRadius) / cellSize));
+        const lastZ = Math.min(Math.floor(this.length / 2 / cellSize), Math.ceil((localZ + safeRadius) / cellSize));
+        let changed = false;
+
+        for (let gridX = firstX; gridX <= lastX; gridX++) {
+            for (let gridZ = firstZ; gridZ <= lastZ; gridZ++) {
+                const dx = gridX * cellSize - localX;
+                const dz = gridZ * cellSize - localZ;
+                const distance = Math.hypot(dx, dz);
+                if (distance > safeRadius) continue;
+                const t = THREE.MathUtils.clamp(distance / safeRadius, 0, 1);
+                const falloff = 1 - t * t * (3 - 2 * t);
+                const key = `${gridX},${gridZ}`;
+                const previous = this.paintedHeights.get(key)?.height ?? 0;
+                const height = THREE.MathUtils.clamp(previous + amount * falloff, -100, 100);
+                if (Math.abs(height - previous) <= 1e-6) continue;
+                if (Math.abs(height) <= 1e-5) this.paintedHeights.delete(key);
+                else this.paintedHeights.set(key, { gridX, gridZ, height });
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    public clearPaintedHeight(): boolean {
+        if (this.paintedHeights.size === 0) return false;
+        this.paintedHeights.clear();
+        this.terrainMesher.invalidate();
+        this.update();
+        return true;
     }
 
     public override getNodeBasis(_index: number): NodeBasis {
@@ -108,6 +149,9 @@ export default class Terrain extends WorldElement {
             terrainSmoothingEnabled: this.smoothingEnabled,
             terrainSmoothingRadius: this.smoothingRadius,
             terrainMaxSlope: this.maxSlopeDegrees,
+            terrainHeightPaint: [...this.paintedHeights.values()]
+                .sort((a, b) => a.gridZ - b.gridZ || a.gridX - b.gridX)
+                .map((sample) => ({ ...sample })),
         };
     }
 
@@ -124,6 +168,13 @@ export default class Terrain extends WorldElement {
         terrain.smoothingEnabled = data.terrainSmoothingEnabled ?? true;
         terrain.smoothingRadius = THREE.MathUtils.clamp(data.terrainSmoothingRadius ?? 4, 0.5, 20);
         terrain.maxSlopeDegrees = THREE.MathUtils.clamp(data.terrainMaxSlope ?? 35, 1, 89);
+        for (const sample of data.terrainHeightPaint ?? []) {
+            if (!Number.isFinite(sample.gridX) || !Number.isFinite(sample.gridZ) || !Number.isFinite(sample.height)) continue;
+            const gridX = Math.round(sample.gridX);
+            const gridZ = Math.round(sample.gridZ);
+            const height = THREE.MathUtils.clamp(sample.height, -100, 100);
+            if (Math.abs(height) > 1e-5) terrain.paintedHeights.set(`${gridX},${gridZ}`, { gridX, gridZ, height });
+        }
         const uv = data.uvTransforms?.terrain;
         if (uv) terrain.terrainUV = { ...uv };
         return terrain;
@@ -269,6 +320,10 @@ export default class Terrain extends WorldElement {
             length: this.length,
             cutAreas,
             cutPoints,
+            paint: {
+                cellSize: Terrain.PAINT_CELL_SIZE,
+                samples: [...this.paintedHeights.values()],
+            },
             settings: {
                 meshDetail: this.meshDetail,
                 triangleLimit: this.triangleLimit,

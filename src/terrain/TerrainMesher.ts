@@ -69,12 +69,24 @@ export interface TerrainCutPointInput {
     profileOnly?: boolean;
 }
 
+export interface TerrainPaintHeightInput {
+    gridX: number;
+    gridZ: number;
+    height: number;
+}
+
+export interface TerrainPaintInput {
+    cellSize: number;
+    samples: TerrainPaintHeightInput[];
+}
+
 export interface TerrainMesherInput {
     center: THREE.Vector3;
     width: number;
     length: number;
     cutAreas: OccupiedTriangle[];
     cutPoints: TerrainCutPointInput[];
+    paint?: TerrainPaintInput;
     settings: TerrainMesherSettings;
 }
 
@@ -127,12 +139,21 @@ export default class TerrainMesher {
             this.findContainingRegion([point.position.x, point.position.z], regions) !== null
             && !this.isInsideCutArea([point.position.x, point.position.z], input.cutAreas)
         ));
+        const activePaintPoints = this.getActivePaintPoints(input, regions);
+        const influencePoints = [...activeCutPoints, ...activePaintPoints];
         const activeCutPointKeys = new Set(activeCutPoints.map((point) => this.pointKey([point.position.x, point.position.z])));
         const mandatoryEstimate = regions.reduce((sum, region) => (
             sum + region.contour.length + region.holes.reduce((holeSum, hole) => holeSum + hole.length, 0)
-        ), 0) + activeCutPoints.length + Math.max(0, roadSegments.length - roadBoundarySegments.length);
+        ), 0) + influencePoints.length + Math.max(0, roadSegments.length - roadBoundarySegments.length);
         const maxSteiner = Math.max(0, Math.floor((input.settings.triangleLimit - mandatoryEstimate) / 2));
-        const steiner = this.generateSteinerPoints(input, regions, roadSegments, activeCutPoints, maxSteiner);
+        const steiner = this.generateSteinerPoints(
+            input,
+            regions,
+            roadSegments,
+            influencePoints,
+            activeCutPoints,
+            maxSteiner,
+        );
 
         let triangles = this.insertRoadBoundaryKnots(
             this.triangulateRegions(regions, steiner),
@@ -161,7 +182,7 @@ export default class TerrainMesher {
         }
 
         if (triangles.length > input.settings.triangleLimit) {
-            const essential = activeCutPoints.map((point) => [point.position.x, point.position.z] as Point2);
+            const essential = influencePoints.map((point) => [point.position.x, point.position.z] as Point2);
             triangles = this.insertRoadBoundaryKnots(
                 this.triangulateRegions(regions, essential),
                 roadBoundarySegments,
@@ -421,7 +442,8 @@ export default class TerrainMesher {
         input: TerrainMesherInput,
         regions: PolygonRegion[],
         roadSegments: Segment2[],
-        cutPoints: TerrainCutPointInput[],
+        requiredPoints: TerrainCutPointInput[],
+        adaptivePoints: TerrainCutPointInput[],
         limit: number,
     ): Point2[] {
         const result: Point2[] = [];
@@ -436,11 +458,11 @@ export default class TerrainMesher {
             result.push(snapped);
         };
 
-        for (const point of cutPoints) {
+        for (const point of requiredPoints) {
             addExactPoint([point.position.x, point.position.z]);
         }
 
-        if (result.length >= limit || roadSegments.length + cutPoints.length === 0) return result;
+        if (result.length >= limit || roadSegments.length + adaptivePoints.length === 0) return result;
 
         const terrainDiagonal = Math.hypot(input.width, input.length);
         const baseRadius = Math.max(detail * 2, input.settings.smoothingRadius);
@@ -474,7 +496,7 @@ export default class TerrainMesher {
                     const boundaryClearance = Math.min(detail * 0.25, tier.spacing * 0.2);
                     if (this.getDistanceToRegionBoundary(point, region) < boundaryClearance) return true;
 
-                    const distance = this.getNearestInfluenceDistance(point, roadSegments, cutPoints);
+                    const distance = this.getNearestInfluenceDistance(point, roadSegments, adaptivePoints);
                     if (distance <= tier.innerRadius + TerrainMesher.EPSILON
                         || distance > tier.outerRadius + TerrainMesher.EPSILON) return true;
 
@@ -496,7 +518,7 @@ export default class TerrainMesher {
                 if (scanned >= scanLimit) break;
             }
             if (scanned < scanLimit) {
-                for (const point of cutPoints) {
+                for (const point of adaptivePoints) {
                     visitBounds(
                         point.position.x - tier.outerRadius, point.position.x + tier.outerRadius,
                         point.position.z - tier.outerRadius, point.position.z + tier.outerRadius,
@@ -611,12 +633,91 @@ export default class TerrainMesher {
         return result;
     }
 
+    private getActivePaintPoints(input: TerrainMesherInput, regions: PolygonRegion[]): TerrainCutPointInput[] {
+        const paint = input.paint;
+        if (!paint || paint.samples.length === 0) return [];
+        const cellSize = Math.max(0.05, paint.cellSize);
+        const candidates = paint.samples
+            .filter((sample) => Math.abs(sample.height) > TerrainMesher.EPSILON)
+            .map((sample) => ({
+                sample,
+                position: new THREE.Vector3(
+                    input.center.x + Math.round(sample.gridX) * cellSize,
+                    input.center.y + sample.height,
+                    input.center.z + Math.round(sample.gridZ) * cellSize,
+                ),
+            }))
+            .filter(({ position }) => (
+                this.findContainingRegion([position.x, position.z], regions) !== null
+                && !this.isInsideCutArea([position.x, position.z], input.cutAreas)
+            ));
+        const maxInfluences = Math.max(12, Math.min(
+            160,
+            Math.floor(input.settings.triangleLimit / 6),
+            Math.floor(240 / Math.max(0.5, input.settings.meshDetail)),
+        ));
+        if (candidates.length <= maxInfluences) {
+            return candidates.map(({ position }) => ({ position, radius: cellSize * 2 }));
+        }
+
+        const values = new Map<string, number>();
+        for (const sample of paint.samples) {
+            values.set(`${Math.round(sample.gridX)},${Math.round(sample.gridZ)}`, sample.height);
+        }
+        const importance = (sample: TerrainPaintHeightInput): number => {
+            const x = Math.round(sample.gridX);
+            const z = Math.round(sample.gridZ);
+            const neighborSum = (values.get(`${x - 1},${z}`) ?? 0)
+                + (values.get(`${x + 1},${z}`) ?? 0)
+                + (values.get(`${x},${z - 1}`) ?? 0)
+                + (values.get(`${x},${z + 1}`) ?? 0);
+            return Math.abs(sample.height * 4 - neighborSum) + Math.abs(sample.height) * 0.02;
+        };
+
+        let blockSize = Math.max(2, Math.ceil(Math.sqrt(candidates.length / maxInfluences)));
+        let selected: typeof candidates = [];
+        do {
+            const blocks = new Map<string, (typeof candidates)[number]>();
+            for (const candidate of candidates) {
+                const blockX = Math.floor(candidate.sample.gridX / blockSize);
+                const blockZ = Math.floor(candidate.sample.gridZ / blockSize);
+                const key = `${blockX},${blockZ}`;
+                const current = blocks.get(key);
+                if (!current || importance(candidate.sample) > importance(current.sample)) blocks.set(key, candidate);
+            }
+            selected = [...blocks.values()];
+            blockSize++;
+        } while (selected.length > maxInfluences);
+
+        return selected
+            .sort((a, b) => a.sample.gridZ - b.sample.gridZ || a.sample.gridX - b.sample.gridX)
+            .map(({ position }) => ({ position, radius: cellSize * 2 }));
+    }
+
     private applyHeights(topology: TopologyCache, input: TerrainMesherInput): OccupiedTriangle[] {
         const cutPointMap = new Map<string, TerrainCutPointInput>();
         for (const point of input.cutPoints) {
             const key = this.pointKey([point.position.x, point.position.z]);
             if (topology.activeCutPointKeys.has(key)) cutPointMap.set(key, point);
         }
+        const paintCellSize = Math.max(0.05, input.paint?.cellSize ?? 1);
+        const paintValues = new Map<string, number>();
+        for (const sample of input.paint?.samples ?? []) {
+            paintValues.set(`${Math.round(sample.gridX)},${Math.round(sample.gridZ)}`, sample.height);
+        }
+        const paintedHeightAt = (point: Point2): number => {
+            if (paintValues.size === 0) return 0;
+            const gridX = (point[0] - input.center.x) / paintCellSize;
+            const gridZ = (point[1] - input.center.z) / paintCellSize;
+            const x0 = Math.floor(gridX);
+            const z0 = Math.floor(gridZ);
+            const tx = gridX - x0;
+            const tz = gridZ - z0;
+            const read = (x: number, z: number): number => paintValues.get(`${x},${z}`) ?? 0;
+            const bottom = THREE.MathUtils.lerp(read(x0, z0), read(x0 + 1, z0), tx);
+            const top = THREE.MathUtils.lerp(read(x0, z0 + 1), read(x0 + 1, z0 + 1), tx);
+            return THREE.MathUtils.lerp(bottom, top, tz);
+        };
 
         const maxSlopeRadians = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(input.settings.maxSlopeDegrees, 1, 89));
         const maxSlope = Math.max(0.01, Math.tan(maxSlopeRadians));
@@ -651,18 +752,19 @@ export default class TerrainMesher {
                 return road.height;
             }
 
+            const paintedBaseHeight = input.center.y + paintedHeightAt(point);
             if (!input.settings.smoothingEnabled) {
-                heightCache.set(key, input.center.y);
-                return input.center.y;
+                heightCache.set(key, paintedBaseHeight);
+                return paintedBaseHeight;
             }
 
             let weightedDelta = 0;
             let weightSum = 0;
             let localSlopeHeight: number | null = null;
             if (road) {
-                const width = Math.max(input.settings.smoothingRadius, 1.5 * Math.abs(road.height - input.center.y) / road.maxSlope);
+                const width = Math.max(input.settings.smoothingRadius, 1.5 * Math.abs(road.height - paintedBaseHeight) / road.maxSlope);
                 const weight = this.smoothInfluence(road.distance, width);
-                weightedDelta += (road.height - input.center.y) * weight;
+                weightedDelta += (road.height - paintedBaseHeight) * weight;
                 weightSum += weight;
             }
             for (const cutPoint of cutPointMap.values()) {
@@ -679,24 +781,24 @@ export default class TerrainMesher {
                         smoothT,
                         THREE.MathUtils.clamp(cutPoint.slopeSmoothing ?? 0, 0, 1),
                     );
-                    const candidate = THREE.MathUtils.lerp(cutPoint.position.y, input.center.y, profileT);
+                    const candidate = THREE.MathUtils.lerp(cutPoint.position.y, paintedBaseHeight, profileT);
                     if (localSlopeHeight === null
-                        || Math.abs(candidate - input.center.y) > Math.abs(localSlopeHeight - input.center.y)) {
+                        || Math.abs(candidate - paintedBaseHeight) > Math.abs(localSlopeHeight - paintedBaseHeight)) {
                         localSlopeHeight = candidate;
                     }
                     continue;
                 }
                 // A cut point's own radius sets how far its height modification reaches,
                 // still respecting the max-slope constraint so steep drops stay walkable.
-                const slopeRun = Math.abs(cutPoint.position.y - input.center.y) / Math.max(maxSlope, 1e-6);
+                const slopeRun = Math.abs(cutPoint.position.y - paintedBaseHeight) / Math.max(maxSlope, 1e-6);
                 const width = Math.max(cutPoint.radius, 1.5 * slopeRun);
                 const weight = this.smoothInfluence(distance, width);
-                weightedDelta += (cutPoint.position.y - input.center.y) * weight;
+                weightedDelta += (cutPoint.position.y - paintedBaseHeight) * weight;
                 weightSum += weight;
             }
-            let height = input.center.y + weightedDelta / Math.max(1, weightSum);
+            let height = paintedBaseHeight + weightedDelta / Math.max(1, weightSum);
             if (localSlopeHeight !== null) {
-                height = localSlopeHeight < input.center.y
+                height = localSlopeHeight < paintedBaseHeight
                     ? Math.min(height, localSlopeHeight)
                     : Math.max(height, localSlopeHeight);
             }
@@ -793,6 +895,10 @@ export default class TerrainMesher {
         const cutterKeys = input.cutAreas.map((tri) => [tri.a, tri.b, tri.c]
             .map((point) => this.pointKey([point.x, point.z])).sort().join(';')).sort();
         const pointKeys = input.cutPoints.map((point) => this.pointKey([point.position.x, point.position.z])).sort();
+        const paintKeys = (input.paint?.samples ?? [])
+            .filter((sample) => Math.abs(sample.height) > TerrainMesher.EPSILON)
+            .map((sample) => `${Math.round(sample.gridX)},${Math.round(sample.gridZ)}`)
+            .sort();
         return [
             this.pointKey([input.center.x, input.center.z]),
             this.snap(input.width), this.snap(input.length),
@@ -800,6 +906,7 @@ export default class TerrainMesher {
             input.settings.smoothingEnabled ? 1 : 0,
             this.snap(input.settings.smoothingRadius),
             cutterKeys.join('|'), pointKeys.join('|'),
+            this.snap(input.paint?.cellSize ?? 1), paintKeys.join('|'),
         ].join('#');
     }
 

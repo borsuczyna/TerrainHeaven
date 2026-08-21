@@ -75,6 +75,7 @@ export interface ElementData {
     terrainSmoothingEnabled?: boolean;
     terrainSmoothingRadius?: number;
     terrainMaxSlope?: number;
+    terrainHeightPaint?: { gridX: number; gridZ: number; height: number }[];
     // Terrain cut spline-specific
     terrainCutDistance?: number;
     // River-specific
