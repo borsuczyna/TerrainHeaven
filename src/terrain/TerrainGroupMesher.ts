@@ -14,6 +14,7 @@ import TerrainMesher, {
     type TerrainMesherSettings,
     type TerrainRect,
 } from './TerrainMesher';
+import { applyTerrainLOD } from '../export/LODLevels';
 
 interface GroupCache {
     signature: string;
@@ -69,6 +70,11 @@ const rectsOverlap = (a: TerrainRect, b: TerrainRect, padding: number): boolean 
 export default class TerrainGroupMesher {
     private readonly meshers = new Map<Terrain, TerrainMesher>();
     private readonly caches = new Map<Terrain, GroupCache>();
+    // Keyed the same way as the two maps above, one layer deeper by LOD index - so
+    // switching the editor's "LOD Preview" back and forth (or the exporter building all
+    // of a tile's levels) doesn't refire the mesher on every call.
+    private readonly lodMeshers = new Map<Terrain, Map<number, TerrainMesher>>();
+    private readonly lodCaches = new Map<Terrain, Map<number, GroupCache>>();
 
     constructor(
         @inject(SceneManager) private readonly scene: SceneManager,
@@ -104,6 +110,55 @@ export default class TerrainGroupMesher {
     public invalidate(): void {
         this.caches.clear();
         for (const mesher of this.meshers.values()) mesher.invalidate();
+        this.lodCaches.clear();
+        for (const byLod of this.lodMeshers.values()) for (const mesher of byLod.values()) mesher.invalidate();
+    }
+
+    // Builds one tile's slice of its group at a coarser LOD level (0 = identical to
+    // getSurfaceFor/the live scene) using its own dedicated mesher/cache per level, so
+    // holes, banks, and slope limits stay correct at every LOD automatically - it is the
+    // same real mesher, just fed coarser settings, not a separate decimation pass.
+    // Shared by both the editor's "LOD Preview" setting and the Unity exporter, via the
+    // same `applyTerrainLOD` formula, so a previewed level looks exactly like what gets
+    // exported.
+    public buildLODSurface(terrain: Terrain, lodIndex: number): OccupiedTriangle[] {
+        if (lodIndex <= 0) return this.getSurfaceFor(terrain);
+
+        const elements = this.scene.getElements();
+        const terrains = elements.filter((element): element is Terrain => element instanceof Terrain);
+        const groups = this.getGroups(terrains);
+        const group = groups.find((members) => members.includes(terrain));
+        if (!group) return [];
+
+        const authority = group[0];
+        this.pruneCaches(groups.map((members) => members[0]));
+
+        const settings = applyTerrainLOD(this.getGroupSettings(group), lodIndex);
+        const input = this.buildInput(group, terrains, elements, settings, lodIndex);
+        const signature = this.getSignature(group, input);
+
+        let cachesByLod = this.lodCaches.get(authority);
+        if (!cachesByLod) {
+            cachesByLod = new Map();
+            this.lodCaches.set(authority, cachesByLod);
+        }
+        const cached = cachesByLod.get(lodIndex);
+        if (cached?.signature === signature) return cached.slices.get(terrain) ?? [];
+
+        let meshersByLod = this.lodMeshers.get(authority);
+        if (!meshersByLod) {
+            meshersByLod = new Map();
+            this.lodMeshers.set(authority, meshersByLod);
+        }
+        let mesher = meshersByLod.get(lodIndex);
+        if (!mesher) {
+            mesher = new TerrainMesher();
+            meshersByLod.set(lodIndex, mesher);
+        }
+
+        const slices = this.splitByTile(mesher.build(input), group);
+        cachesByLod.set(lodIndex, { signature, slices });
+        return slices.get(terrain) ?? [];
     }
 
     // Tiles that touch along an edge belong to one surface. Two tiles meeting only at a
@@ -165,9 +220,15 @@ export default class TerrainGroupMesher {
         };
     }
 
-    private buildInput(group: Terrain[], terrains: Terrain[], elements: WorldElement[]): TerrainMesherInput {
+    private buildInput(
+        group: Terrain[],
+        terrains: Terrain[],
+        elements: WorldElement[],
+        settingsOverride?: Partial<TerrainMesherSettings>,
+        lodIndex = 0,
+    ): TerrainMesherInput {
         const authority = group[0];
-        const settings = this.getGroupSettings(group);
+        const settings = { ...this.getGroupSettings(group), ...settingsOverride };
         const footprint = group.map((tile) => tile.getBounds());
 
         const cutAreas = new Map<string, OccupiedTriangle>();
@@ -186,10 +247,11 @@ export default class TerrainGroupMesher {
 
         const cutPoints: TerrainCutPointInput[] = [...this.cutPointManager.getPointsWithRadius()];
         for (const element of elements) {
-            if (element instanceof TerrainCutSpline) cutPoints.push(...element.getSampledCutPoints());
+            if (element instanceof TerrainCutSpline) cutPoints.push(...element.getSampledCutPoints(lodIndex));
             if (element instanceof RiverSpline) {
                 cutPoints.push(...element.getSampledTerrainPoints(
                     riverSurfaceHeights.get(element) ?? authority.center.y,
+                    lodIndex,
                 ));
             }
         }
@@ -283,6 +345,8 @@ export default class TerrainGroupMesher {
         const live = new Set(authorities);
         for (const key of [...this.caches.keys()]) if (!live.has(key)) this.caches.delete(key);
         for (const key of [...this.meshers.keys()]) if (!live.has(key)) this.meshers.delete(key);
+        for (const key of [...this.lodCaches.keys()]) if (!live.has(key)) this.lodCaches.delete(key);
+        for (const key of [...this.lodMeshers.keys()]) if (!live.has(key)) this.lodMeshers.delete(key);
     }
 
     /**

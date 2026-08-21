@@ -6,6 +6,7 @@ import type { PropertyDefinition } from '../editor/Properties';
 import TerrainGroupMesher from '../terrain/TerrainGroupMesher';
 import type { TerrainPaintHeightInput, TerrainRect } from '../terrain/TerrainMesher';
 import type RiverSpline from './RiverSpline';
+import LODPreviewManager from '../editor/LODPreviewManager';
 
 export default class Terrain extends WorldElement {
     public static readonly PAINT_CELL_SIZE = 1;
@@ -82,6 +83,86 @@ export default class Terrain extends WorldElement {
             }
         }
         return changed;
+    }
+
+    // A third paint mode: blends each cell toward the average of its 3x3 neighbourhood
+    // instead of pushing height up or down, smoothing out painted bumps within the brush
+    // rather than aiming for any particular height.
+    //
+    // Static (not per-tile) because a naive per-tile version - each tile reading the
+    // shared field and writing its own cells in turn - lets a seam cell come out
+    // differently depending on which tile happened to process it first (the second tile
+    // to run would already see the first tile's smoothed value as its "current" state,
+    // biasing the blend). Computing every affected tile's updates from one snapshot of
+    // the untouched field, then applying them all afterward, keeps a seam cell's result
+    // independent of tile order - confirmed by a regression test that failed under the
+    // naive per-tile version.
+    public static smoothHeight(worldPosition: THREE.Vector3, radius: number, strength: number, terrains: Terrain[]): boolean {
+        const cellSize = Terrain.PAINT_CELL_SIZE;
+        const safeRadius = Math.max(cellSize * 0.5, radius);
+        const blendStrength = THREE.MathUtils.clamp(strength, 0, 1);
+
+        const affected = terrains.filter((terrain) => terrain.intersectsPaintBrush(worldPosition, safeRadius));
+        if (affected.length === 0) return false;
+
+        // The combined cell range across every affected tile's own padded footprint - a
+        // cell right on a seam must be considered once, not once per bordering tile.
+        let firstX = Number.POSITIVE_INFINITY;
+        let lastX = Number.NEGATIVE_INFINITY;
+        let firstZ = Number.POSITIVE_INFINITY;
+        let lastZ = Number.NEGATIVE_INFINITY;
+        for (const terrain of affected) {
+            const bounds = terrain.getPaintBounds();
+            firstX = Math.min(firstX, Math.max(Math.ceil(bounds.minX / cellSize), Math.floor((worldPosition.x - safeRadius) / cellSize)));
+            lastX = Math.max(lastX, Math.min(Math.floor(bounds.maxX / cellSize), Math.ceil((worldPosition.x + safeRadius) / cellSize)));
+            firstZ = Math.min(firstZ, Math.max(Math.ceil(bounds.minZ / cellSize), Math.floor((worldPosition.z - safeRadius) / cellSize)));
+            lastZ = Math.max(lastZ, Math.min(Math.floor(bounds.maxZ / cellSize), Math.ceil((worldPosition.z + safeRadius) / cellSize)));
+        }
+
+        const updates = new Map<string, number>();
+        for (let gridX = firstX; gridX <= lastX; gridX++) {
+            for (let gridZ = firstZ; gridZ <= lastZ; gridZ++) {
+                const dx = gridX * cellSize - worldPosition.x;
+                const dz = gridZ * cellSize - worldPosition.z;
+                const distance = Math.hypot(dx, dz);
+                if (distance > safeRadius) continue;
+                const t = THREE.MathUtils.clamp(distance / safeRadius, 0, 1);
+                const falloff = 1 - t * t * (3 - 2 * t);
+
+                let sum = 0;
+                for (let ox = -1; ox <= 1; ox++) {
+                    for (let oz = -1; oz <= 1; oz++) sum += Terrain.readPaintCell(terrains, gridX + ox, gridZ + oz);
+                }
+                const average = sum / 9;
+                const current = Terrain.readPaintCell(terrains, gridX, gridZ);
+                const next = THREE.MathUtils.clamp(
+                    THREE.MathUtils.lerp(current, average, blendStrength * falloff),
+                    -100,
+                    100,
+                );
+                if (Math.abs(next - current) > 1e-6) updates.set(`${gridX},${gridZ}`, next);
+            }
+        }
+
+        if (updates.size === 0) return false;
+        const margin = Terrain.PAINT_EDGE_MARGIN * cellSize;
+        for (const [key, height] of updates) {
+            const [gridX, gridZ] = key.split(',').map(Number);
+            const x = gridX * cellSize;
+            const z = gridZ * cellSize;
+            // A cell on a shared edge is stored by every bordering tile (that's what
+            // lets readPaintCell fall back to a neighbour's copy at all) - writing the
+            // same computed value into every tile that stores it keeps them numerically
+            // identical, so which one a later read happens to ask first can't matter.
+            // Writing to only the single "owner" left the other tile's stale prior copy
+            // in place, which a query starting from that tile would still see.
+            for (const terrain of affected) {
+                if (!Terrain.isWithinBounds(terrain.getBounds(), x, z, margin)) continue;
+                if (Math.abs(height) <= 1e-5) terrain.paintedHeights.delete(key);
+                else terrain.paintedHeights.set(key, { gridX, gridZ, height });
+            }
+        }
+        return true;
     }
 
     public clearPaintedHeight(): boolean {
@@ -328,7 +409,7 @@ export default class Terrain extends WorldElement {
                                 this.update();
                             },
                             min: 10,
-                            max: 50,
+                            max: 500,
                             step: 0.1,
                         },
                         {
@@ -340,7 +421,7 @@ export default class Terrain extends WorldElement {
                                 this.update();
                             },
                             min: 10,
-                            max: 50,
+                            max: 500,
                             step: 0.1,
                         },
                         {
@@ -424,9 +505,20 @@ export default class Terrain extends WorldElement {
     }
 
     protected override getGeometry(): GeometryGroup[] {
+        return this.buildGeometry(container.resolve(LODPreviewManager).level);
+    }
+
+    // Geometry at a specific Unity-export LOD level, without touching the live element
+    // or the LOD Preview setting - used by the exporter to build every LOD level's mesh
+    // for this tile.
+    public getExportGeometry(lodIndex: number): GeometryGroup[] {
+        return this.buildGeometry(lodIndex);
+    }
+
+    private buildGeometry(lodIndex: number): GeometryGroup[] {
         // The whole group of touching tiles is meshed as one surface and then cut along
         // the tile borders, so this tile only has to skin its own share of it.
-        const area = container.resolve(TerrainGroupMesher).getSurfaceFor(this);
+        const area = container.resolve(TerrainGroupMesher).buildLODSurface(this, lodIndex);
 
         const width = Math.max(0.0001, this.width);
         const length = Math.max(0.0001, this.length);

@@ -5,6 +5,7 @@ import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition } from '../editor/Properties';
 import type { TerrainCutPointInput } from '../terrain/TerrainMesher';
+import { getDivisionsForLOD } from '../export/LODLevels';
 
 export const DEFAULT_CUT_SPLINE_RADIUS = 4;
 
@@ -91,19 +92,24 @@ export default class TerrainCutSpline extends WorldElement {
         super.update();
     }
 
-    private getBezierCurvePoints(): THREE.Vector3[] {
+    private getBezierCurvePoints(divisionsOverride?: number): THREE.Vector3[] {
         return sampleCubicBezier(
             this.nodeA.mesh.position,
             this.curvePointA ? this.curvePointA.mesh.position : this.nodeA.mesh.position,
             this.curvePointB ? this.curvePointB.mesh.position : this.nodeB.mesh.position,
             this.nodeB.mesh.position,
-            this._divisions,
+            divisionsOverride ?? this._divisions,
         );
     }
 
-    // Points fed into the terrain mesher to sculpt the surface along this spline.
-    public getSampledCutPoints(): TerrainCutPointInput[] {
-        return this.getBezierCurvePoints().map((point) => ({
+    // Points fed into the terrain mesher to sculpt the surface along this spline. A
+    // non-zero lodIndex thins the row count for a coarser terrain LOD - matching how
+    // much coarser the terrain mesh itself gets at that level keeps the mesher's point
+    // budget and constraint density compatible, instead of forcing a full-resolution
+    // string of cut points into a much smaller triangle budget.
+    public getSampledCutPoints(lodIndex = 0): TerrainCutPointInput[] {
+        const divisions = lodIndex > 0 ? getDivisionsForLOD(this._divisions, lodIndex) : undefined;
+        return this.getBezierCurvePoints(divisions).map((point) => ({
             position: point.clone(),
             radius: Math.max(0.1, this.distance),
         }));

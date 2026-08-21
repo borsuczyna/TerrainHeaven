@@ -58,6 +58,17 @@ export interface ElementData {
     bridgePillarWidth?: number;
     bridgePillarInset?: number;
     bridgeDeckThickness?: number;
+    bridgeEdgeStyle?: string;
+    bridgeEdgeHeight?: number;
+    bridgeEdgeWidth?: number;
+    bridgeEdgeDistance?: number;
+    bridgeEdgeLength?: number;
+    bridgeEdgeCapEnabled?: boolean;
+    bridgeEdgeCapHeight?: number;
+    bridgeEdgeCapWidth?: number;
+    bridgeEdgeCapJoined?: boolean;
+    // Legacy: migrated to bridgeEdgeCapWidth when loading older project files.
+    bridgeEdgeCapOverhang?: number;
     // Intersection-specific
     length?: number;
     nodeCount?: number;

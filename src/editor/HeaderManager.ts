@@ -5,6 +5,7 @@ import ViewGizmoMenu from './panels/ViewGizmoMenu';
 import ProjectSerializer from './ProjectSerializer';
 import SelectionManager from './SelectionManager';
 import HistoryManager from './HistoryManager';
+import ExportPanel from './panels/ExportPanel';
 
 @singleton()
 export default class HeaderManager {
@@ -15,12 +16,14 @@ export default class HeaderManager {
         @inject(ProjectSerializer) private readonly serializer: ProjectSerializer,
         @inject(SelectionManager) private readonly selection: SelectionManager,
         @inject(HistoryManager) private readonly history: HistoryManager,
+        @inject(ExportPanel) private readonly exportPanel: ExportPanel,
     ) {}
 
     public init(): void {
         const btnSettings = document.getElementById('header-settings') as HTMLButtonElement;
         const btnSave = document.getElementById('header-save') as HTMLButtonElement;
         const btnLoad = document.getElementById('header-load') as HTMLButtonElement;
+        const btnExport = document.getElementById('header-export') as HTMLButtonElement;
         const btnHelp = document.getElementById('header-help') as HTMLButtonElement;
 
         this.viewGizmoMenu.init();
@@ -65,6 +68,11 @@ export default class HeaderManager {
                 reader.readAsText(file);
             });
             input.click();
+        });
+
+        btnExport.addEventListener('click', () => {
+            if (this.exportPanel.isVisible) this.exportPanel.hide();
+            else this.exportPanel.show();
         });
     }
 

@@ -9,11 +9,14 @@ import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 import GeometrySweepManager, { type GeometryLineSegment, type GeometryLineSection } from '../editor/GeometrySweepManager';
 import SceneManager from '../editor/SceneManager';
+import LODPreviewManager from '../editor/LODPreviewManager';
+import { getDivisionsForLOD } from '../export/LODLevels';
 
-export type EdgeType = 'none' | 'sidewalk';
+export type EdgeType = 'none' | 'sidewalk' | 'bridge';
 export type PillarShape = 'box' | 'circular';
+export type BridgeEdgeStyle = 'solid' | 'plane' | 'spaced' | 'truss';
 
-type RoadGeometryGroup = 'road' | 'sidewalk' | 'bridgeDeck' | 'bridgePillars';
+type RoadGeometryGroup = 'road' | 'sidewalk' | 'bridgeEdges' | 'bridgeDeck' | 'bridgePillars';
 
 interface GeometryLineContext {
     halfWidth: number;
@@ -39,6 +42,15 @@ export default class Road extends WorldElement {
     public roadTexStretch: number = 1;
     public sidewalkTexStretch: number = 1;
     public roadCrown: number = 0;
+    public bridgeEdgeStyle: BridgeEdgeStyle = 'solid';
+    public bridgeEdgeHeight: number = 0.8;
+    public bridgeEdgeWidth: number = 0.2;
+    public bridgeEdgeDistance: number = 3;
+    public bridgeEdgeLength: number = 1;
+    public bridgeEdgeCapEnabled: boolean = false;
+    public bridgeEdgeCapHeight: number = 0.12;
+    public bridgeEdgeCapWidth: number = 0.36;
+    public bridgeEdgeCapJoined: boolean = false;
     public bridgeEnabled: boolean = false;
     public bridgePillarShape: PillarShape = 'box';
     public bridgePillarSegments: number = 12;
@@ -89,6 +101,7 @@ export default class Road extends WorldElement {
     private readonly uvTransforms: Map<RoadGeometryGroup, UVTransform> = new Map([
         ['road', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
         ['sidewalk', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
+        ['bridgeEdges', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
         ['bridgeDeck', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
         ['bridgePillars', { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 }],
     ]);
@@ -161,6 +174,15 @@ export default class Road extends WorldElement {
     public override update(): void {
         this.updateCurveLines();
         super.update();
+        if (this.edgeType === 'bridge' && this.bridgeEdgeStyle === 'plane') {
+            const materialIndex = this.getGroupNames().indexOf('bridgeEdges');
+            const materials = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+            const bridgeEdgeMaterial = materials[materialIndex] as THREE.MeshStandardMaterial | undefined;
+            if (bridgeEdgeMaterial) {
+                bridgeEdgeMaterial.side = THREE.DoubleSide;
+                bridgeEdgeMaterial.needsUpdate = true;
+            }
+        }
         // Ground-level roads do not need to shadow the terrain. Bridges do.
         this.mesh.castShadow = this.bridgeEnabled;
     }
@@ -211,7 +233,9 @@ export default class Road extends WorldElement {
                 const hw = halfWidthStart + (halfWidthEnd - halfWidthStart) * t;
                 const offset = -hw + 2 * hw * frac;
                 const right = getRightAtIndex(i);
-                offsetPoints.push(points[i].clone().add(right.clone().multiplyScalar(offset)));
+                offsetPoints.push(points[i].clone()
+                    .add(right.clone().multiplyScalar(offset))
+                    .add(new THREE.Vector3(0, this.getLaneHeightAtFrac(frac, this.getCrownAt(t)), 0)));
             }
             const isEdge = b === 0 || b === laneCount;
             const mat = new THREE.LineBasicMaterial({ color: isEdge ? 0xffffff : 0x888888 });
@@ -245,13 +269,15 @@ export default class Road extends WorldElement {
         super.dispose();
     }
 
-    private getBezierCurvePoints(): THREE.Vector3[] {
+    private getBezierCurvePoints(divisionsOverride?: number): THREE.Vector3[] {
         return sampleCubicBezier(
             this.nodeA.mesh.position,
             this.curvePointA ? this.curvePointA.mesh.position : this.nodeA.mesh.position,
             this.curvePointB ? this.curvePointB.mesh.position : this.nodeB.mesh.position,
             this.nodeB.mesh.position,
-            this._divisions,
+            // Keep a middle cross-section even for a straight road. It is needed to
+            // represent the road's own crown while connected endpoint crowns blend.
+            Math.max(1, divisionsOverride ?? this._divisions),
         );
     }
 
@@ -287,7 +313,8 @@ export default class Road extends WorldElement {
     }
 
     private isRoadGeometryGroup(group: string): group is RoadGeometryGroup {
-        return group === 'road' || group === 'sidewalk' || group === 'bridgeDeck' || group === 'bridgePillars';
+        return group === 'road' || group === 'sidewalk' || group === 'bridgeEdges'
+            || group === 'bridgeDeck' || group === 'bridgePillars';
     }
 
     private getStoredUVTransform(group: RoadGeometryGroup): UVTransform {
@@ -300,7 +327,7 @@ export default class Road extends WorldElement {
 
     private serializeUVTransforms(): Record<string, UVTransform> {
         const out: Record<string, UVTransform> = {};
-        const groups: RoadGeometryGroup[] = ['road', 'sidewalk', 'bridgeDeck', 'bridgePillars'];
+        const groups: RoadGeometryGroup[] = ['road', 'sidewalk', 'bridgeEdges', 'bridgeDeck', 'bridgePillars'];
         for (const group of groups) {
             const t = this.getStoredUVTransform(group);
             out[group] = { offsetX: t.offsetX, offsetY: t.offsetY, scaleX: t.scaleX, scaleY: t.scaleY };
@@ -337,6 +364,7 @@ export default class Road extends WorldElement {
     public override getUVGroups(): string[] {
         const groups: string[] = ['road'];
         if (this.edgeType === 'sidewalk') groups.push('sidewalk');
+        if (this.edgeType === 'bridge') groups.push('bridgeEdges');
         if (this.bridgeEnabled) {
             groups.push('bridgeDeck', 'bridgePillars');
         }
@@ -425,6 +453,15 @@ export default class Road extends WorldElement {
             sidewalkWidth: this.sidewalkWidth,
             curbHeight: this.curbHeight,
             roadCrown: this.roadCrown,
+            bridgeEdgeStyle: this.bridgeEdgeStyle,
+            bridgeEdgeHeight: this.bridgeEdgeHeight,
+            bridgeEdgeWidth: this.bridgeEdgeWidth,
+            bridgeEdgeDistance: this.bridgeEdgeDistance,
+            bridgeEdgeLength: this.bridgeEdgeLength,
+            bridgeEdgeCapEnabled: this.bridgeEdgeCapEnabled,
+            bridgeEdgeCapHeight: this.bridgeEdgeCapHeight,
+            bridgeEdgeCapWidth: this.bridgeEdgeCapWidth,
+            bridgeEdgeCapJoined: this.bridgeEdgeCapJoined,
             curvePointA,
             curvePointB,
             bridgeEnabled: this.bridgeEnabled,
@@ -444,10 +481,20 @@ export default class Road extends WorldElement {
         const road = new Road(posA, posB);
         road.width = ed.width ?? 3;
         road.lanes = ed.lanes ?? 2;
-        road.edgeType = (ed.edgeType as 'none' | 'sidewalk') ?? 'none';
+        road.edgeType = (ed.edgeType as EdgeType) ?? 'none';
         road.sidewalkWidth = ed.sidewalkWidth ?? 1;
         road.curbHeight = ed.curbHeight ?? 0.15;
         road.roadCrown = ed.roadCrown ?? 0;
+        road.bridgeEdgeStyle = (ed.bridgeEdgeStyle as BridgeEdgeStyle) ?? 'solid';
+        road.bridgeEdgeHeight = Math.max(0.05, ed.bridgeEdgeHeight ?? 0.8);
+        road.bridgeEdgeWidth = Math.max(0.02, ed.bridgeEdgeWidth ?? 0.2);
+        road.bridgeEdgeDistance = Math.max(0.1, ed.bridgeEdgeDistance ?? 3);
+        road.bridgeEdgeLength = Math.max(0.05, ed.bridgeEdgeLength ?? 1);
+        road.bridgeEdgeCapEnabled = ed.bridgeEdgeCapEnabled ?? false;
+        road.bridgeEdgeCapHeight = Math.max(0.02, ed.bridgeEdgeCapHeight ?? 0.12);
+        road.bridgeEdgeCapWidth = Math.max(0.02,
+            ed.bridgeEdgeCapWidth ?? ((ed.bridgeEdgeWidth ?? 0.2) + 2 * (ed.bridgeEdgeCapOverhang ?? 0.08)));
+        road.bridgeEdgeCapJoined = ed.bridgeEdgeCapJoined ?? false;
         road.bridgeEnabled = ed.bridgeEnabled ?? false;
         road.bridgePillarShape = (ed.bridgePillarShape as PillarShape) ?? 'box';
         road.bridgePillarSegments = Math.max(3, Math.round(ed.bridgePillarSegments ?? 12));
@@ -537,6 +584,7 @@ export default class Road extends WorldElement {
                         options: [
                             { label: 'None', value: 'none' },
                             { label: 'Sidewalk', value: 'sidewalk' },
+                            { label: 'Bridge', value: 'bridge' },
                         ],
                         get: () => self.edgeType,
                         set: (v: string) => { self.edgeType = v as EdgeType; self.update(); self.onPropertiesChanged?.(); },
@@ -558,6 +606,100 @@ export default class Road extends WorldElement {
                             min: 0,
                             step: 0.05,
                         },
+                    ] : []),
+                    ...(self.edgeType === 'bridge' ? [
+                        {
+                            type: 'select' as const,
+                            label: 'Bridge Edge Style',
+                            options: [
+                                { label: 'Two Solid Walls', value: 'solid' },
+                                { label: 'Two Double-Sided Planes', value: 'plane' },
+                                { label: 'Spaced Walls', value: 'spaced' },
+                                { label: 'Steel Truss', value: 'truss' },
+                            ],
+                            get: () => self.bridgeEdgeStyle,
+                            set: (v: string) => {
+                                self.bridgeEdgeStyle = v as BridgeEdgeStyle;
+                                self.update();
+                                self.onPropertiesChanged?.();
+                            },
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Wall Height',
+                            get: () => self.bridgeEdgeHeight,
+                            set: (v: number) => { self.bridgeEdgeHeight = Math.max(0.05, v); self.update(); },
+                            min: 0.05,
+                            step: 0.05,
+                        },
+                        ...(self.bridgeEdgeStyle !== 'plane' ? [{
+                            type: 'number' as const,
+                            label: 'Wall Width',
+                            get: () => self.bridgeEdgeWidth,
+                            set: (v: number) => { self.bridgeEdgeWidth = Math.max(0.02, v); self.update(); },
+                            min: 0.02,
+                            step: 0.05,
+                        }] : []),
+                        ...(self.bridgeEdgeStyle === 'spaced' ? [
+                            {
+                                type: 'number' as const,
+                                label: 'Wall Distance',
+                                get: () => self.bridgeEdgeDistance,
+                                set: (v: number) => { self.bridgeEdgeDistance = Math.max(0.1, v); self.update(); },
+                                min: 0.1,
+                                step: 0.1,
+                            },
+                            {
+                                type: 'number' as const,
+                                label: 'Wall Length',
+                                get: () => self.bridgeEdgeLength,
+                                set: (v: number) => { self.bridgeEdgeLength = Math.max(0.05, v); self.update(); },
+                                min: 0.05,
+                                step: 0.05,
+                            },
+                            {
+                                type: 'boolean' as const,
+                                label: 'Wall Cap',
+                                get: () => self.bridgeEdgeCapEnabled,
+                                set: (v: boolean) => {
+                                    self.bridgeEdgeCapEnabled = v;
+                                    self.update();
+                                    self.onPropertiesChanged?.();
+                                },
+                            },
+                            ...(self.bridgeEdgeCapEnabled ? [
+                                {
+                                    type: 'number' as const,
+                                    label: 'Cap Height',
+                                    get: () => self.bridgeEdgeCapHeight,
+                                    set: (v: number) => { self.bridgeEdgeCapHeight = Math.max(0.02, v); self.update(); },
+                                    min: 0.02,
+                                    step: 0.02,
+                                },
+                                {
+                                    type: 'number' as const,
+                                    label: 'Cap Width',
+                                    get: () => self.bridgeEdgeCapWidth,
+                                    set: (v: number) => { self.bridgeEdgeCapWidth = Math.max(0.02, v); self.update(); },
+                                    min: 0.02,
+                                    step: 0.02,
+                                },
+                                {
+                                    type: 'boolean' as const,
+                                    label: 'Joined Cap',
+                                    get: () => self.bridgeEdgeCapJoined,
+                                    set: (v: boolean) => { self.bridgeEdgeCapJoined = v; self.update(); },
+                                },
+                            ] : []),
+                        ] : []),
+                        ...(self.bridgeEdgeStyle === 'truss' ? [{
+                            type: 'number' as const,
+                            label: 'Truss Section Distance',
+                            get: () => self.bridgeEdgeDistance,
+                            set: (v: number) => { self.bridgeEdgeDistance = Math.max(0.25, v); self.update(); },
+                            min: 0.25,
+                            step: 0.25,
+                        }] : []),
                     ] : []),
                 ],
             },
@@ -704,8 +846,32 @@ export default class Road extends WorldElement {
     }
 
     protected getGeometry(): GeometryGroup[] {
-        const edge = this.computeEdgeData();
+        const lodIndex = container.resolve(LODPreviewManager).level;
+        return this.buildGeometry(lodIndex > 0 ? getDivisionsForLOD(this._divisions, lodIndex) : undefined);
+    }
+
+    // Geometry at a specific Unity-export LOD level, without touching the live element
+    // (divisions is only ever read here, never mutated) - used by the exporter to build
+    // every LOD level's mesh for this road.
+    public getExportGeometry(lodIndex: number): GeometryGroup[] {
+        return this.buildGeometry(getDivisionsForLOD(this._divisions, lodIndex));
+    }
+
+    private buildGeometry(divisionsOverride?: number): GeometryGroup[] {
+        const edge = this.computeEdgeData(divisionsOverride);
         const groups = this.sweepGeometryLine(edge);
+        if (this.edgeType === 'bridge' && this.bridgeEdgeStyle === 'spaced') {
+            const bridgeEdgeTriangles = this.getSpacedBridgeEdgeTriangles(edge);
+            if (bridgeEdgeTriangles.length > 0) {
+                groups.push({ name: 'bridgeEdges', triangles: bridgeEdgeTriangles });
+            }
+        }
+        if (this.edgeType === 'bridge' && this.bridgeEdgeStyle === 'truss') {
+            const bridgeEdgeTriangles = this.getTrussBridgeEdgeTriangles(edge);
+            if (bridgeEdgeTriangles.length > 0) {
+                groups.push({ name: 'bridgeEdges', triangles: bridgeEdgeTriangles });
+            }
+        }
         if (!this.bridgeEnabled) return groups;
 
         const pillarTriangles = this.getBridgePillarTriangles(edge);
@@ -759,21 +925,32 @@ export default class Road extends WorldElement {
             const laneLeftFrac = lane / laneCount;
             const laneRightFrac = (lane + 1) / laneCount;
             const invert = lane % 2 === 1;
-            segments.push({
-                group: 'road',
-                start: {
-                    lateral: -context.halfWidth + 2 * context.halfWidth * laneLeftFrac,
-                    height: this.getLaneHeightAtFrac(laneLeftFrac, context.crownHeight),
-                    u: invert ? 1 : 0,
-                    v: laneV(invert),
-                },
-                end: {
-                    lateral: -context.halfWidth + 2 * context.halfWidth * laneRightFrac,
-                    height: this.getLaneHeightAtFrac(laneRightFrac, context.crownHeight),
-                    u: invert ? 0 : 1,
-                    v: laneV(invert),
-                },
-            });
+            // Crown is a road profile, not a lane-boundary profile. Split the lane
+            // containing the centre so odd lane counts also get an exact ridge vertex.
+            const profileFractions = laneLeftFrac < 0.5 && laneRightFrac > 0.5
+                ? [laneLeftFrac, 0.5, laneRightFrac]
+                : [laneLeftFrac, laneRightFrac];
+            for (let part = 0; part < profileFractions.length - 1; part++) {
+                const startFrac = profileFractions[part];
+                const endFrac = profileFractions[part + 1];
+                const startLaneU = (startFrac - laneLeftFrac) * laneCount;
+                const endLaneU = (endFrac - laneLeftFrac) * laneCount;
+                segments.push({
+                    group: 'road',
+                    start: {
+                        lateral: -context.halfWidth + 2 * context.halfWidth * startFrac,
+                        height: this.getLaneHeightAtFrac(startFrac, context.crownHeight),
+                        u: invert ? 1 - startLaneU : startLaneU,
+                        v: laneV(invert),
+                    },
+                    end: {
+                        lateral: -context.halfWidth + 2 * context.halfWidth * endFrac,
+                        height: this.getLaneHeightAtFrac(endFrac, context.crownHeight),
+                        u: invert ? 1 - endLaneU : endLaneU,
+                        v: laneV(invert),
+                    },
+                });
+            }
         }
 
         if (this.edgeType === 'sidewalk') {
@@ -849,11 +1026,85 @@ export default class Road extends WorldElement {
             });
         }
 
+        if (this.edgeType === 'bridge'
+            && (this.bridgeEdgeStyle === 'solid' || this.bridgeEdgeStyle === 'plane')) {
+            const wallHeight = Math.max(0.05, this.bridgeEdgeHeight);
+            const wallWidth = this.bridgeEdgeStyle === 'plane' ? 0 : Math.max(0.02, this.bridgeEdgeWidth);
+            const halfWidth = context.halfWidth;
+            const rightBase = this.getDeckTopHeightAtLateral(halfWidth, context);
+            const leftBase = this.getDeckTopHeightAtLateral(-halfWidth, context);
+            const rightV = context.rightDistance;
+            const leftV = context.leftDistance;
+
+            if (this.bridgeEdgeStyle === 'plane') {
+                segments.push({
+                    group: 'bridgeEdges',
+                    start: { lateral: halfWidth, height: rightBase, u: 0, v: rightV },
+                    end: { lateral: halfWidth, height: rightBase + wallHeight, u: 1, v: rightV },
+                });
+                segments.push({
+                    group: 'bridgeEdges',
+                    start: { lateral: -halfWidth, height: leftBase + wallHeight, u: 1, v: leftV },
+                    end: { lateral: -halfWidth, height: leftBase, u: 0, v: leftV },
+                });
+            } else {
+                const deckThickness = Math.max(0.05, context.deckThickness);
+                const rightBottom = rightBase - deckThickness;
+                const leftBottom = leftBase - deckThickness;
+                // Solid parapets extend down to the deck underside and are closed there.
+                segments.push(
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: halfWidth, height: rightBottom, u: 0, v: rightV },
+                        end: { lateral: halfWidth, height: rightBase + wallHeight, u: 1, v: rightV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: halfWidth, height: rightBase + wallHeight, u: 0, v: rightV },
+                        end: { lateral: halfWidth + wallWidth, height: rightBase + wallHeight, u: 1, v: rightV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: halfWidth + wallWidth, height: rightBase + wallHeight, u: 1, v: rightV },
+                        end: { lateral: halfWidth + wallWidth, height: rightBottom, u: 0, v: rightV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: halfWidth + wallWidth, height: rightBottom, u: 1, v: rightV },
+                        end: { lateral: halfWidth, height: rightBottom, u: 0, v: rightV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: -halfWidth, height: leftBase + wallHeight, u: 1, v: leftV },
+                        end: { lateral: -halfWidth, height: leftBottom, u: 0, v: leftV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: -(halfWidth + wallWidth), height: leftBase + wallHeight, u: 0, v: leftV },
+                        end: { lateral: -halfWidth, height: leftBase + wallHeight, u: 1, v: leftV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: -(halfWidth + wallWidth), height: leftBottom, u: 0, v: leftV },
+                        end: { lateral: -(halfWidth + wallWidth), height: leftBase + wallHeight, u: 1, v: leftV },
+                    },
+                    {
+                        group: 'bridgeEdges',
+                        start: { lateral: -halfWidth, height: leftBottom, u: 1, v: leftV },
+                        end: { lateral: -(halfWidth + wallWidth), height: leftBottom, u: 0, v: leftV },
+                    },
+                );
+            }
+        }
+
         if (this.bridgeEnabled) {
             const deckThickness = Math.max(0.05, context.deckThickness);
             const deckSegments: GeometryLineSegment<RoadGeometryGroup>[] = [];
 
-            for (const segment of segments) {
+            // Only the actual roadway/sidewalk surface belongs to the deck shell.
+            // Bridge edge walls are separate geometry and must never be mirrored into it.
+            for (const segment of segments.filter((candidate) =>
+                candidate.group === 'road' || candidate.group === 'sidewalk')) {
                 deckSegments.push({
                     group: 'bridgeDeck',
                     start: {
@@ -952,20 +1203,467 @@ export default class Road extends WorldElement {
         const sweptGroups = this.geometrySweepManager.sweepSections(geometrySections);
         const roadGroup = sweptGroups.find((group) => group.name === 'road');
         const sidewalkGroup = sweptGroups.find((group) => group.name === 'sidewalk');
+        const bridgeEdgesGroup = sweptGroups.find((group) => group.name === 'bridgeEdges');
         const bridgeDeckGroup = sweptGroups.find((group) => group.name === 'bridgeDeck');
 
         if (roadGroup) this.applyUVTransformToTriangles('road', roadGroup.triangles);
         if (sidewalkGroup) this.applyUVTransformToTriangles('sidewalk', sidewalkGroup.triangles);
+        if (bridgeEdgesGroup) {
+            if (this.bridgeEdgeStyle === 'solid') {
+                bridgeEdgesGroup.triangles.push(...this.getSolidBridgeEdgeEndCapTriangles(edge));
+            }
+            this.applyUVTransformToTriangles('bridgeEdges', bridgeEdgesGroup.triangles);
+        }
         if (bridgeDeckGroup) this.applyUVTransformToTriangles('bridgeDeck', bridgeDeckGroup.triangles);
 
         const groups: GeometryGroup[] = [{ name: 'road', triangles: roadGroup?.triangles ?? [] }];
         if (sidewalkGroup && sidewalkGroup.triangles.length > 0) {
             groups.push(sidewalkGroup);
         }
+        if (bridgeEdgesGroup && bridgeEdgesGroup.triangles.length > 0) {
+            groups.push(bridgeEdgesGroup);
+        }
         if (bridgeDeckGroup && bridgeDeckGroup.triangles.length > 0) {
             groups.push(bridgeDeckGroup);
         }
         return groups;
+    }
+
+    private getSolidBridgeEdgeEndCapTriangles(edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
+        const triangles: Triangle[] = [];
+        if (edge.points.length < 2) return triangles;
+
+        const wallHeight = Math.max(0.05, this.bridgeEdgeHeight);
+        const wallWidth = Math.max(0.02, this.bridgeEdgeWidth);
+        const last = edge.points.length - 1;
+        const ends = [
+            {
+                index: 0,
+                nodeIndex: 0,
+                deckThickness: this.getResolvedBridgeDeckThickness(0),
+                outward: edge.points[0].clone().sub(edge.points[1]).normalize(),
+            },
+            {
+                index: last,
+                nodeIndex: 1,
+                deckThickness: this.getResolvedBridgeDeckThickness(1),
+                outward: edge.points[last].clone().sub(edge.points[last - 1]).normalize(),
+            },
+        ];
+
+        for (const end of ends) {
+            if (this.hasContinuousBridgeEdgeConnection(end.nodeIndex, 'solid')) continue;
+            const origin = edge.points[end.index];
+            const right = edge.rightVecs[end.index];
+            const halfWidth = edge.halfWidths[end.index];
+            const deckThickness = Math.max(0.05, end.deckThickness);
+
+            for (const side of [-1, 1]) {
+                const innerBottom = origin.clone()
+                    .add(right.clone().multiplyScalar(side * halfWidth))
+                    .add(new THREE.Vector3(0, -deckThickness, 0));
+                const outerBottom = origin.clone()
+                    .add(right.clone().multiplyScalar(side * (halfWidth + wallWidth)))
+                    .add(new THREE.Vector3(0, -deckThickness, 0));
+                const innerTop = origin.clone()
+                    .add(right.clone().multiplyScalar(side * halfWidth))
+                    .add(new THREE.Vector3(0, wallHeight, 0));
+                const outerTop = origin.clone()
+                    .add(right.clone().multiplyScalar(side * (halfWidth + wallWidth)))
+                    .add(new THREE.Vector3(0, wallHeight, 0));
+                const normal = new THREE.Vector3().subVectors(innerTop, innerBottom)
+                    .cross(new THREE.Vector3().subVectors(outerTop, innerBottom));
+                const reverse = normal.dot(end.outward) < 0;
+
+                this.pushBridgeEdgeQuad(
+                    triangles,
+                    innerBottom,
+                    innerTop,
+                    outerTop,
+                    outerBottom,
+                    wallHeight + deckThickness,
+                    wallWidth,
+                    reverse,
+                );
+            }
+        }
+
+        return triangles;
+    }
+
+    private getTrussBridgeEdgeTriangles(edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
+        const triangles: Triangle[] = [];
+        if (edge.centerTotal <= 1e-6) return triangles;
+
+        const beamWidth = Math.max(0.02, this.bridgeEdgeWidth);
+        const trussHeight = Math.max(beamWidth * 2, this.bridgeEdgeHeight);
+        const requestedSpacing = Math.max(0.25, this.bridgeEdgeDistance);
+        const sectionCount = Math.max(2, Math.ceil(edge.centerTotal / requestedSpacing));
+        const deckThicknessStart = this.getResolvedBridgeDeckThickness(0);
+        const deckThicknessEnd = this.getResolvedBridgeDeckThickness(1);
+        const topNodesBySide = new Map<number, THREE.Vector3[]>();
+        let sectionRightAxes: THREE.Vector3[] = [];
+        const jointKeys = new Set<string>();
+
+        for (const side of [-1, 1]) {
+            const bottomNodes: THREE.Vector3[] = [];
+            const topNodes: THREE.Vector3[] = [];
+            const sideAxes: THREE.Vector3[] = [];
+
+            for (let i = 0; i <= sectionCount; i++) {
+                const distance = edge.centerTotal * i / sectionCount;
+                const sample = this.sampleEdgeAtDistance(edge, distance);
+                if (!sample) continue;
+                const t = i / sectionCount;
+                const ramp = Math.min(1, t / 0.2, (1 - t) / 0.2);
+                const deckThickness = THREE.MathUtils.lerp(deckThicknessStart, deckThicknessEnd, sample.t);
+                const lateral = side * (sample.halfWidth + beamWidth * 0.5);
+                const bottom = sample.origin.clone()
+                    .add(sample.right.clone().multiplyScalar(lateral))
+                    .add(new THREE.Vector3(0, -deckThickness + beamWidth * 0.5, 0));
+                const top = bottom.clone().add(new THREE.Vector3(0, trussHeight * ramp, 0));
+                bottomNodes.push(bottom);
+                topNodes.push(top);
+                sideAxes.push(sample.right.clone().normalize());
+            }
+
+            for (let i = 0; i < bottomNodes.length - 1; i++) {
+                const sideAxis = sideAxes[i].clone().lerp(sideAxes[i + 1], 0.5).normalize();
+                this.addBridgeBeamBox(triangles, bottomNodes[i], bottomNodes[i + 1], beamWidth, sideAxis);
+                this.addBridgeBeamBox(triangles, topNodes[i], topNodes[i + 1], beamWidth, sideAxis);
+
+                if (i % 2 === 0) {
+                    this.addBridgeBeamBox(triangles, bottomNodes[i], topNodes[i + 1], beamWidth, sideAxis);
+                } else {
+                    this.addBridgeBeamBox(triangles, topNodes[i], bottomNodes[i + 1], beamWidth, sideAxis);
+                }
+            }
+
+            for (let i = 1; i < bottomNodes.length - 1; i++) {
+                this.addBridgeBeamBox(triangles, bottomNodes[i], topNodes[i], beamWidth, sideAxes[i]);
+            }
+
+            for (let i = 0; i < bottomNodes.length; i++) {
+                this.addTrussJointBox(triangles, bottomNodes[i], beamWidth, sideAxes[i], jointKeys);
+                this.addTrussJointBox(triangles, topNodes[i], beamWidth, sideAxes[i], jointKeys);
+            }
+
+            topNodesBySide.set(side, topNodes);
+            sectionRightAxes = sideAxes;
+        }
+
+        const leftTopNodes = topNodesBySide.get(-1) ?? [];
+        const rightTopNodes = topNodesBySide.get(1) ?? [];
+        const overheadCount = Math.min(leftTopNodes.length, rightTopNodes.length);
+        const up = new THREE.Vector3(0, 1, 0);
+        for (let i = 1; i < overheadCount - 1; i++) {
+            const forwardAxis = new THREE.Vector3().crossVectors(up, sectionRightAxes[i]).normalize();
+            this.addBridgeBeamBox(triangles, leftTopNodes[i], rightTopNodes[i], beamWidth, forwardAxis);
+        }
+        for (let i = 1; i < overheadCount - 2; i++) {
+            const forwardAxis = new THREE.Vector3().crossVectors(up, sectionRightAxes[i]).normalize();
+            this.addBridgeBeamBox(triangles, leftTopNodes[i], rightTopNodes[i + 1], beamWidth, forwardAxis);
+            this.addBridgeBeamBox(triangles, rightTopNodes[i], leftTopNodes[i + 1], beamWidth, forwardAxis);
+        }
+
+        this.applyUVTransformToTriangles('bridgeEdges', triangles);
+        return triangles;
+    }
+
+    private hasContinuousBridgeEdgeConnection(nodeIndex: number, style: BridgeEdgeStyle): boolean {
+        const connection = this.connections.get(nodeIndex);
+        return connection?.element instanceof Road
+            && connection.element.edgeType === 'bridge'
+            && connection.element.bridgeEdgeStyle === style;
+    }
+
+    private addTrussJointBox(
+        triangles: Triangle[],
+        center: THREE.Vector3,
+        beamWidth: number,
+        sideAxis: THREE.Vector3,
+        jointKeys: Set<string>,
+    ): void {
+        const key = `${Math.round(center.x * 10000)}:${Math.round(center.y * 10000)}:${Math.round(center.z * 10000)}`;
+        if (jointKeys.has(key)) return;
+        jointKeys.add(key);
+
+        // A slightly oversized closed cube acts as a steel gusset and covers the wedges
+        // left where several square beams meet at different angles.
+        const size = beamWidth * 1.3;
+        const half = size * 0.5;
+        this.addBridgeBeamBox(
+            triangles,
+            center.clone().add(new THREE.Vector3(0, -half, 0)),
+            center.clone().add(new THREE.Vector3(0, half, 0)),
+            size,
+            sideAxis,
+        );
+    }
+
+    private addBridgeBeamBox(
+        triangles: Triangle[],
+        start: THREE.Vector3,
+        end: THREE.Vector3,
+        width: number,
+        sideAxisHint: THREE.Vector3,
+    ): void {
+        const along = end.clone().sub(start);
+        const length = along.length();
+        if (length <= 1e-5) return;
+        along.divideScalar(length);
+
+        const sideAxis = sideAxisHint.clone()
+            .addScaledVector(along, -sideAxisHint.dot(along));
+        if (sideAxis.lengthSq() <= 1e-8) {
+            sideAxis.set(0, 1, 0).addScaledVector(along, -along.y);
+        }
+        sideAxis.normalize();
+        const otherAxis = new THREE.Vector3().crossVectors(along, sideAxis).normalize();
+        const half = width * 0.5;
+        const cornersAt = (center: THREE.Vector3): THREE.Vector3[] => [
+            center.clone().addScaledVector(sideAxis, -half).addScaledVector(otherAxis, -half),
+            center.clone().addScaledVector(sideAxis, half).addScaledVector(otherAxis, -half),
+            center.clone().addScaledVector(sideAxis, half).addScaledVector(otherAxis, half),
+            center.clone().addScaledVector(sideAxis, -half).addScaledVector(otherAxis, half),
+        ];
+        const s = cornersAt(start);
+        const e = cornersAt(end);
+        const boxCenter = start.clone().lerp(end, 0.5);
+        const faces = [
+            [s[0], s[1], s[2], s[3]],
+            [e[3], e[2], e[1], e[0]],
+            [s[0], e[0], e[1], s[1]],
+            [s[1], e[1], e[2], s[2]],
+            [s[2], e[2], e[3], s[3]],
+            [s[3], e[3], e[0], s[0]],
+        ];
+        for (const face of faces) {
+            const faceCenter = face[0].clone().add(face[1]).add(face[2]).add(face[3]).multiplyScalar(0.25);
+            const normal = new THREE.Vector3().subVectors(face[1], face[0])
+                .cross(new THREE.Vector3().subVectors(face[2], face[0]));
+            this.pushBridgeEdgeQuad(
+                triangles,
+                face[0], face[1], face[2], face[3],
+                length, width,
+                normal.dot(faceCenter.sub(boxCenter)) < 0,
+            );
+        }
+    }
+
+    private getSpacedBridgeEdgeTriangles(edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
+        const triangles: Triangle[] = [];
+        if (edge.centerTotal <= 1e-6) return triangles;
+
+        const spacing = Math.max(0.1, this.bridgeEdgeDistance);
+        const wallLength = Math.min(Math.max(0.05, this.bridgeEdgeLength), edge.centerTotal);
+        const wallWidth = Math.max(0.02, this.bridgeEdgeWidth);
+        const wallHeight = Math.max(0.05, this.bridgeEdgeHeight);
+        const deckThicknessStart = this.getResolvedBridgeDeckThickness(0);
+        const deckThicknessEnd = this.getResolvedBridgeDeckThickness(1);
+
+        for (let center = spacing * 0.5; center < edge.centerTotal + 1e-6; center += spacing) {
+            const wallStartDistance = Math.max(0, center - wallLength * 0.5);
+            const wallEndDistance = Math.min(edge.centerTotal, center + wallLength * 0.5);
+            const start = this.sampleEdgeAtDistance(edge, wallStartDistance);
+            const end = this.sampleEdgeAtDistance(edge, wallEndDistance);
+            if (!start || !end || start.origin.distanceToSquared(end.origin) <= 1e-8) continue;
+
+            const startDeckThickness = THREE.MathUtils.lerp(deckThicknessStart, deckThicknessEnd, start.t);
+            const endDeckThickness = THREE.MathUtils.lerp(deckThicknessStart, deckThicknessEnd, end.t);
+
+            for (const side of [-1, 1]) {
+                const startInnerTop = start.origin.clone().add(start.right.clone().multiplyScalar(side * start.halfWidth))
+                    .add(new THREE.Vector3(0, wallHeight, 0));
+                const endInnerTop = end.origin.clone().add(end.right.clone().multiplyScalar(side * end.halfWidth))
+                    .add(new THREE.Vector3(0, wallHeight, 0));
+                const startOuterTop = start.origin.clone().add(start.right.clone().multiplyScalar(side * (start.halfWidth + wallWidth)))
+                    .add(new THREE.Vector3(0, wallHeight, 0));
+                const endOuterTop = end.origin.clone().add(end.right.clone().multiplyScalar(side * (end.halfWidth + wallWidth)))
+                    .add(new THREE.Vector3(0, wallHeight, 0));
+                const startInnerBottom = startInnerTop.clone().add(new THREE.Vector3(0, -(wallHeight + startDeckThickness), 0));
+                const endInnerBottom = endInnerTop.clone().add(new THREE.Vector3(0, -(wallHeight + endDeckThickness), 0));
+                const startOuterBottom = startOuterTop.clone().add(new THREE.Vector3(0, -(wallHeight + startDeckThickness), 0));
+                const endOuterBottom = endOuterTop.clone().add(new THREE.Vector3(0, -(wallHeight + endDeckThickness), 0));
+                const reverse = side > 0;
+                const totalStartHeight = wallHeight + startDeckThickness;
+                const totalEndHeight = wallHeight + endDeckThickness;
+
+                this.pushBridgeEdgeQuad(triangles, startInnerBottom, endInnerBottom, endInnerTop, startInnerTop,
+                    wallLength, Math.max(totalStartHeight, totalEndHeight), reverse);
+                this.pushBridgeEdgeQuad(triangles, endOuterBottom, startOuterBottom, startOuterTop, endOuterTop,
+                    wallLength, Math.max(totalStartHeight, totalEndHeight), reverse);
+                this.pushBridgeEdgeQuad(triangles, startInnerTop, endInnerTop, endOuterTop, startOuterTop,
+                    wallLength, wallWidth, reverse);
+                this.pushBridgeEdgeQuad(triangles, startOuterBottom, startInnerBottom, startInnerTop, startOuterTop,
+                    wallWidth, totalStartHeight, reverse);
+                this.pushBridgeEdgeQuad(triangles, endInnerBottom, endOuterBottom, endOuterTop, endInnerTop,
+                    wallWidth, totalEndHeight, reverse);
+                this.pushBridgeEdgeQuad(triangles, startInnerBottom, startOuterBottom, endOuterBottom, endInnerBottom,
+                    wallWidth, wallLength, reverse);
+
+                if (this.bridgeEdgeCapEnabled && !this.bridgeEdgeCapJoined) {
+                    this.addSpacedBridgeEdgeCapBox(
+                        triangles,
+                        edge,
+                        wallStartDistance,
+                        wallEndDistance,
+                        side,
+                        wallHeight,
+                        wallWidth,
+                    );
+                }
+            }
+        }
+
+        if (this.bridgeEdgeCapEnabled && this.bridgeEdgeCapJoined) {
+            triangles.push(...this.getJoinedSpacedBridgeEdgeCapTriangles(edge, wallHeight, wallWidth));
+        }
+
+        this.applyUVTransformToTriangles('bridgeEdges', triangles);
+        return triangles;
+    }
+
+    private addSpacedBridgeEdgeCapBox(
+        triangles: Triangle[],
+        edge: ReturnType<Road['computeEdgeData']>,
+        startDistance: number,
+        endDistance: number,
+        side: number,
+        wallHeight: number,
+        wallWidth: number,
+    ): void {
+        const start = this.sampleEdgeAtDistance(edge, startDistance);
+        const end = this.sampleEdgeAtDistance(edge, endDistance);
+        if (!start || !end) return;
+
+        const capHeight = Math.max(0.02, this.bridgeEdgeCapHeight);
+        const capWidth = Math.max(0.02, this.bridgeEdgeCapWidth);
+        const startCenter = start.halfWidth + wallWidth * 0.5;
+        const endCenter = end.halfWidth + wallWidth * 0.5;
+        const startInnerOffset = Math.max(0, startCenter - capWidth * 0.5);
+        const endInnerOffset = Math.max(0, endCenter - capWidth * 0.5);
+        const startOuterOffset = startCenter + capWidth * 0.5;
+        const endOuterOffset = endCenter + capWidth * 0.5;
+        const startInnerBottom = start.origin.clone()
+            .add(start.right.clone().multiplyScalar(side * startInnerOffset))
+            .add(new THREE.Vector3(0, wallHeight, 0));
+        const endInnerBottom = end.origin.clone()
+            .add(end.right.clone().multiplyScalar(side * endInnerOffset))
+            .add(new THREE.Vector3(0, wallHeight, 0));
+        const startOuterBottom = start.origin.clone()
+            .add(start.right.clone().multiplyScalar(side * startOuterOffset))
+            .add(new THREE.Vector3(0, wallHeight, 0));
+        const endOuterBottom = end.origin.clone()
+            .add(end.right.clone().multiplyScalar(side * endOuterOffset))
+            .add(new THREE.Vector3(0, wallHeight, 0));
+        const startInnerTop = startInnerBottom.clone().add(new THREE.Vector3(0, capHeight, 0));
+        const endInnerTop = endInnerBottom.clone().add(new THREE.Vector3(0, capHeight, 0));
+        const startOuterTop = startOuterBottom.clone().add(new THREE.Vector3(0, capHeight, 0));
+        const endOuterTop = endOuterBottom.clone().add(new THREE.Vector3(0, capHeight, 0));
+        const capLength = Math.max(0.01, endDistance - startDistance);
+        const reverse = side > 0;
+
+        this.pushBridgeEdgeQuad(triangles, startInnerBottom, endInnerBottom,
+            endInnerTop, startInnerTop, capLength, capHeight, reverse);
+        this.pushBridgeEdgeQuad(triangles, endOuterBottom, startOuterBottom,
+            startOuterTop, endOuterTop, capLength, capHeight, reverse);
+        this.pushBridgeEdgeQuad(triangles, startInnerTop, endInnerTop,
+            endOuterTop, startOuterTop, capLength, capWidth, reverse);
+        this.pushBridgeEdgeQuad(triangles, startOuterBottom, startInnerBottom,
+            startInnerTop, startOuterTop, capWidth, capHeight, reverse);
+        this.pushBridgeEdgeQuad(triangles, endInnerBottom, endOuterBottom,
+            endOuterTop, endInnerTop, capWidth, capHeight, reverse);
+        this.pushBridgeEdgeQuad(triangles, startInnerBottom, startOuterBottom,
+            endOuterBottom, endInnerBottom, capWidth, capLength, reverse);
+    }
+
+    private getJoinedSpacedBridgeEdgeCapTriangles(
+        edge: ReturnType<Road['computeEdgeData']>,
+        wallHeight: number,
+        wallWidth: number,
+    ): Triangle[] {
+        const capHeight = Math.max(0.02, this.bridgeEdgeCapHeight);
+        const capWidth = Math.max(0.02, this.bridgeEdgeCapWidth);
+        const sections: GeometryLineSection<RoadGeometryGroup>[] = [];
+
+        for (let i = 0; i < edge.points.length; i++) {
+            const center = edge.halfWidths[i] + wallWidth * 0.5;
+            const inner = Math.max(0, center - capWidth * 0.5);
+            const outer = center + capWidth * 0.5;
+            const v = edge.centerCumDist[i];
+            sections.push({
+                origin: edge.points[i],
+                right: edge.rightVecs[i],
+                segments: [
+                    { group: 'bridgeEdges', start: { lateral: inner, height: wallHeight, u: 0, v }, end: { lateral: inner, height: wallHeight + capHeight, u: 1, v } },
+                    { group: 'bridgeEdges', start: { lateral: inner, height: wallHeight + capHeight, u: 0, v }, end: { lateral: outer, height: wallHeight + capHeight, u: 1, v } },
+                    { group: 'bridgeEdges', start: { lateral: outer, height: wallHeight + capHeight, u: 1, v }, end: { lateral: outer, height: wallHeight, u: 0, v } },
+                    { group: 'bridgeEdges', start: { lateral: outer, height: wallHeight, u: 1, v }, end: { lateral: inner, height: wallHeight, u: 0, v } },
+                    { group: 'bridgeEdges', start: { lateral: -inner, height: wallHeight + capHeight, u: 1, v }, end: { lateral: -inner, height: wallHeight, u: 0, v } },
+                    { group: 'bridgeEdges', start: { lateral: -outer, height: wallHeight + capHeight, u: 0, v }, end: { lateral: -inner, height: wallHeight + capHeight, u: 1, v } },
+                    { group: 'bridgeEdges', start: { lateral: -outer, height: wallHeight, u: 0, v }, end: { lateral: -outer, height: wallHeight + capHeight, u: 1, v } },
+                    { group: 'bridgeEdges', start: { lateral: -inner, height: wallHeight, u: 1, v }, end: { lateral: -outer, height: wallHeight, u: 0, v } },
+                ],
+            });
+        }
+
+        const triangles = this.geometrySweepManager.sweepSections(sections)
+            .find((group) => group.name === 'bridgeEdges')?.triangles ?? [];
+        this.addJoinedSpacedBridgeEdgeCapEnds(triangles, edge, wallHeight, wallWidth, capHeight, capWidth);
+        return triangles;
+    }
+
+    private addJoinedSpacedBridgeEdgeCapEnds(
+        triangles: Triangle[],
+        edge: ReturnType<Road['computeEdgeData']>,
+        wallHeight: number,
+        wallWidth: number,
+        capHeight: number,
+        capWidth: number,
+    ): void {
+        const last = edge.points.length - 1;
+        for (const [index, neighbour] of [[0, 1], [last, last - 1]] as const) {
+            const origin = edge.points[index];
+            const right = edge.rightVecs[index];
+            const center = edge.halfWidths[index] + wallWidth * 0.5;
+            const inner = Math.max(0, center - capWidth * 0.5);
+            const outer = center + capWidth * 0.5;
+            const outward = origin.clone().sub(edge.points[neighbour]).normalize();
+            for (const side of [-1, 1]) {
+                const innerBottom = origin.clone().add(right.clone().multiplyScalar(side * inner)).add(new THREE.Vector3(0, wallHeight, 0));
+                const outerBottom = origin.clone().add(right.clone().multiplyScalar(side * outer)).add(new THREE.Vector3(0, wallHeight, 0));
+                const innerTop = innerBottom.clone().add(new THREE.Vector3(0, capHeight, 0));
+                const outerTop = outerBottom.clone().add(new THREE.Vector3(0, capHeight, 0));
+                const normal = new THREE.Vector3().subVectors(innerTop, innerBottom)
+                    .cross(new THREE.Vector3().subVectors(outerTop, innerBottom));
+                this.pushBridgeEdgeQuad(triangles, innerBottom, innerTop, outerTop, outerBottom,
+                    capHeight, capWidth, normal.dot(outward) < 0);
+            }
+        }
+    }
+
+    private pushBridgeEdgeQuad(
+        out: Triangle[],
+        a: THREE.Vector3,
+        b: THREE.Vector3,
+        c: THREE.Vector3,
+        d: THREE.Vector3,
+        width: number,
+        height: number,
+        reverse: boolean = false,
+    ): void {
+        const uvA = new THREE.Vector2(0, 0);
+        const uvB = new THREE.Vector2(Math.max(0.01, width), 0);
+        const uvC = new THREE.Vector2(Math.max(0.01, width), Math.max(0.01, height));
+        const uvD = new THREE.Vector2(0, Math.max(0.01, height));
+        if (reverse) {
+            out.push(new Triangle(a, c, b, uvA, uvC, uvB));
+            out.push(new Triangle(a, d, c, uvA.clone(), uvD, uvC.clone()));
+        } else {
+            out.push(new Triangle(a, b, c, uvA, uvB, uvC));
+            out.push(new Triangle(a, c, d, uvA.clone(), uvC.clone(), uvD));
+        }
     }
 
     private getBridgePillarTriangles(edge: ReturnType<Road['computeEdgeData']>): Triangle[] {
@@ -1208,8 +1906,8 @@ export default class Road extends WorldElement {
         ));
     }
 
-    private computeEdgeData() {
-        const points = this.getBezierCurvePoints();
+    private computeEdgeData(divisionsOverride?: number) {
+        const points = this.getBezierCurvePoints(divisionsOverride);
         const up = new THREE.Vector3(0, 1, 0);
         const halfWidthStart = this.getResolvedHalfWidth(0);
         const halfWidthEnd = this.getResolvedHalfWidth(1);

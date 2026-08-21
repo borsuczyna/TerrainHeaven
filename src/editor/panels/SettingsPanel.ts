@@ -2,6 +2,7 @@ import { singleton, inject } from 'tsyringe';
 import { createIcons, icons } from 'lucide';
 import ProjectSettings from '../ProjectSettings';
 import HistoryManager from '../HistoryManager';
+import LODPreviewManager from '../LODPreviewManager';
 
 @singleton()
 export default class SettingsPanel {
@@ -11,6 +12,7 @@ export default class SettingsPanel {
     constructor(
         @inject(ProjectSettings) private readonly settings: ProjectSettings,
         @inject(HistoryManager) private readonly history: HistoryManager,
+        @inject(LODPreviewManager) private readonly lodPreview: LODPreviewManager,
     ) {
         this.container = document.createElement('div');
         this.container.id = 'settings-panel';
@@ -57,6 +59,19 @@ export default class SettingsPanel {
                     <p class="sp-help">Warm sunlight, soft shadows and lightweight day/night lighting.</p>
                 </div>
                 ${s.enhancedVisuals ? this.buildEnhancedControls() : this.buildBasicControls()}
+                <div class="sp-section">
+                    <div class="sp-section-label">Unity Export</div>
+                    <div class="sp-row">
+                        <label class="sp-label">LOD Preview</label>
+                        <select class="sp-select" data-prop="lodPreview">
+                            <option value="0" ${this.lodPreview.level === 0 ? 'selected' : ''}>Full detail</option>
+                            <option value="1" ${this.lodPreview.level === 1 ? 'selected' : ''}>LOD 1</option>
+                            <option value="2" ${this.lodPreview.level === 2 ? 'selected' : ''}>LOD 2</option>
+                            <option value="3" ${this.lodPreview.level === 3 ? 'selected' : ''}>LOD 3</option>
+                        </select>
+                    </div>
+                    <p class="sp-help">Temporarily view terrain/roads/rivers at one of the Unity exporter's LOD levels. Not saved with the project.</p>
+                </div>
             </div>
         `;
 
@@ -69,6 +84,10 @@ export default class SettingsPanel {
 
         if (s.enhancedVisuals) this.bindEnhancedControls();
         else this.bindBasicControls();
+
+        const lodSelect = this.container.querySelector<HTMLSelectElement>('[data-prop="lodPreview"]');
+        lodSelect?.addEventListener('change', () => this.lodPreview.setLevel(Number(lodSelect.value)));
+
         createIcons({ icons });
     }
 

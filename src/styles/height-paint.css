@@ -34,6 +34,7 @@ body:has(#height-paint-panel.visible) #transform-toolbar { right: 340px; }
 .height-paint-body input { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; outline: none; background: #181a1e; color: #e8ebef; }
 .height-paint-body input:focus { border-color: #4c9eea; box-shadow: 0 0 0 2px rgba(76,158,234,.14); }
 .height-paint-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.height-paint-modes-3 { grid-template-columns: 1fr 1fr 1fr; }
 .height-paint-modes button, .height-paint-clear { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(255,255,255,.04); color: #aeb7c2; cursor: pointer; }
 .height-paint-modes button:hover, .height-paint-clear:hover { background: rgba(255,255,255,.09); color: white; }
 .height-paint-modes button.active { border-color: rgba(87,170,255,.42); background: rgba(87,170,255,.14); color: #a8d4ff; }
