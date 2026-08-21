@@ -75,7 +75,7 @@ export default class HeightPaintTool implements Tool {
         this.painting = true;
         this.activeTerrain = result.terrain;
         this.lastDab.copy(result.hit.point);
-        this.history.beginAction(this.getDirection(event.ctrlKey || event.metaKey) > 0 ? 'Raise Terrain' : 'Lower Terrain');
+        this.history.beginAction(this.getActionLabel(event.ctrlKey || event.metaKey));
         this.applyDab(result.hit.point, event.ctrlKey || event.metaKey);
         event.preventDefault();
         return true;
@@ -110,7 +110,7 @@ export default class HeightPaintTool implements Tool {
         if (changed) this.activeTerrain = result.terrain;
     };
 
-    private onMouseUp = (event: MouseEvent): void => {
+    public onMouseUp = (event: MouseEvent): void => {
         if (event.button !== 0 || !this.painting) return;
         this.painting = false;
         this.history.endAction();
@@ -126,9 +126,20 @@ export default class HeightPaintTool implements Tool {
     }
 
     private paintAt(point: THREE.Vector3, invert: boolean): boolean {
-        const terrains = this.scene.getElements()
-            .filter((element): element is Terrain => element instanceof Terrain)
-            .filter((terrain) => terrain.intersectsPaintBrush(point, this.panel.settings.radius));
+        const allTerrains = this.scene.getElements().filter((element): element is Terrain => element instanceof Terrain);
+        const terrains = allTerrains.filter((terrain) => terrain.intersectsPaintBrush(point, this.panel.settings.radius));
+        if (terrains.length === 0) return false;
+
+        if (this.panel.settings.mode === 'smooth') {
+            // Smooth has no up/down direction to invert - Ctrl is a no-op for it. A
+            // single group-wide call (rather than one per tile) is required for a seam
+            // cell's result to stay independent of which tile happens to be listed
+            // first - see Terrain.smoothHeight's own comment for why.
+            const changed = Terrain.smoothHeight(point, this.panel.settings.radius, this.panel.settings.strength, allTerrains);
+            if (changed) for (const terrain of terrains) terrain.update();
+            return changed;
+        }
+
         const changed = terrains.filter((terrain) => terrain.paintHeight(
             point,
             this.panel.settings.radius,
@@ -139,8 +150,13 @@ export default class HeightPaintTool implements Tool {
     }
 
     private getDirection(invert: boolean): number {
-        const direction = this.panel.settings.mode === 'raise' ? 1 : -1;
+        const direction = this.panel.settings.mode === 'lower' ? -1 : 1;
         return invert ? -direction : direction;
+    }
+
+    private getActionLabel(invert: boolean): string {
+        if (this.panel.settings.mode === 'smooth') return 'Smooth Terrain';
+        return this.getDirection(invert) > 0 ? 'Raise Terrain' : 'Lower Terrain';
     }
 
     private getTerrainHit(clientX: number, clientY: number): TerrainHit | null {
@@ -164,8 +180,10 @@ export default class HeightPaintTool implements Tool {
     }
 
     private updateRingColor(invert: boolean): void {
-        const raise = this.getDirection(invert) > 0;
-        (this.brushRing.material as THREE.LineBasicMaterial).color.setHex(raise ? 0x67d986 : 0xff6d6d);
+        let color = 0xff6d6d;
+        if (this.panel.settings.mode === 'smooth') color = 0x67b3d9;
+        else if (this.getDirection(invert) > 0) color = 0x67d986;
+        (this.brushRing.material as THREE.LineBasicMaterial).color.setHex(color);
     }
 
     private clearActiveTerrain(): void {

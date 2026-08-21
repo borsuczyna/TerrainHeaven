@@ -5,6 +5,8 @@ import { container } from 'tsyringe';
 import SceneManager from '../editor/SceneManager';
 import Terrain from '../elements/Terrain';
 import TerrainCutSpline from '../elements/TerrainCutSpline';
+import RiverSpline from '../elements/RiverSpline';
+import TerrainGroupMesher from './TerrainGroupMesher';
 
 interface Vertex { x: number; y: number; z: number }
 
@@ -149,5 +151,56 @@ describe('TerrainGroupMesher', () => {
                 .join('#');
         };
         expect(build(false)).toEqual(build(true));
+    });
+
+    describe('buildLODSurface', () => {
+        it('thins terrain-shaping cut points along with the mesh, instead of forcing full density into a shrunk budget', () => {
+            // A dense river (small Divisions/Detail Level target spacing relative to
+            // the tile) used to keep contributing just as many cut points at every LOD,
+            // so a heavily reduced triangleLimit had to cram them in anyway - producing
+            // a chaotic tangle of slivers rather than a clean, simplified surface.
+            const scene = freshScene();
+            const terrain = new Terrain(new THREE.Vector3(0, 0, 0), 40, 40);
+            terrain.meshDetail = 2;
+            terrain.triangleLimit = 1500;
+            scene.add(terrain);
+            const river = new RiverSpline(new THREE.Vector3(-18, 0, -3), new THREE.Vector3(18, 0, 3));
+            river.detailLevel = 2;
+            river.divisions = 4;
+            scene.add(river);
+            terrain.update();
+
+            const mesher = container.resolve(TerrainGroupMesher);
+            const counts = [0, 1, 2, 3].map((lod) => mesher.buildLODSurface(terrain, lod).length);
+            // Strictly decreasing - each LOD level is a real simplification of the last,
+            // never a plateau caused by leftover full-density constraints.
+            for (let i = 1; i < counts.length; i++) expect(counts[i]).toBeLessThan(counts[i - 1]);
+        });
+
+        it('keeps every LOD level free of edges far steeper than the river bank actually calls for', () => {
+            const scene = freshScene();
+            const terrain = new Terrain(new THREE.Vector3(0, 0, 0), 40, 40);
+            scene.add(terrain);
+            const river = new RiverSpline(new THREE.Vector3(-18, 0, -3), new THREE.Vector3(18, 0, 3));
+            river.detailLevel = 2;
+            river.divisions = 4;
+            scene.add(river);
+            terrain.update();
+
+            const mesher = container.resolve(TerrainGroupMesher);
+            // River bankSlope defaults to 70 degrees, not the terrain's 35 Max Slope -
+            // the bank is *supposed* to get that steep. A generous margin above 70 still
+            // catches a genuine blow-up without being a hair-trigger test.
+            const limit = Math.tan(THREE.MathUtils.degToRad(85));
+            for (const lod of [0, 1, 2, 3]) {
+                const worst = Math.max(...mesher.buildLODSurface(terrain, lod).flatMap((tri) => (
+                    [[tri.a, tri.b], [tri.b, tri.c], [tri.c, tri.a]].map(([a, b]) => {
+                        const run = Math.hypot(b.x - a.x, b.z - a.z);
+                        return run < 1e-6 ? 0 : Math.abs(b.y - a.y) / run;
+                    })
+                )));
+                expect(worst).toBeLessThan(limit);
+            }
+        });
     });
 });

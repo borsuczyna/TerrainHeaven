@@ -9,6 +9,8 @@ import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 import GeometrySweepManager, { type GeometryLineSegment, type GeometryLineSection } from '../editor/GeometrySweepManager';
 import SceneManager from '../editor/SceneManager';
+import LODPreviewManager from '../editor/LODPreviewManager';
+import { getDivisionsForLOD } from '../export/LODLevels';
 
 export type EdgeType = 'none' | 'sidewalk' | 'bridge';
 export type PillarShape = 'box' | 'circular';
@@ -267,7 +269,7 @@ export default class Road extends WorldElement {
         super.dispose();
     }
 
-    private getBezierCurvePoints(): THREE.Vector3[] {
+    private getBezierCurvePoints(divisionsOverride?: number): THREE.Vector3[] {
         return sampleCubicBezier(
             this.nodeA.mesh.position,
             this.curvePointA ? this.curvePointA.mesh.position : this.nodeA.mesh.position,
@@ -275,7 +277,7 @@ export default class Road extends WorldElement {
             this.nodeB.mesh.position,
             // Keep a middle cross-section even for a straight road. It is needed to
             // represent the road's own crown while connected endpoint crowns blend.
-            Math.max(1, this._divisions),
+            Math.max(1, divisionsOverride ?? this._divisions),
         );
     }
 
@@ -844,7 +846,19 @@ export default class Road extends WorldElement {
     }
 
     protected getGeometry(): GeometryGroup[] {
-        const edge = this.computeEdgeData();
+        const lodIndex = container.resolve(LODPreviewManager).level;
+        return this.buildGeometry(lodIndex > 0 ? getDivisionsForLOD(this._divisions, lodIndex) : undefined);
+    }
+
+    // Geometry at a specific Unity-export LOD level, without touching the live element
+    // (divisions is only ever read here, never mutated) - used by the exporter to build
+    // every LOD level's mesh for this road.
+    public getExportGeometry(lodIndex: number): GeometryGroup[] {
+        return this.buildGeometry(getDivisionsForLOD(this._divisions, lodIndex));
+    }
+
+    private buildGeometry(divisionsOverride?: number): GeometryGroup[] {
+        const edge = this.computeEdgeData(divisionsOverride);
         const groups = this.sweepGeometryLine(edge);
         if (this.edgeType === 'bridge' && this.bridgeEdgeStyle === 'spaced') {
             const bridgeEdgeTriangles = this.getSpacedBridgeEdgeTriangles(edge);
@@ -1892,8 +1906,8 @@ export default class Road extends WorldElement {
         ));
     }
 
-    private computeEdgeData() {
-        const points = this.getBezierCurvePoints();
+    private computeEdgeData(divisionsOverride?: number) {
+        const points = this.getBezierCurvePoints(divisionsOverride);
         const up = new THREE.Vector3(0, 1, 0);
         const halfWidthStart = this.getResolvedHalfWidth(0);
         const halfWidthEnd = this.getResolvedHalfWidth(1);

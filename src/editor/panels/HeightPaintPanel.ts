@@ -1,7 +1,7 @@
 import { createIcons, icons } from 'lucide';
 import { singleton } from 'tsyringe';
 
-export type HeightPaintMode = 'raise' | 'lower';
+export type HeightPaintMode = 'raise' | 'lower' | 'smooth';
 
 export interface HeightPaintBrushSettings {
     radius: number;
@@ -32,9 +32,10 @@ export default class HeightPaintPanel {
             <div class="height-paint-body">
                 <section>
                     <h3>Mode</h3>
-                    <div class="height-paint-modes">
+                    <div class="height-paint-modes height-paint-modes-3">
                         <button type="button" data-mode="raise" class="active"><i data-lucide="arrow-up"></i> Raise</button>
                         <button type="button" data-mode="lower"><i data-lucide="arrow-down"></i> Lower</button>
+                        <button type="button" data-mode="smooth"><i data-lucide="blend"></i> Smooth</button>
                     </div>
                 </section>
                 <section>
@@ -43,7 +44,7 @@ export default class HeightPaintPanel {
                     <label><span>Strength</span><input type="number" min="0.01" max="5" step="0.05" data-setting="strength" value="0.25"></label>
                 </section>
                 <button type="button" class="height-paint-clear" data-action="clear"><i data-lucide="rotate-ccw"></i> Clear Painted Height</button>
-                <div class="height-paint-help"><i data-lucide="mouse-pointer-2"></i><span><b>LMB + drag</b> paints height.<br><b>Ctrl + LMB</b> temporarily inverts the mode.</span></div>
+                <div class="height-paint-help"><i data-lucide="mouse-pointer-2"></i><span><b>LMB + drag</b> paints height.<br><b>Ctrl + LMB</b> temporarily inverts Raise/Lower (no effect on Smooth).</span></div>
             </div>
         `;
         document.body.appendChild(this.container);

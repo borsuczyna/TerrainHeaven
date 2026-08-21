@@ -303,6 +303,12 @@ export default class Intersection extends WorldElement {
         };
     }
 
+    // Intersections have no density knob to coarsen, so every LOD level is identical -
+    // the exporter still calls this for consistency with Terrain/Road/RiverSpline.
+    public getExportGeometry(_lodIndex: number): GeometryGroup[] {
+        return this.getGeometry();
+    }
+
     protected getGeometry(): GeometryGroup[] {
         const roadTris: Triangle[] = [];
         const swTris: Triangle[] = [];

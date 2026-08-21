@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { container } from 'tsyringe';
 import WorldElement, { type NodeBasis, type GeometryGroup, type ElementData, type OccupiedTriangle } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
@@ -6,6 +7,8 @@ import Config from '../utils/Config';
 import { sampleCubicBezier } from '../utils/Bezier';
 import type { PropertyDefinition } from '../editor/Properties';
 import type { TerrainCutPointInput } from '../terrain/TerrainMesher';
+import LODPreviewManager from '../editor/LODPreviewManager';
+import { getDetailLevelForLOD, getDivisionsForLOD } from '../export/LODLevels';
 
 const WATER_COLOR = 0x2f6fa8;
 const WATER_SURFACE_OFFSET = 0.025;
@@ -173,19 +176,25 @@ export default class RiverSpline extends WorldElement {
     // bank noise above to actually show up as corners rather than being smoothed away
     // between too-sparse points. Shared by the water mesh and the terrain sampling below
     // so both trace the same jagged line.
-    private getCenterlineSamples(): { point: THREE.Vector3; right: THREE.Vector3 }[] {
+    // `overrides` only ever coarsens the *rendered water mesh* for an editor LOD
+    // preview or a Unity export level - terrain-shaping (getSampledTerrainPoints) and
+    // the terrain-cutting footprint (getOccupiedArea) always call this with no override,
+    // so lowering a river's visual LOD never changes how it carves the terrain.
+    private getCenterlineSamples(
+        overrides?: { detailLevel?: number; divisions?: number },
+    ): { point: THREE.Vector3; right: THREE.Vector3 }[] {
         const p0 = this.nodeA.mesh.position;
         const p1 = this.curvePointA?.mesh.position ?? p0;
         const p2 = this.curvePointB?.mesh.position ?? this.nodeB.mesh.position;
         const p3 = this.nodeB.mesh.position;
         const controlLength = p0.distanceTo(p1) + p1.distanceTo(p2) + p2.distanceTo(p3);
-        const detailLevel = THREE.MathUtils.clamp(this.detailLevel, 0.1, 4);
+        const detailLevel = THREE.MathUtils.clamp(overrides?.detailLevel ?? this.detailLevel, 0.1, 4);
         const targetSpacing = 1.5 / detailLevel;
         // Detail provides automatic coverage for long channels, while Divisions
         // always adds explicit curve segments. Using max() here made Divisions
         // appear ignored whenever automatic sampling was already denser.
         const automaticDivisions = Math.min(64, Math.max(0, Math.ceil(controlLength / targetSpacing) - 1));
-        const longitudinalDivisions = automaticDivisions + this._divisions;
+        const longitudinalDivisions = automaticDivisions + (overrides?.divisions ?? this._divisions);
         const points = sampleCubicBezier(p0, p1, p2, p3, longitudinalDivisions);
         return points.map((point, index) => {
             const previous = points[Math.max(0, index - 1)];
@@ -200,9 +209,14 @@ export default class RiverSpline extends WorldElement {
     // Keep a real, lowered riverbed below the water instead of opening a boolean hole.
     // Bank Slope is the actual angle between the bank and horizontal terrain:
     // horizontal run = vertical depth / tan(angle).
-    public getSampledTerrainPoints(terrainSurfaceY = this.nodeA.mesh.position.y): TerrainCutPointInput[] {
-        const samplePoints = this.getCenterlineSamples();
-        const detailLevel = THREE.MathUtils.clamp(this.detailLevel, 0.1, 4);
+    // A non-zero lodIndex thins both the longitudinal row count and the cross-section/
+    // profile density together (all three derive from the same `detailLevel` below), so
+    // a coarser terrain LOD gets a proportionally coarser set of shaping constraints
+    // instead of forcing a full-resolution river through a much smaller triangle budget.
+    public getSampledTerrainPoints(terrainSurfaceY = this.nodeA.mesh.position.y, lodIndex = 0): TerrainCutPointInput[] {
+        const overrides = this.getLODOverrides(lodIndex);
+        const samplePoints = this.getCenterlineSamples(overrides);
+        const detailLevel = THREE.MathUtils.clamp(overrides?.detailLevel ?? this.detailLevel, 0.1, 4);
         const targetSpacing = 1.5 / detailLevel;
         const minimumCrossSteps = detailLevel < 0.5 ? 1 : 2;
         const crossSteps = Math.min(12, Math.max(minimumCrossSteps, Math.ceil(this.width / targetSpacing)));
@@ -284,8 +298,8 @@ export default class RiverSpline extends WorldElement {
     // above, so getOccupiedArea() below cuts the terrain exactly where the water surface
     // sits - no gap, no overlap - and the water's own edge shows the same bank noise as
     // the ground around it instead of staying a plain straight-sided strip.
-    private buildSurfaceTriangles(): Triangle[] {
-        const samples = this.getCenterlineSamples();
+    private buildSurfaceTriangles(overrides?: { detailLevel?: number; divisions?: number }): Triangle[] {
+        const samples = this.getCenterlineSamples(overrides);
         if (samples.length < 2) return [];
 
         const triangles: Triangle[] = [];
@@ -317,7 +331,22 @@ export default class RiverSpline extends WorldElement {
     }
 
     protected override getGeometry(): GeometryGroup[] {
-        return [{ name: 'water', triangles: this.buildSurfaceTriangles() }];
+        const lodIndex = container.resolve(LODPreviewManager).level;
+        return [{ name: 'water', triangles: this.buildSurfaceTriangles(this.getLODOverrides(lodIndex)) }];
+    }
+
+    // Water mesh at a specific Unity-export LOD level, without touching the live
+    // element or its terrain-shaping/footprint (those always use full fidelity).
+    public getExportGeometry(lodIndex: number): GeometryGroup[] {
+        return [{ name: 'water', triangles: this.buildSurfaceTriangles(this.getLODOverrides(lodIndex)) }];
+    }
+
+    private getLODOverrides(lodIndex: number): { detailLevel?: number; divisions?: number } | undefined {
+        if (lodIndex <= 0) return undefined;
+        return {
+            detailLevel: getDetailLevelForLOD(this.detailLevel, lodIndex),
+            divisions: getDivisionsForLOD(this._divisions, lodIndex),
+        };
     }
 
     public override getOccupiedArea(): OccupiedTriangle[] {
