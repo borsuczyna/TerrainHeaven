@@ -13,6 +13,8 @@ import WireframeManager from './WireframeManager';
 import XRayManager from './XRayManager';
 import FoliageTool from './tools/FoliageTool';
 import HeightPaintTool from './tools/HeightPaintTool';
+import FenceTool from './tools/FenceTool';
+import PresetPanel from './panels/PresetPanel';
 
 @singleton()
 export default class LeftToolbarManager {
@@ -30,6 +32,8 @@ export default class LeftToolbarManager {
         @inject(XRayManager) private readonly xrayManager: XRayManager,
         @inject(FoliageTool) private readonly foliageTool: FoliageTool,
         @inject(HeightPaintTool) private readonly heightPaintTool: HeightPaintTool,
+        @inject(FenceTool) private readonly fenceTool: FenceTool,
+        @inject(PresetPanel) private readonly presetPanel: PresetPanel,
     ) {}
 
     public init(): void {
@@ -49,16 +53,18 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.uvTool);
         this.toolManager.registerTool(this.foliageTool);
         this.toolManager.registerTool(this.heightPaintTool);
+        this.toolManager.registerTool(this.fenceTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
             'road-switcher',
             document.getElementById('btn-road') as HTMLButtonElement,
-            ['road', 'intersection'],
+            ['road', 'intersection', 'fence'],
             'road',
             {
                 road: { label: 'Road Tool', icon: 'route' },
                 intersection: { label: 'Intersection Tool', icon: 'git-fork' },
+                fence: { label: 'Fence Tool', icon: 'panels-top-left' },
             },
             'R',
         );
@@ -91,6 +97,13 @@ export default class LeftToolbarManager {
         btnTextures.addEventListener('click', () => {
             this.textureBrowser.toggle();
             btnTextures.classList.toggle('active', this.textureBrowser.isVisible);
+        });
+
+        const btnPresets = document.getElementById('btn-presets') as HTMLButtonElement;
+        this.presetPanel.onHide = () => btnPresets.classList.remove('active');
+        btnPresets.addEventListener('click', () => {
+            this.presetPanel.toggle();
+            btnPresets.classList.toggle('active', this.presetPanel.isVisible);
         });
 
         const btnXray = document.getElementById('btn-xray') as HTMLButtonElement;

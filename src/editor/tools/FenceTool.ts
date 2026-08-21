@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { singleton, inject } from 'tsyringe';
-import Road from '../../elements/Road';
+import { inject, singleton } from 'tsyringe';
+import Fence from '../../elements/Fence';
 import Camera from '../Camera';
 import HistoryManager from '../HistoryManager';
 import SceneManager from '../SceneManager';
@@ -8,9 +8,9 @@ import SplinePlacementTool from './SplinePlacementTool';
 import PresetManager from '../PresetManager';
 
 @singleton()
-export default class RoadTool extends SplinePlacementTool<Road> {
-    public readonly name = 'road';
-    protected readonly historyLabel = 'Add Road';
+export default class FenceTool extends SplinePlacementTool<Fence> {
+    public readonly name = 'fence';
+    protected readonly historyLabel = 'Add Fence';
 
     constructor(
         @inject(SceneManager) scene: SceneManager,
@@ -21,7 +21,7 @@ export default class RoadTool extends SplinePlacementTool<Road> {
         super(scene, camera, history, presets);
     }
 
-    protected createElement(start: THREE.Vector3, end: THREE.Vector3): Road {
-        return new Road(start, end);
+    protected createElement(start: THREE.Vector3, end: THREE.Vector3): Fence {
+        return new Fence(start, end);
     }
 }

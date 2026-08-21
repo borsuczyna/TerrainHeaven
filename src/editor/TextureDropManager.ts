@@ -6,6 +6,7 @@ import SceneManager from './SceneManager';
 import type WorldElement from '../elements/WorldElement';
 import HistoryManager from './HistoryManager';
 import TextureLibrary from './TextureLibrary';
+import PresetManager from './PresetManager';
 
 @singleton()
 export default class TextureDropManager {
@@ -17,6 +18,7 @@ export default class TextureDropManager {
         @inject(SceneManager) private readonly scene: SceneManager,
         @inject(HistoryManager) private readonly history: HistoryManager,
         @inject(TextureLibrary) private readonly textureLibrary: TextureLibrary,
+        @inject(PresetManager) private readonly presets: PresetManager,
     ) {}
 
     public init(): void {
@@ -34,6 +36,11 @@ export default class TextureDropManager {
     }
 
     private async handleDrop(e: DragEvent): Promise<void> {
+        const presetId = e.dataTransfer?.getData('application/x-santown-preset-id') ?? '';
+        if (presetId) {
+            this.applyDroppedPreset(presetId, e);
+            return;
+        }
         let texturePath = e.dataTransfer?.getData('application/x-santown-texture-path') ?? '';
 
         if (!texturePath && e.dataTransfer?.files.length) {
@@ -73,5 +80,26 @@ export default class TextureDropManager {
         }
 
         texture.dispose();
+    }
+
+    private applyDroppedPreset(presetId: string, e: DragEvent): void {
+        const mouse = new THREE.Vector2(
+            (e.clientX / window.innerWidth) * 2 - 1,
+            -(e.clientY / window.innerHeight) * 2 + 1,
+        );
+        this.raycaster.setFromCamera(mouse, this.camera.instance);
+        const targets = this.scene.instance.children.filter((child) =>
+            child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane');
+        for (const hit of this.raycaster.intersectObjects(targets, true)) {
+            let object: THREE.Object3D | null = hit.object;
+            let element: WorldElement | undefined;
+            while (object && !element) {
+                element = object.userData.worldElement as WorldElement | undefined;
+                object = object.parent;
+            }
+            if (!element) continue;
+            if (this.presets.applyPreset(presetId, element)) this.history.record('Apply Preset');
+            return;
+        }
     }
 }

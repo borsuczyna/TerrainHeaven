@@ -1,0 +1,107 @@
+#preset-panel {
+    position: fixed;
+    inset: 58px auto 18px 72px;
+    width: 340px;
+    z-index: 115;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: var(--text-primary, #edf2f7);
+    background: color-mix(in srgb, var(--panel-bg, #15191f) 96%, transparent);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(18px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-12px);
+    transition: opacity 140ms ease, transform 140ms ease;
+}
+
+#preset-panel.visible { opacity: 1; pointer-events: auto; transform: translateX(0); }
+
+.preset-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 17px 16px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.preset-header > div { display: flex; flex-direction: column; gap: 2px; }
+.preset-header strong { font-size: 15px; letter-spacing: -0.01em; }
+.preset-eyebrow { color: #7f8b99; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.preset-close, .preset-default, .preset-delete {
+    display: grid;
+    place-items: center;
+    color: #95a0ac;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.preset-close { width: 30px; height: 30px; }
+.preset-close:hover, .preset-default:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+
+.preset-toolbar { padding: 12px 14px 8px; }
+.preset-toolbar input {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 9px 11px;
+    color: inherit;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    outline: none;
+}
+.preset-toolbar input:focus { border-color: #4d8dff; }
+
+.preset-hint {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    margin: 2px 14px 10px;
+    padding: 9px 10px;
+    color: #aab4bf;
+    background: rgba(77, 141, 255, 0.08);
+    border: 1px solid rgba(77, 141, 255, 0.16);
+    border-radius: 7px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+.preset-hint svg { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 1px; color: #6ca0ff; }
+
+.preset-list { min-height: 0; padding: 0 10px 14px; overflow: auto; }
+.preset-group h3 { margin: 12px 5px 7px; color: #7f8b99; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.preset-card {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 28px 28px;
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0;
+    padding: 9px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 8px;
+    cursor: grab;
+}
+.preset-card:hover { background: rgba(255, 255, 255, 0.065); border-color: rgba(255, 255, 255, 0.13); }
+.preset-card:active { cursor: grabbing; }
+.preset-card.default { border-color: rgba(247, 190, 65, 0.45); background: rgba(247, 190, 65, 0.07); }
+.preset-card-icon { display: grid; place-items: center; width: 34px; height: 34px; color: #79a7ff; background: rgba(77, 141, 255, 0.12); border-radius: 7px; }
+.preset-card-icon svg { width: 17px; height: 17px; }
+.preset-card-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.preset-card-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.preset-card-copy span { color: #7f8b99; font-size: 10px; }
+.preset-default, .preset-delete { width: 28px; height: 28px; }
+.preset-default svg, .preset-delete svg { width: 14px; height: 14px; }
+.preset-card.default .preset-default { color: #f7be41; }
+.preset-delete:hover { color: #ff7777; background: rgba(255, 80, 80, 0.09); }
+.preset-empty { display: flex; min-height: 220px; padding: 28px; align-items: center; justify-content: center; flex-direction: column; gap: 7px; color: #7f8b99; text-align: center; }
+.preset-empty svg { width: 28px; height: 28px; margin-bottom: 5px; }
+.preset-empty strong { color: #c9d1da; font-size: 13px; }
+.preset-empty span { max-width: 230px; font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 720px) {
+    #preset-panel { right: 10px; left: 62px; width: auto; }
+}

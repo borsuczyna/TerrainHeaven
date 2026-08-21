@@ -11,6 +11,23 @@ class TestRoad extends Road {
 }
 
 describe('Road UV mapping', () => {
+    it('scales curb-side UVs with the actual curb height', () => {
+        const road = new TestRoad(new THREE.Vector3(0, 0, 0), new THREE.Vector3(10, 0, 0));
+        road.edgeType = 'sidewalk';
+        road.curbHeight = 0.4;
+        road.sidewalkWidth = 1.5;
+        road.sidewalkTexStretch = 2;
+
+        const triangles = road.geometryGroups().find((group) => group.name === 'sidewalk')?.triangles ?? [];
+        const curbTriangle = triangles.find((triangle) => {
+            const heights = [triangle.a.y, triangle.b.y, triangle.c.y];
+            return Math.min(...heights) < 1e-8 && Math.max(...heights) > 0.39;
+        });
+        expect(curbTriangle).toBeDefined();
+        const uValues = [curbTriangle!.uvA.x, curbTriangle!.uvB.x, curbTriangle!.uvC.x];
+        expect(Math.max(...uValues) - Math.min(...uValues)).toBeCloseTo(0.8, 6);
+    });
+
     it('keeps the longitudinal UV constant across every curved-road section', () => {
         const road = new TestRoad(new THREE.Vector3(-8, 0, 0), new THREE.Vector3(8, 0, 0));
         road.lanes = 1;

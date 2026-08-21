@@ -147,7 +147,13 @@ export function buildMtl(materials: ObjMaterial[]): string {
     const lines: string[] = [];
     for (const material of materials) {
         lines.push(`newmtl ${sanitizeName(material.name)}`, 'Kd 1 1 1', 'Ka 0 0 0', 'Ks 0 0 0', 'd 1', 'illum 1');
-        if (material.textureRelativePath) lines.push(`map_Kd ${material.textureRelativePath}`);
+        if (material.textureRelativePath) {
+            lines.push(`map_Kd ${material.textureRelativePath}`);
+            // The same image supplies opacity when it contains an alpha channel.
+            // Importers that support map_d (including common DCC/engine pipelines)
+            // can therefore preserve transparent project textures.
+            lines.push(`map_d ${material.textureRelativePath}`);
+        }
     }
     return `${lines.join('\n')}\n`;
 }

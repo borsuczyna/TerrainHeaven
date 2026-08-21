@@ -5,6 +5,8 @@ import type WorldElement from '../elements/WorldElement';
 import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
 import { createIcons, icons } from 'lucide';
+import PresetManager from './PresetManager';
+import PresetPanel from './panels/PresetPanel';
 
 @singleton()
 export default class PropertiesPanel {
@@ -18,6 +20,8 @@ export default class PropertiesPanel {
     constructor(
         @inject(CopyManager) copyManager: CopyManager,
         @inject(HistoryManager) history: HistoryManager,
+        @inject(PresetManager) private readonly presets: PresetManager,
+        @inject(PresetPanel) private readonly presetPanel: PresetPanel,
     ) {
         this.copyManager = copyManager;
         this.history = history;
@@ -190,6 +194,7 @@ export default class PropertiesPanel {
                 menu.innerHTML = `
                     <div class="panel-menu-item" data-action="copy">Copy properties</div>
                     <div class="panel-menu-item${canPaste ? '' : ' disabled'}" data-action="paste">Paste properties</div>
+                    <div class="panel-menu-item" data-action="save-preset">Save as preset…</div>
                 `;
 
                 menu.querySelectorAll('.panel-menu-item').forEach(item => {
@@ -201,6 +206,7 @@ export default class PropertiesPanel {
                             this.doPasteProperties();
                             this.history.record('Paste Properties');
                         }
+                        else if (action === 'save-preset') this.savePreset();
                         menu.style.display = 'none';
                     });
                 });
@@ -220,6 +226,15 @@ export default class PropertiesPanel {
     private doPasteProperties(): void {
         if (!this.element) return;
         this.copyManager.pastePropertiesOnto(this.element);
+    }
+
+    private savePreset(): void {
+        if (!this.element) return;
+        const suggested = `${this.element.getProperties().title} Preset`;
+        const name = window.prompt('Preset name', suggested);
+        if (name === null) return;
+        this.presets.savePreset(name, this.element);
+        this.presetPanel.show();
     }
 
     private bindEvents(def: PropertyDefinition): void {

@@ -3,6 +3,7 @@ import { singleton } from 'tsyringe';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
+import Fence from '../elements/Fence';
 import type WorldElement from '../elements/WorldElement';
 import type { UVTransform } from '../elements/WorldElement';
 import type SceneManager from './SceneManager';
@@ -37,7 +38,7 @@ export default class CopyManager {
         this.snapshotTextures(element);
         this.snapshotUVTransforms(element);
 
-        if (element instanceof Road) {
+        if (element instanceof Road || element instanceof Fence) {
             const a = element.nodeA.mesh.position;
             const b = element.nodeB.mesh.position;
             this.roadLength = a.distanceTo(b);
@@ -117,7 +118,7 @@ export default class CopyManager {
 
         let newEl: WorldElement | null = null;
 
-        if (this.sourceType === 'Road' && this.roadDirection !== null && this.roadLength !== null) {
+        if ((this.sourceType === 'Road' || this.sourceType === 'Fence') && this.roadDirection !== null && this.roadLength !== null) {
             const dir = this.roadDirection.clone();
             dir.y = 0;
             if (dir.lengthSq() < 0.001) dir.set(1, 0, 0);
@@ -125,7 +126,7 @@ export default class CopyManager {
             const half = this.roadLength / 2;
             const posA = spawnCenter.clone().sub(dir.clone().multiplyScalar(half));
             const posB = spawnCenter.clone().add(dir.clone().multiplyScalar(half));
-            newEl = new Road(posA, posB);
+            newEl = this.sourceType === 'Fence' ? new Fence(posA, posB) : new Road(posA, posB);
         } else if (this.sourceType === 'Intersection' && this.intersectionNodeCount !== null) {
             newEl = new Intersection(spawnCenter, this.intersectionNodeCount);
         } else if (this.sourceType === 'Terrain' && this.terrainWidth !== null && this.terrainHeight !== null) {

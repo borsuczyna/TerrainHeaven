@@ -5,6 +5,7 @@ import type Camera from '../Camera';
 import type HistoryManager from '../HistoryManager';
 import type SceneManager from '../SceneManager';
 import type { Tool } from '../ToolManager';
+import type PresetManager from '../PresetManager';
 
 export interface CurvePlacementElement extends WorldElement {
     readonly nodeA: WorldNode;
@@ -35,6 +36,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
         protected readonly scene: SceneManager,
         protected readonly camera: Camera,
         protected readonly history: HistoryManager,
+        protected readonly presets: PresetManager,
     ) {}
 
     protected abstract createElement(start: THREE.Vector3, end: THREE.Vector3): T;
@@ -74,11 +76,12 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
 
         this.startNode = start.node;
         this.preview = this.createElement(start.position.clone(), start.position.clone());
+        this.presets.applyDefault(this.preview);
         this.scene.add(this.preview);
         this.connectStartIfPossible();
 
         if (e.ctrlKey || e.metaKey) {
-            this.preview.divisions = DEFAULT_CURVE_DIVISIONS;
+            if (this.preview.divisions <= 0) this.preview.divisions = DEFAULT_CURVE_DIVISIONS;
             this.preview.setCurvePointA(start.position.clone());
             this.preview.setCurvePointB(start.position.clone());
             this.updatePreviewAndConnections();
@@ -101,7 +104,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
         }
 
         if (this.phase === 'straight' || this.phase === 'choose-end') {
-            this.preview.nodeB.update(point.position);
+            this.preview.nodeB.update(this.snapEndpoint(point.position, e.shiftKey));
             if (this.phase === 'choose-end') this.updateAutomaticEndHandle();
             else this.updateConnectedElements();
             return;
@@ -131,7 +134,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
                 return;
             }
             this.endNode = endpoint.node;
-            this.preview.nodeB.update(endpoint.position);
+            this.preview.nodeB.update(this.snapEndpoint(endpoint.position, e.shiftKey));
             this.finalize();
             return;
         }
@@ -202,6 +205,21 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
             return position;
         }
         return this.preview?.nodeA.mesh.position.clone() ?? new THREE.Vector3();
+    }
+
+    private snapEndpoint(position: THREE.Vector3, enabled: boolean): THREE.Vector3 {
+        if (!enabled) return position;
+        const start = this.getStartPosition();
+        const delta = position.clone().sub(start);
+        const horizontalLength = Math.hypot(delta.x, delta.z);
+        if (horizontalLength < 1e-8) return position;
+        const step = Math.PI / 4;
+        const angle = Math.round(Math.atan2(delta.z, delta.x) / step) * step;
+        return new THREE.Vector3(
+            start.x + Math.cos(angle) * horizontalLength,
+            position.y,
+            start.z + Math.sin(angle) * horizontalLength,
+        );
     }
 
     private getPlacementPoint(e: MouseEvent, ignoreNodes = false): { position: THREE.Vector3; node: WorldNode | null } | null {

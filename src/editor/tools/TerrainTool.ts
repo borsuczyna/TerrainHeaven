@@ -5,6 +5,7 @@ import SceneManager from '../SceneManager.ts';
 import Camera from '../Camera.ts';
 import Terrain from '../../elements/Terrain.ts';
 import HistoryManager from '../HistoryManager.ts';
+import PresetManager from '../PresetManager';
 
 @singleton()
 export default class TerrainTool implements Tool {
@@ -20,6 +21,7 @@ export default class TerrainTool implements Tool {
         @inject(SceneManager) scene: SceneManager,
         @inject(Camera) camera: Camera,
         @inject(HistoryManager) private readonly history: HistoryManager,
+        @inject(PresetManager) private readonly presets: PresetManager,
     ) {
         this.scene = scene;
         this.camera = camera;
@@ -41,6 +43,7 @@ export default class TerrainTool implements Tool {
         if (!this.raycaster.ray.intersectPlane(this.groundPlane, target)) return false;
 
         const terrain = new Terrain(target, 30, 30);
+        this.presets.applyDefault(terrain);
         this.scene.add(terrain);
         this.history.record('Add Terrain');
         return true;

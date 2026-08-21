@@ -5,6 +5,7 @@ import SceneManager from '../SceneManager';
 import Camera from '../Camera';
 import Intersection from '../../elements/Intersection';
 import HistoryManager from '../HistoryManager';
+import PresetManager from '../PresetManager';
 
 @singleton()
 export default class IntersectionTool implements Tool {
@@ -20,6 +21,7 @@ export default class IntersectionTool implements Tool {
         @inject(SceneManager) scene: SceneManager,
         @inject(Camera) camera: Camera,
         @inject(HistoryManager) private readonly history: HistoryManager,
+        @inject(PresetManager) private readonly presets: PresetManager,
     ) {
         this.scene = scene;
         this.camera = camera;
@@ -41,6 +43,7 @@ export default class IntersectionTool implements Tool {
         if (!this.raycaster.ray.intersectPlane(this.groundPlane, target)) return false;
 
         const intersection = new Intersection(target, 4);
+        this.presets.applyDefault(intersection);
         this.scene.add(intersection);
         this.history.record('Add Intersection');
         return true;

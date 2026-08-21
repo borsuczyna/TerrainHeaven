@@ -16,9 +16,10 @@ const SECTIONS: ShortcutSection[] = [
         title: 'Tools',
         entries: [
             { keys: ['V'], label: 'Select tool' },
-            { keys: ['R'], label: 'Road tool (press again for Intersection)' },
+            { keys: ['R'], label: 'Road tool (press again for Intersection / Fence)' },
             { keys: ['T'], label: 'Terrain tool (press again to cycle Cut Point / Cut Spline / River)' },
             { keys: ['U'], label: 'UV Mapper tool' },
+            { keys: ['Drag preset'], label: 'Apply it to a matching element' },
             { keys: ['W'], label: 'Move gizmo (with an element selected)' },
             { keys: ['E'], label: 'Rotate gizmo (with an element selected)' },
         ],
@@ -28,6 +29,7 @@ const SECTIONS: ShortcutSection[] = [
         entries: [
             { keys: ['LMB', 'Drag'], label: 'Box-select multiple elements (on empty space)' },
             { keys: ['Ctrl', 'LMB', 'Drag'], label: 'Add a curved path with tangent handles' },
+            { keys: ['Shift', 'LMB', 'Drag'], label: 'Snap a straight path to 45° angles' },
             { keys: ['Delete'], label: 'Delete selection' },
             { keys: ['Ctrl', 'C'], label: 'Copy selected element' },
             { keys: ['Ctrl', 'V'], label: 'Paste element / properties' },

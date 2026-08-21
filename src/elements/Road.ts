@@ -956,6 +956,10 @@ export default class Road extends WorldElement {
         if (this.edgeType === 'sidewalk') {
             const leftV = context.leftDistance * this.sidewalkTexStretch;
             const rightV = context.rightDistance * this.sidewalkTexStretch;
+            // Use world-size UVs across each cross-section. The old fixed 0..1 range
+            // stretched the same texel height over every curb height and sidewalk width.
+            const curbU = Math.max(0.001, context.curbHeight) * this.sidewalkTexStretch;
+            const sidewalkU = Math.max(0.001, context.sidewalkWidth) * this.sidewalkTexStretch;
 
             // Right curb face: inner bottom -> inner top
             segments.push({
@@ -969,7 +973,7 @@ export default class Road extends WorldElement {
                 end: {
                     lateral: context.halfWidth,
                     height: context.curbHeight,
-                    u: 1,
+                    u: curbU,
                     v: rightV,
                 },
             });
@@ -986,7 +990,7 @@ export default class Road extends WorldElement {
                 end: {
                     lateral: context.halfWidth + context.sidewalkWidth,
                     height: context.curbHeight,
-                    u: 1,
+                    u: sidewalkU,
                     v: rightV,
                 },
             });
@@ -997,7 +1001,7 @@ export default class Road extends WorldElement {
                 start: {
                     lateral: -context.halfWidth,
                     height: context.curbHeight,
-                    u: 1,
+                    u: curbU,
                     v: leftV,
                 },
                 end: {
@@ -1014,7 +1018,7 @@ export default class Road extends WorldElement {
                 start: {
                     lateral: -(context.halfWidth + context.sidewalkWidth),
                     height: context.curbHeight,
-                    u: 1,
+                    u: sidewalkU,
                     v: leftV,
                 },
                 end: {

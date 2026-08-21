@@ -34,7 +34,7 @@ export interface OccupiedTriangle {
 }
 
 export interface ElementData {
-    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river';
+    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
@@ -96,6 +96,16 @@ export interface ElementData {
     riverBankSmoothing?: number;
     riverIrregularityLevel?: number;
     riverDetailLevel?: number;
+    // Fence-specific
+    fenceStyle?: string;
+    fenceHeight?: number;
+    fenceThickness?: number;
+    fencePostSpacing?: number;
+    fencePostHeight?: number;
+    fencePostWidth?: number;
+    fencePostShape?: string;
+    fencePostSides?: number;
+    fenceMaxAngleStep?: number;
 }
 
 interface Connection {
@@ -505,6 +515,7 @@ export default abstract class WorldElement {
             if (idx >= 0 && mats[idx]) {
                 const m = mats[idx] as THREE.MeshStandardMaterial;
                 m.map = texture;
+                this.configureTextureTransparency(m);
                 m.needsUpdate = true;
             }
         }
@@ -573,6 +584,7 @@ export default abstract class WorldElement {
             if (tex) {
                 this.applyTextureRotation(info.name, tex);
                 mat.map = tex;
+                this.configureTextureTransparency(mat);
             }
             mat.wireframe = container.resolve(WireframeManager).isEnabled();
             this.applySelectionMaterialState(mat);
@@ -584,5 +596,14 @@ export default abstract class WorldElement {
 
         oldGeometry.dispose();
         for (const material of oldMaterials) material.dispose();
+    }
+
+    private configureTextureTransparency(material: THREE.MeshStandardMaterial): void {
+        // Imported PNG/WebP textures may contain either smooth alpha or cut-out pixels.
+        // Enabling blending here makes alpha work consistently for every element type;
+        // a tiny alpha test also prevents fully invisible texels from writing depth.
+        material.transparent = true;
+        material.alphaTest = 0.001;
+        material.depthWrite = true;
     }
 }

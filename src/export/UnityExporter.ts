@@ -8,6 +8,7 @@ import Terrain from '../elements/Terrain';
 import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import RiverSpline from '../elements/RiverSpline';
+import Fence from '../elements/Fence';
 import { MAX_LOD_INDEX } from './LODLevels';
 import { buildMtl, buildObj, type ObjGroup, type ObjMaterial } from './ObjWriter';
 
@@ -29,7 +30,7 @@ export interface UnityExportOptions {
     scale: number;
 }
 
-type ExportKind = 'terrain' | 'road' | 'intersection' | 'river';
+type ExportKind = 'terrain' | 'road' | 'intersection' | 'river' | 'fence';
 
 interface ManifestLodGroup {
     // Matches one OBJ "g"/"usemtl" submesh, in file order, so the importer can assign
@@ -207,6 +208,7 @@ export default class UnityExporter {
         if (element instanceof RiverSpline) return 'river';
         if (element instanceof Intersection) return 'intersection';
         if (element instanceof Road) return 'road';
+        if (element instanceof Fence) return 'fence';
         return null;
     }
 
@@ -216,6 +218,7 @@ export default class UnityExporter {
             case 'road': return (element as Road).getExportGeometry(lodIndex);
             case 'intersection': return (element as Intersection).getExportGeometry(lodIndex);
             case 'river': return (element as RiverSpline).getExportGeometry(lodIndex);
+            case 'fence': return (element as Fence).getExportGeometry(lodIndex);
             default: return [];
         }
     }
