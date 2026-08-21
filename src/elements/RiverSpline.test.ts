@@ -156,4 +156,72 @@ describe('RiverSpline', () => {
         expect(first.connections.get(1)?.element).toBe(second);
         expect(second.connections.get(0)?.element).toBe(first);
     });
+
+    describe('Irregularity Level', () => {
+        // Bed-row terrain samples sit exactly on the water's own edge, so the two must
+        // move together at every Irregularity level - a mismatch would open a gap or an
+        // overlap right at the shoreline. Samples are spaced along the curve rather than
+        // at round x values, so pick whatever bed row actually landed nearest x.
+        const crossSectionSpan = (river: RiverSpline, x: number): number => {
+            const bedSamples = river.getSampledTerrainPoints(0).filter((sample) => !sample.profileOnly);
+            const nearestX = bedSamples
+                .map((sample) => sample.position.x)
+                .reduce((best, value) => (Math.abs(value - x) < Math.abs(best - x) ? value : best));
+            const zs = bedSamples
+                .filter((sample) => Math.abs(sample.position.x - nearestX) < 1e-6)
+                .map((sample) => sample.position.z);
+            return Math.max(...zs) - Math.min(...zs);
+        };
+
+        it('accepts values above 1 and keeps the water edge matched to the terrain bed edge', () => {
+            for (const level of [0, 1, 2, 3]) {
+                const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(40, 0, 0));
+                river.width = 4;
+                river.divisions = 3;
+                river.detailLevel = 2;
+                river.irregularityLevel = level;
+                river.update();
+                expect(river.irregularityLevel).toBe(level);
+
+                // Resolve the target x once, from the bed samples, and reuse it for the
+                // water buffer too - picking "nearest to 20" independently from each list
+                // can split a near-tie two different ways once the water buffer's Float32
+                // storage rounds a value that was equidistant at full precision.
+                const bedSamples = river.getSampledTerrainPoints(0).filter((sample) => !sample.profileOnly);
+                const nearestX = bedSamples
+                    .map((sample) => sample.position.x)
+                    .reduce((best, value) => (Math.abs(value - 20) < Math.abs(best - 20) ? value : best));
+                const position = river.mesh.geometry.getAttribute('position');
+                const midZs: number[] = [];
+                for (let i = 0; i < position.count; i++) {
+                    if (Math.abs(position.getX(i) - nearestX) < 1e-3) midZs.push(position.getZ(i));
+                }
+                const waterSpan = Math.max(...midZs) - Math.min(...midZs);
+                expect(Math.abs(waterSpan - crossSectionSpan(river, 20))).toBeLessThan(0.05);
+            }
+        });
+
+        it('makes higher levels noticeably more jagged, not just uniformly wider', () => {
+            const edgeVariance = (level: number): number => {
+                const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(60, 0, 0));
+                river.width = 4;
+                river.divisions = 4;
+                river.detailLevel = 2;
+                river.irregularityLevel = level;
+                const spans = [10, 20, 30, 40, 50].map((x) => crossSectionSpan(river, x));
+                const mean = spans.reduce((a, b) => a + b, 0) / spans.length;
+                return spans.reduce((a, b) => a + (b - mean) ** 2, 0) / spans.length;
+            };
+            expect(edgeVariance(2.5)).toBeGreaterThan(edgeVariance(0.3) * 4);
+        });
+
+        it('never lets the channel pinch shut, even at the maximum level', () => {
+            const river = new RiverSpline(new THREE.Vector3(0, 0, 0), new THREE.Vector3(40, 0, 0));
+            river.width = 4;
+            river.divisions = 3;
+            river.irregularityLevel = 3;
+            const spans = [10, 15, 20, 25, 30].map((x) => crossSectionSpan(river, x));
+            expect(Math.min(...spans)).toBeGreaterThan(0.3);
+        });
+    });
 });

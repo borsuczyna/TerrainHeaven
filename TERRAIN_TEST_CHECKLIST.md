@@ -44,6 +44,15 @@ group settings.
 - Move a painted tile. Its hills travel with it, snapped to the nearest paint cell.
 - Save and reload a scene painted before the lattice became world-aligned (`terrainHeightPaint` without `terrainHeightPaintSpace`). The hills must land where they were.
 
+## River irregularity
+
+- Sweep `Irregularity Level` from `0` to its new maximum (`3`). Low values should read as a gentle wander; higher values should visibly fold into sharp corners along both the water's edge and the surrounding bank, not just a wider strip.
+- At every level, zoom into the shoreline: the water polygon's edge and the terrain's bank must meet exactly, with no gap or overlap, even where the edge is jagged.
+- Push `Irregularity Level` to its maximum on a narrow river (`Width` around 1-2). The channel must never pinch shut to a sliver or self-intersect.
+- Raise `Detail Level` and `Divisions` together with a high `Irregularity Level`; the extra longitudinal samples should make the corners read as crisper, not different in shape.
+- Confirm `Bank Slope` still holds at the steepest points of an irregular bank - irregularity must not be able to push a slope past the configured maximum.
+- Save and reload a scene with `Irregularity Level` above `1`. The value and the bank shape must persist exactly.
+
 ## Quality and limits
 
 - Test `Mesh Detail` at `0.5`, `2`, and `5`.

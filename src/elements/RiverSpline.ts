@@ -9,6 +9,10 @@ import type { TerrainCutPointInput } from '../terrain/TerrainMesher';
 
 const WATER_COLOR = 0x2f6fa8;
 const WATER_SURFACE_OFFSET = 0.025;
+// How far past 1 Irregularity can be pushed. Values above 1 make the bank noise read as
+// sharp corners rather than a gentle wander; the formulas below stay slope-safe and keep
+// a minimum channel width at any value up to this cap.
+const MAX_IRREGULARITY = 3;
 
 // A river works like a Road: nodes, curve points, Divisions, connectable ends and adjustable
 // width. Its water is an overlay; unlike roads it keeps the terrain surface intact below it.
@@ -24,8 +28,10 @@ export default class RiverSpline extends WorldElement {
     // Rounds the transition at the riverbed and terrain edge. 0 is a straight
     // slope, 1 is fully eased while retaining the configured maximum angle.
     public bankSmoothing: number = 0.65;
-    // Adds deterministic variation to the bank outline and profile. Because it
-    // is derived from world position it does not flicker when the mesh rebuilds.
+    // Adds deterministic variation to the bank outline and profile - both the water's
+    // own edge and the terrain around it. Because it is derived from world position it
+    // does not flicker when the mesh rebuilds. Past 1 the noise increasingly folds into
+    // sharp corners instead of a smooth wander.
     public irregularityLevel: number = 0;
     // Controls local river terrain sampling/remeshing without increasing the
     // detail of the entire terrain.
@@ -132,16 +138,42 @@ export default class RiverSpline extends WorldElement {
         );
     }
 
-    private getIrregularityNoise(position: THREE.Vector3, channel: number): number {
-        const broad = Math.sin(position.x * 0.47 + position.z * 0.61 + channel * 2.17);
-        const fine = Math.sin(position.x * 1.31 - position.z * 1.73 + channel * 4.13);
-        return THREE.MathUtils.clamp(broad * 0.65 + fine * 0.35, -1, 1);
+    // Two components: a slow "wander" that meanders the bank gently even at low
+    // Irregularity, and a "corner" component folded through sign(x)*|x|^0.4 so its
+    // waveform snaps toward flat plateaus and back instead of rounding off - that fold is
+    // what makes the bank read as jagged, cornered noise rather than a smooth wave once
+    // Irregularity pushes it up. Both are pure functions of world position, so the
+    // pattern never flickers when the mesh rebuilds.
+    private getBankNoise(position: THREE.Vector3, channel: number): number {
+        const wander = Math.sin(position.x * 0.37 + position.z * 0.48 + channel * 2.17);
+        const cornerRaw = Math.sin(position.x * 1.9 - position.z * 2.6 + channel * 5.3)
+            + 0.5 * Math.sin(position.x * 4.1 + position.z * 3.4 + channel * 8.7);
+        const cornerFold = Math.sign(cornerRaw) * Math.pow(Math.min(1.5, Math.abs(cornerRaw)) / 1.5, 0.4);
+        return THREE.MathUtils.clamp(wander * 0.5 + cornerFold * 0.5, -1, 1);
     }
 
-    // Keep a real, lowered riverbed below the water instead of opening a boolean hole.
-    // Bank Slope is the actual angle between the bank and horizontal terrain:
-    // horizontal run = vertical depth / tan(angle).
-    public getSampledTerrainPoints(terrainSurfaceY = this.nodeA.mesh.position.y): TerrainCutPointInput[] {
+    // The water's own half-width on each side, perturbed by bank noise. This is what
+    // actually bends the water edge into corners; everything downstream (bed cross
+    // offsets, the water quad strip, the bank profile beyond it) is built from these two
+    // numbers so the water edge and the surrounding terrain always meet exactly, with no
+    // gap or overlap, however irregular they get.
+    private getChannelHalfWidths(position: THREE.Vector3): { left: number; right: number } {
+        const nominal = Math.max(0.05, this.width / 2);
+        const irregularityLevel = THREE.MathUtils.clamp(this.irregularityLevel, 0, MAX_IRREGULARITY);
+        if (irregularityLevel <= 0) return { left: nominal, right: nominal };
+        const perturb = (channel: number): number => {
+            const noise = this.getBankNoise(position, channel);
+            const fraction = THREE.MathUtils.clamp(irregularityLevel * 0.3 * noise, -0.85, 1.5);
+            return Math.max(nominal * 0.15, nominal * (1 + fraction));
+        };
+        return { left: perturb(-1), right: perturb(1) };
+    }
+
+    // The centerline, sampled finely enough (via Detail Level and Divisions) for the
+    // bank noise above to actually show up as corners rather than being smoothed away
+    // between too-sparse points. Shared by the water mesh and the terrain sampling below
+    // so both trace the same jagged line.
+    private getCenterlineSamples(): { point: THREE.Vector3; right: THREE.Vector3 }[] {
         const p0 = this.nodeA.mesh.position;
         const p1 = this.curvePointA?.mesh.position ?? p0;
         const p2 = this.curvePointB?.mesh.position ?? this.nodeB.mesh.position;
@@ -155,29 +187,41 @@ export default class RiverSpline extends WorldElement {
         const automaticDivisions = Math.min(64, Math.max(0, Math.ceil(controlLength / targetSpacing) - 1));
         const longitudinalDivisions = automaticDivisions + this._divisions;
         const points = sampleCubicBezier(p0, p1, p2, p3, longitudinalDivisions);
-        const halfWidth = Math.max(0.05, this.width / 2);
-        const minimumCrossSteps = detailLevel < 0.5 ? 1 : 2;
-        const crossSteps = Math.min(12, Math.max(minimumCrossSteps, Math.ceil(this.width / targetSpacing)));
-        const bedDepth = THREE.MathUtils.clamp(this.width * 0.25, 0.35, 4);
-        const bankSlopeDegrees = THREE.MathUtils.clamp(this.bankSlope, 1, 89);
-        const bankSmoothing = THREE.MathUtils.clamp(this.bankSmoothing, 0, 1);
-        const irregularityLevel = THREE.MathUtils.clamp(this.irregularityLevel, 0, 1);
-        const samples: TerrainCutPointInput[] = [];
-
-        for (let index = 0; index < points.length; index++) {
+        return points.map((point, index) => {
             const previous = points[Math.max(0, index - 1)];
             const next = points[Math.min(points.length - 1, index + 1)];
             const forward = new THREE.Vector3().subVectors(next, previous).normalize();
             const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
             if (right.lengthSq() < 1e-8) right.copy(this.getRightAtIndex(points, index));
-            const bedY = points[index].y - bedDepth;
+            return { point, right };
+        });
+    }
+
+    // Keep a real, lowered riverbed below the water instead of opening a boolean hole.
+    // Bank Slope is the actual angle between the bank and horizontal terrain:
+    // horizontal run = vertical depth / tan(angle).
+    public getSampledTerrainPoints(terrainSurfaceY = this.nodeA.mesh.position.y): TerrainCutPointInput[] {
+        const samplePoints = this.getCenterlineSamples();
+        const detailLevel = THREE.MathUtils.clamp(this.detailLevel, 0.1, 4);
+        const targetSpacing = 1.5 / detailLevel;
+        const minimumCrossSteps = detailLevel < 0.5 ? 1 : 2;
+        const crossSteps = Math.min(12, Math.max(minimumCrossSteps, Math.ceil(this.width / targetSpacing)));
+        const bedDepth = THREE.MathUtils.clamp(this.width * 0.25, 0.35, 4);
+        const bankSlopeDegrees = THREE.MathUtils.clamp(this.bankSlope, 1, 89);
+        const bankSmoothing = THREE.MathUtils.clamp(this.bankSmoothing, 0, 1);
+        const irregularityLevel = THREE.MathUtils.clamp(this.irregularityLevel, 0, MAX_IRREGULARITY);
+        const samples: TerrainCutPointInput[] = [];
+
+        for (const { point, right } of samplePoints) {
+            const { left: leftHalfWidth, right: rightHalfWidth } = this.getChannelHalfWidths(point);
+            const bedY = point.y - bedDepth;
             const verticalDepth = Math.max(0.01, terrainSurfaceY - bedY);
             const straightBankRun = verticalDepth / Math.tan(THREE.MathUtils.degToRad(bankSlopeDegrees));
             // Smoothstep's maximum derivative is 1.5. Expanding the run by the
             // same amount ensures smoothing never makes the bank steeper.
             const bankRun = straightBankRun * (1 + 0.5 * bankSmoothing);
-            const leftNoise = this.getIrregularityNoise(points[index], -1);
-            const rightNoise = this.getIrregularityNoise(points[index], 1);
+            const leftNoise = this.getBankNoise(point, -1);
+            const rightNoise = this.getBankNoise(point, 1);
             // Irregularity only widens the nominal profile, so it cannot make a
             // bank steeper than Bank Slope requests.
             const irregularRun = (noise: number): number => (
@@ -188,9 +232,9 @@ export default class RiverSpline extends WorldElement {
 
             for (let cross = 0; cross <= crossSteps; cross++) {
                 const crossT = cross / crossSteps;
-                const offset = THREE.MathUtils.lerp(-halfWidth, halfWidth, crossT);
+                const offset = THREE.MathUtils.lerp(-leftHalfWidth, rightHalfWidth, crossT);
                 samples.push({
-                    position: points[index].clone().addScaledVector(right, offset).setY(bedY),
+                    position: point.clone().addScaledVector(right, offset).setY(bedY),
                     radius: THREE.MathUtils.lerp(leftBankRun, rightBankRun, crossT),
                     maxSlopeDegrees: bankSlopeDegrees,
                     slopeSmoothing: bankSmoothing,
@@ -203,11 +247,12 @@ export default class RiverSpline extends WorldElement {
             for (const side of [-1, 1]) {
                 const sideNoise = side < 0 ? leftNoise : rightNoise;
                 const sideBankRun = side < 0 ? leftBankRun : rightBankRun;
+                const sideHalfWidth = side < 0 ? leftHalfWidth : rightHalfWidth;
                 for (let step = 1; step <= profileSteps; step++) {
                     const t = step / profileSteps;
                     const smoothT = t * t * (3 - 2 * t);
                     const profileT = THREE.MathUtils.lerp(t, smoothT, bankSmoothing);
-                    const verticalVariation = verticalDepth * irregularityLevel * 0.08
+                    const verticalVariation = verticalDepth * Math.min(irregularityLevel, 1.5) * 0.08
                         * sideNoise * Math.sin(Math.PI * t);
                     const profileY = THREE.MathUtils.clamp(
                         THREE.MathUtils.lerp(bedY, terrainSurfaceY, profileT) + verticalVariation,
@@ -215,8 +260,8 @@ export default class RiverSpline extends WorldElement {
                         terrainSurfaceY,
                     );
                     samples.push({
-                        position: points[index].clone()
-                            .addScaledVector(right, side * (halfWidth + sideBankRun * t))
+                        position: point.clone()
+                            .addScaledVector(right, side * (sideHalfWidth + sideBankRun * t))
                             .setY(profileY),
                         radius: 0,
                         profileOnly: true,
@@ -235,27 +280,30 @@ export default class RiverSpline extends WorldElement {
         return new THREE.Vector3().crossVectors(direction, up).normalize();
     }
 
-    // Same full-width quad strip as the surface geometry, so getOccupiedArea() below cuts
-    // the terrain exactly where the water surface will sit - no gap, no overlap.
+    // Follows the same centerline and per-side half-widths as the terrain sampling
+    // above, so getOccupiedArea() below cuts the terrain exactly where the water surface
+    // sits - no gap, no overlap - and the water's own edge shows the same bank noise as
+    // the ground around it instead of staying a plain straight-sided strip.
     private buildSurfaceTriangles(): Triangle[] {
-        const points = this.getBezierCurvePoints();
-        if (points.length < 2) return [];
+        const samples = this.getCenterlineSamples();
+        if (samples.length < 2) return [];
 
-        const halfWidth = Math.max(0.05, this.width / 2);
         const triangles: Triangle[] = [];
-        for (let i = 0; i < points.length - 1; i++) {
-            const rightA = this.getRightAtIndex(points, i);
-            const rightB = this.getRightAtIndex(points, i + 1);
-            const aLeft = points[i].clone().addScaledVector(rightA, -halfWidth);
-            const aRight = points[i].clone().addScaledVector(rightA, halfWidth);
-            const bLeft = points[i + 1].clone().addScaledVector(rightB, -halfWidth);
-            const bRight = points[i + 1].clone().addScaledVector(rightB, halfWidth);
+        for (let i = 0; i < samples.length - 1; i++) {
+            const a = samples[i];
+            const b = samples[i + 1];
+            const widthsA = this.getChannelHalfWidths(a.point);
+            const widthsB = this.getChannelHalfWidths(b.point);
+            const aLeft = a.point.clone().addScaledVector(a.right, -widthsA.left);
+            const aRight = a.point.clone().addScaledVector(a.right, widthsA.right);
+            const bLeft = b.point.clone().addScaledVector(b.right, -widthsB.left);
+            const bRight = b.point.clone().addScaledVector(b.right, widthsB.right);
             aLeft.y += WATER_SURFACE_OFFSET;
             aRight.y += WATER_SURFACE_OFFSET;
             bLeft.y += WATER_SURFACE_OFFSET;
             bRight.y += WATER_SURFACE_OFFSET;
-            const uA = i / (points.length - 1);
-            const uB = (i + 1) / (points.length - 1);
+            const uA = i / (samples.length - 1);
+            const uB = (i + 1) / (samples.length - 1);
             triangles.push(new Triangle(
                 aLeft, aRight, bRight,
                 new THREE.Vector2(0, uA), new THREE.Vector2(1, uA), new THREE.Vector2(1, uB),
@@ -388,9 +436,9 @@ export default class RiverSpline extends WorldElement {
                         type: 'number',
                         label: 'Irregularity Level',
                         get: () => self.irregularityLevel,
-                        set: (v: number) => { self.irregularityLevel = THREE.MathUtils.clamp(v, 0, 1); self.update(); },
+                        set: (v: number) => { self.irregularityLevel = THREE.MathUtils.clamp(v, 0, MAX_IRREGULARITY); self.update(); },
                         min: 0,
-                        max: 1,
+                        max: MAX_IRREGULARITY,
                         step: 0.05,
                     },
                     {
@@ -440,7 +488,7 @@ export default class RiverSpline extends WorldElement {
         river.width = Math.max(0.1, data.width ?? 4);
         river.bankSlope = THREE.MathUtils.clamp(data.riverBankSlope ?? 70, 1, 89);
         river.bankSmoothing = THREE.MathUtils.clamp(data.riverBankSmoothing ?? 0.65, 0, 1);
-        river.irregularityLevel = THREE.MathUtils.clamp(data.riverIrregularityLevel ?? 0, 0, 1);
+        river.irregularityLevel = THREE.MathUtils.clamp(data.riverIrregularityLevel ?? 0, 0, MAX_IRREGULARITY);
         river.detailLevel = THREE.MathUtils.clamp(data.riverDetailLevel ?? 1, 0.1, 4);
         if (data.divisions && data.divisions > 0) {
             river.divisions = data.divisions;
