@@ -50,12 +50,12 @@ a:focus,
 }
 
 #header-toolbar {
-    left: 12px;
+    left: auto;
     right: 12px;
     top: 10px;
     height: 50px;
     box-sizing: border-box;
-    justify-content: space-between;
+    justify-content: flex-end;
     padding: 0 10px;
     background: var(--ui-bg);
     border: 1px solid var(--ui-border);

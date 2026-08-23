@@ -107,13 +107,14 @@ export interface ElementData {
     fencePostSides?: number;
     fenceMaxAngleStep?: number;
     // Building-specific
-    buildingSegments?: { offsetX: number; offsetZ: number; width: number; depth: number }[];
+    buildingSegments?: { x: number; y: number; z: number; width: number; depth: number; separateRoof?: boolean }[];
     buildingWallHeight?: number;
     buildingRoofType?: string;
     buildingRoofOverhang?: number;
     buildingRoofRidgeHeight?: number;
     buildingRoofThickness?: number;
     buildingRailingHeight?: number;
+    buildingRailingThickness?: number;
     buildingCutInGround?: boolean;
     buildingOpenings?: { x: number; y: number; z: number; type: string; width: number; height: number; depth: number }[];
 }

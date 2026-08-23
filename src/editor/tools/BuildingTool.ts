@@ -40,7 +40,7 @@ export default class BuildingTool implements Tool {
         const target = new THREE.Vector3();
         if (!this.raycaster.ray.intersectPlane(this.groundPlane, target)) return false;
 
-        const building = new Building(target, { offsetX: 0, offsetZ: 0, width: DEFAULT_WIDTH, depth: DEFAULT_DEPTH });
+        const building = new Building(target, { width: DEFAULT_WIDTH, depth: DEFAULT_DEPTH });
         this.presets.applyDefault(building);
         this.scene.add(building);
         this.history.record('Add Building');

@@ -43,14 +43,9 @@ export default class BuildingSegmentTool implements Tool {
         // walls are always axis-aligned (segments are AABB rectangles, and a union of
         // AABBs only ever produces axis-aligned edges), so the normal is always a clean
         // cardinal direction and this never needs to account for an angled wall.
-        const anchor = hit.building.getAnchorPosition();
         const center = hit.point.clone().addScaledVector(hit.outward, NEW_SEGMENT_SIZE / 2);
-        hit.building.addSegment({
-            offsetX: center.x - anchor.x,
-            offsetZ: center.z - anchor.z,
-            width: NEW_SEGMENT_SIZE,
-            depth: NEW_SEGMENT_SIZE,
-        });
+        center.y = hit.building.getAnchorPosition().y;
+        hit.building.addSegment(center, NEW_SEGMENT_SIZE, NEW_SEGMENT_SIZE);
         this.history.record('Add Building Segment');
         return true;
     }
