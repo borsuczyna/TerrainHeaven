@@ -112,8 +112,10 @@ export interface ElementData {
     buildingRoofType?: string;
     buildingRoofOverhang?: number;
     buildingRoofRidgeHeight?: number;
+    buildingRoofThickness?: number;
     buildingRailingHeight?: number;
-    buildingOpenings?: { x: number; y: number; z: number; type: string; width: number; height: number; sill: number }[];
+    buildingCutInGround?: boolean;
+    buildingOpenings?: { x: number; y: number; z: number; type: string; width: number; height: number; depth: number }[];
 }
 
 interface Connection {

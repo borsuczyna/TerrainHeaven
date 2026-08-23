@@ -30,7 +30,7 @@ interface OpeningState {
     type: OpeningType;
     width: number;
     height: number;
-    sill: number;
+    depth: number;
 }
 
 interface FootprintPolygon {
@@ -41,6 +41,15 @@ interface FootprintPolygon {
 interface WallEdge {
     a: Point2;
     b: Point2;
+}
+
+interface WallOpening {
+    u: number;
+    width: number;
+    height: number;
+    sill: number;
+    depth: number;
+    type: OpeningType;
 }
 
 const OPENING_NODE_COLOR = 0xffa64d;
@@ -56,19 +65,30 @@ const WALL_SNAP_MARGIN = 0.3;
 // dragging the whole building or an individual opening both fall out of the ordinary
 // multi-node translate path other elements already use - see PolygonTerrain for the same
 // pattern and why it matters for GizmoManager's group-drag behaviour). Nodes 1+ are one per
-// opening, in the same order as `openings`.
+// opening, in the same order as `openings`. An opening's sill height is never stored
+// separately from its node's Y - see collectOpeningsForEdge - so dragging it up/down (via
+// the gizmo or the Properties panel's Position field) always moves the cut hole; a stored,
+// independent sill value previously went stale the moment the node moved.
 export default class Building extends WorldElement {
     public wallHeight = 3;
     public roofType: RoofType = 'flat';
     public roofOverhang = 0.4;
     public roofRidgeHeight = 1.6;
+    public roofThickness = 0.15;
     public railingHeight = 1;
+    // Off by default: a building sitting on top of a rectangular Terrain tile used to
+    // always punch a hole under itself with no way to opt out, which is wrong for e.g. a
+    // building meant to float above a slope or sit on an existing platform.
+    public cutInGround = false;
 
     private segments: BuildingSegment[];
     private openings: OpeningState[] = [];
     private wallUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
     private roofUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
     private railingUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    private gableWallUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    private windowUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    private doorUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 
     constructor(anchor: THREE.Vector3, firstSegment: BuildingSegment) {
         super();
@@ -89,6 +109,10 @@ export default class Building extends WorldElement {
             material.side = THREE.DoubleSide;
             material.needsUpdate = true;
         }
+    }
+
+    public override cutsTerrainSurface(): boolean {
+        return this.cutInGround;
     }
 
     private getAnchor(): THREE.Vector3 {
@@ -143,8 +167,8 @@ export default class Building extends WorldElement {
         const nodeIndex = this.nodes.length;
         this.setNode(nodeIndex, new WorldNode(worldPosition.clone(), OPENING_NODE_COLOR));
         this.openings.push(type === 'door'
-            ? { type, width: 0.9, height: 2.05, sill: 0 }
-            : { type, width: 1.2, height: 1.2, sill: 0.9 });
+            ? { type, width: 0.9, height: 2.05, depth: 0.1 }
+            : { type, width: 1.2, height: 1.2, depth: 0.1 });
         this.update();
     }
 
@@ -169,7 +193,7 @@ export default class Building extends WorldElement {
     }
 
     public override getUVGroups(): string[] {
-        return ['walls', 'roof', 'railing'];
+        return ['walls', 'roof', 'railing', 'gableWalls', 'windows', 'doors'];
     }
 
     public override getUVTransform(group: string): UVTransform {
@@ -191,7 +215,10 @@ export default class Building extends WorldElement {
         };
         if (group === 'walls') this.wallUV = next;
         else if (group === 'roof') this.roofUV = next;
-        else this.railingUV = next;
+        else if (group === 'railing') this.railingUV = next;
+        else if (group === 'gableWalls') this.gableWallUV = next;
+        else if (group === 'windows') this.windowUV = next;
+        else this.doorUV = next;
         this.update();
     }
 
@@ -199,6 +226,9 @@ export default class Building extends WorldElement {
         if (group === 'walls') return this.wallUV;
         if (group === 'roof') return this.roofUV;
         if (group === 'railing') return this.railingUV;
+        if (group === 'gableWalls') return this.gableWallUV;
+        if (group === 'windows') return this.windowUV;
+        if (group === 'doors') return this.doorUV;
         return null;
     }
 
@@ -219,19 +249,27 @@ export default class Building extends WorldElement {
         const edges = this.collectWallEdges(polygons);
         const anchor = this.getAnchor();
 
-        const walls = this.buildWallStrip(edges, anchor.y, this.wallHeight, this.wallUV, true);
+        const windows: Triangle[] = [];
+        const doors: Triangle[] = [];
+        const walls = this.buildWallStrip(edges, anchor.y, this.wallHeight, this.wallUV, true, windows, doors);
         const groups: GeometryGroup[] = [{ name: 'walls', triangles: walls }];
 
         if (this.roofType === 'flat') {
-            groups.push({ name: 'roof', triangles: this.buildFlatRoofCap(polygons, anchor.y + this.wallHeight) });
+            groups.push({ name: 'roof', triangles: this.buildFlatRoofSlab(polygons, edges, anchor.y + this.wallHeight) });
             groups.push({
                 name: 'railing',
-                triangles: this.buildWallStrip(edges, anchor.y + this.wallHeight, Math.max(0.1, this.railingHeight), this.railingUV, false),
+                triangles: this.buildWallStrip(edges, anchor.y + this.wallHeight, Math.max(0.1, this.railingHeight), this.railingUV, false, [], []),
             });
+            groups.push({ name: 'gableWalls', triangles: [] });
         } else {
-            groups.push({ name: 'roof', triangles: this.buildGableRoof(polygons, anchor.y + this.wallHeight) });
+            const gableWalls: Triangle[] = [];
+            groups.push({ name: 'roof', triangles: this.buildGableRoof(polygons, anchor.y + this.wallHeight, gableWalls) });
             groups.push({ name: 'railing', triangles: [] });
+            groups.push({ name: 'gableWalls', triangles: gableWalls });
         }
+
+        groups.push({ name: 'windows', triangles: windows });
+        groups.push({ name: 'doors', triangles: doors });
 
         return groups;
     }
@@ -311,12 +349,27 @@ export default class Building extends WorldElement {
         return edges;
     }
 
+    // Triangulates a footprint polygon and corrects triangle winding so the top face
+    // consistently faces +Y - THREE.ShapeUtils.triangulateShape's own winding depends on
+    // the contour's 2D orientation, which the (x, z) -> (x, worldY, z) mapping here doesn't
+    // automatically line up with "faces up" (see PolygonTerrain for the same correction on
+    // the same kind of footprint-to-3D mapping).
     private triangulatePolygon(polygon: FootprintPolygon): [THREE.Vector2, THREE.Vector2, THREE.Vector2][] {
         const contour = polygon.contour.map(([x, z]) => new THREE.Vector2(x, z));
         const holes = polygon.holes.map((hole) => hole.map(([x, z]) => new THREE.Vector2(x, z)));
         const indices = THREE.ShapeUtils.triangulateShape(contour, holes);
         const points = [...contour, ...holes.flat()];
-        return indices.map(([ia, ib, ic]) => [points[ia], points[ib], points[ic]]);
+        return indices.map(([ia, ib, ic]) => {
+            const pa = points[ia];
+            let pb = points[ib];
+            let pc = points[ic];
+            if (this.signedArea2D(pa, pb, pc) > 0) [pb, pc] = [pc, pb];
+            return [pa, pb, pc];
+        });
+    }
+
+    private signedArea2D(a: THREE.Vector2, b: THREE.Vector2, c: THREE.Vector2): number {
+        return ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2;
     }
 
     // --- walls / railing (shared box-strip extrusion) -------------------------------
@@ -324,8 +377,18 @@ export default class Building extends WorldElement {
     // Builds a vertical strip of quads (optionally with rectangular holes cut in, for
     // window/door openings) along a set of world-space edges. Used for both the main walls
     // and the flat-roof railing - geometrically identical operation, just a different base
-    // height, strip height, and whether openings apply.
-    private buildWallStrip(edges: WallEdge[], baseY: number, height: number, uv: UVTransform, withOpenings: boolean): Triangle[] {
+    // height, strip height, and whether openings apply. windowsOut/doorsOut collect the 3D
+    // frame/pane inserts for any opening actually cut (see appendOpeningInsert); pass empty
+    // arrays for strips that never carry openings (the railing).
+    private buildWallStrip(
+        edges: WallEdge[],
+        baseY: number,
+        height: number,
+        uv: UVTransform,
+        withOpenings: boolean,
+        windowsOut: Triangle[],
+        doorsOut: Triangle[],
+    ): Triangle[] {
         if (edges.length === 0 || height <= 0) return [];
         const centroid = this.computeEdgeCentroid(edges);
         const triangles: Triangle[] = [];
@@ -342,7 +405,7 @@ export default class Building extends WorldElement {
             if (faceNormal.dot(mid.clone().sub(centroid)) < 0) {
                 [a2, b2] = [b2, a2];
             }
-            this.appendWallSegment(triangles, a2, b2, baseY, height, uv, withOpenings ? this.collectOpeningsForEdge(a2, b2) : []);
+            this.appendWallSegment(triangles, a2, b2, baseY, height, uv, withOpenings ? this.collectOpeningsForEdge(a2, b2) : [], windowsOut, doorsOut);
         }
         return triangles;
     }
@@ -360,11 +423,16 @@ export default class Building extends WorldElement {
         baseY: number,
         height: number,
         uv: UVTransform,
-        openings: { u: number; width: number; height: number; sill: number }[],
+        openings: WallOpening[],
+        windowsOut: Triangle[],
+        doorsOut: Triangle[],
     ): void {
         const dir = new THREE.Vector3(b2[0] - a2[0], 0, b2[1] - a2[1]);
         const length = dir.length();
         dir.normalize();
+        // a2->b2 has already been oriented outward by buildWallStrip's centroid check, so
+        // this cross-style normal is guaranteed to point away from the building here too.
+        const outward = new THREE.Vector3(-dir.z, 0, dir.x);
         const point3 = (u: number, v: number): THREE.Vector3 => new THREE.Vector3(a2[0] + dir.x * u, baseY + v, a2[1] + dir.z * u);
         const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
         const addQuad = (u0: number, v0: number, u1: number, v1: number): void => {
@@ -385,6 +453,11 @@ export default class Building extends WorldElement {
             const v0 = THREE.MathUtils.clamp(opening.sill, 0.02, height - 0.05);
             const v1 = THREE.MathUtils.clamp(opening.sill + opening.height, v0 + 0.05, height - 0.02);
             holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
+            this.appendOpeningInsert(
+                opening.type === 'door' ? doorsOut : windowsOut,
+                point3, outward, u0, v0, u1, v1, opening.depth,
+                opening.type === 'door' ? this.doorUV : this.windowUV,
+            );
         }
 
         if (holes.length === 0) {
@@ -406,17 +479,52 @@ export default class Building extends WorldElement {
         }
     }
 
+    // A window/door is never just an empty hole: this builds the recessed pane (the glass
+    // or door slab, its own texturable surface) set `depth` back from the wall's outward
+    // face, plus reveal strips closing the four sides of the recess so the cut reads as a
+    // real frame instead of a hole you can see straight through.
+    private appendOpeningInsert(
+        out: Triangle[],
+        point3: (u: number, v: number) => THREE.Vector3,
+        outward: THREE.Vector3,
+        u0: number,
+        v0: number,
+        u1: number,
+        v1: number,
+        depth: number,
+        uv: UVTransform,
+    ): void {
+        const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
+        const inward = outward.clone().multiplyScalar(-Math.max(0.02, depth));
+        const outer = [point3(u0, v0), point3(u1, v0), point3(u1, v1), point3(u0, v1)];
+        const inner = outer.map((p) => p.clone().add(inward));
+
+        // Recessed pane - same winding as the outer loop (a pure translation preserves the
+        // outward-facing normal), so it faces the same way the wall's own surface does.
+        out.push(new Triangle(inner[0], inner[1], inner[2], uvFor(0, 0), uvFor(1, 0), uvFor(1, 1)));
+        out.push(new Triangle(inner[0], inner[2], inner[3], uvFor(0, 0), uvFor(1, 1), uvFor(0, 1)));
+
+        for (let i = 0; i < 4; i++) {
+            const j = (i + 1) % 4;
+            out.push(new Triangle(outer[j], outer[i], inner[i], uvFor(0, 0), uvFor(1, 0), uvFor(1, 1)));
+            out.push(new Triangle(outer[j], inner[i], inner[j], uvFor(0, 0), uvFor(1, 1), uvFor(0, 1)));
+        }
+    }
+
     // Position-based, not id-based: an opening just carries a world-space node, so it is
     // matched against whichever wall it currently sits closest to every time geometry is
     // rebuilt. Moving the opening (or reshaping the segment the wall belongs to) never
     // leaves a stale reference to clean up - the opening simply stops cutting a hole
-    // anywhere once it's far enough from every wall.
-    private collectOpeningsForEdge(a2: Point2, b2: Point2): { u: number; width: number; height: number; sill: number }[] {
+    // anywhere once it's far enough from every wall. The sill height is read directly from
+    // the node's own Y (relative to the building's base) rather than a separately stored
+    // field, which is what makes dragging the node up/down actually move the hole.
+    private collectOpeningsForEdge(a2: Point2, b2: Point2): WallOpening[] {
         const length = Math.hypot(b2[0] - a2[0], b2[1] - a2[1]);
         if (length < 1e-4) return [];
         const dx = (b2[0] - a2[0]) / length;
         const dz = (b2[1] - a2[1]) / length;
-        const result: { u: number; width: number; height: number; sill: number }[] = [];
+        const anchorY = this.getAnchor().y;
+        const result: WallOpening[] = [];
 
         for (let i = 0; i < this.openings.length; i++) {
             const node = this.nodes[i + 1];
@@ -429,23 +537,37 @@ export default class Building extends WorldElement {
             const perp = Math.abs(relX * dz - relZ * dx);
             if (perp > WALL_SNAP_DISTANCE) continue;
             const opening = this.openings[i];
-            result.push({ u: THREE.MathUtils.clamp(t, 0, length), width: opening.width, height: opening.height, sill: opening.sill });
+            result.push({
+                u: THREE.MathUtils.clamp(t, 0, length),
+                width: opening.width,
+                height: opening.height,
+                sill: pos.y - anchorY,
+                depth: opening.depth,
+                type: opening.type,
+            });
         }
         return result;
     }
 
     // --- roofs -------------------------------------------------------------------
 
-    private buildFlatRoofCap(polygons: FootprintPolygon[], y: number): Triangle[] {
+    private buildFlatRoofSlab(polygons: FootprintPolygon[], edges: WallEdge[], topY: number): Triangle[] {
+        const thickness = Math.max(0.02, this.roofThickness);
+        const bottomY = topY - thickness;
         const uv = this.roofUV;
-        const triangles: Triangle[] = [];
         const uvFor = (p: THREE.Vector2): THREE.Vector2 => new THREE.Vector2(p.x * 0.2 * uv.scaleX + uv.offsetX, p.y * 0.2 * uv.scaleY + uv.offsetY);
+        const triangles: Triangle[] = [];
         for (const polygon of polygons) {
             for (const [pa, pb, pc] of this.triangulatePolygon(polygon)) {
-                const at = (p: THREE.Vector2): THREE.Vector3 => new THREE.Vector3(p.x, y, p.y);
-                triangles.push(new Triangle(at(pa), at(pb), at(pc), uvFor(pa), uvFor(pb), uvFor(pc)));
+                const at = (p: THREE.Vector2, y: number): THREE.Vector3 => new THREE.Vector3(p.x, y, p.y);
+                triangles.push(new Triangle(at(pa, topY), at(pb, topY), at(pc, topY), uvFor(pa), uvFor(pb), uvFor(pc)));
+                triangles.push(new Triangle(at(pa, bottomY), at(pc, bottomY), at(pb, bottomY), uvFor(pa), uvFor(pc), uvFor(pb)));
             }
         }
+        // The fascia closing the slab's outer (and any inner-hole) edges is the exact same
+        // vertical box-strip operation the walls and railing already use - just spanning
+        // from the underside up to the top surface instead of from the ground up.
+        triangles.push(...this.buildWallStrip(edges, bottomY, thickness, uv, false, [], []));
         return triangles;
     }
 
@@ -454,7 +576,7 @@ export default class Building extends WorldElement {
     // roof covering the full bounding rectangle rather than a true hip/valley roof over
     // each wing - a deliberate simplification real hip-roof geometry (a full straight-
     // skeleton solve) isn't worth the complexity for a level editor's prop building.
-    private buildGableRoof(polygons: FootprintPolygon[], baseY: number): Triangle[] {
+    private buildGableRoof(polygons: FootprintPolygon[], baseY: number, gableWallsOut: Triangle[]): Triangle[] {
         let minX = Number.POSITIVE_INFINITY;
         let maxX = Number.NEGATIVE_INFINITY;
         let minZ = Number.POSITIVE_INFINITY;
@@ -476,44 +598,62 @@ export default class Building extends WorldElement {
         const halfDepth = (maxZ - minZ) / 2 + overhang;
         const ridgeY = baseY + Math.max(0.1, this.roofRidgeHeight);
         const ridgeAlongX = maxX - minX >= maxZ - minZ;
+        const thickness = Math.max(0.02, this.roofThickness);
 
         const uv = this.roofUV;
+        const gableUv = this.gableWallUV;
         const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
+        const gableUvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * gableUv.scaleX + gableUv.offsetX, v * gableUv.scaleY + gableUv.offsetY);
         const triangles: Triangle[] = [];
-        const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): void => {
-            triangles.push(new Triangle(a, b, c, uvFor(0, 0), uvFor(1, 0), uvFor(1, 1)));
-            triangles.push(new Triangle(a, c, d, uvFor(0, 0), uvFor(1, 1), uvFor(0, 1)));
-        };
-        const addTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): void => {
-            triangles.push(new Triangle(a, b, c, uvFor(0, 0), uvFor(1, 0), uvFor(0.5, 1)));
+
+        // Extrudes one already-correctly-wound sloped quad into a real slab: the given top
+        // face, a bottom face offset along the panel's own normal (so the slab keeps
+        // uniform thickness across the slope rather than a fixed vertical offset), and
+        // fascia strips closing all four sides - this is what gives the overhang real 3D
+        // depth instead of an infinitely thin plane with the sky visible underneath it.
+        const addThickPanel = (corners: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3]): void => {
+            const normal = corners[1].clone().sub(corners[0]).cross(corners[2].clone().sub(corners[0])).normalize();
+            const offset = normal.multiplyScalar(-thickness);
+            const bottom = corners.map((c) => c.clone().add(offset)) as [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
+            triangles.push(new Triangle(corners[0], corners[1], corners[2], uvFor(0, 0), uvFor(1, 0), uvFor(1, 1)));
+            triangles.push(new Triangle(corners[0], corners[2], corners[3], uvFor(0, 0), uvFor(1, 1), uvFor(0, 1)));
+            triangles.push(new Triangle(bottom[2], bottom[1], bottom[0], uvFor(1, 1), uvFor(1, 0), uvFor(0, 0)));
+            triangles.push(new Triangle(bottom[3], bottom[2], bottom[0], uvFor(0, 1), uvFor(1, 1), uvFor(0, 0)));
+            for (let i = 0; i < 4; i++) {
+                const j = (i + 1) % 4;
+                triangles.push(new Triangle(corners[j], corners[i], bottom[i], uvFor(0, 0), uvFor(1, 0), uvFor(1, 1)));
+                triangles.push(new Triangle(corners[j], bottom[i], bottom[j], uvFor(0, 0), uvFor(1, 1), uvFor(0, 1)));
+            }
         };
 
-        // The two branches below are mirror images of each other (ridge along X vs along
-        // Z), but swapping which axis is which flips handedness in a right-handed Y-up
-        // system - a vertex order that winds outward-facing normals for the slope quads in
-        // one branch winds them inward in the other (and vice versa for the gable-end
-        // triangles). Each branch below has its quad/triangle argument order individually
-        // verified (via the cross-product of its edges) to face outward, rather than
-        // mechanically mirrored from the other, which is what produced inside-out roof
-        // faces before.
+        // The triangular "attic wall" filling the gap between the flat wall-top and the two
+        // roof slopes - its own geometry group (not part of 'roof'), so it can carry a
+        // different texture than the sloped panels.
+        const addGableWall = (a: THREE.Vector3, b: THREE.Vector3, apex: THREE.Vector3): void => {
+            gableWallsOut.push(new Triangle(a, b, apex, gableUvFor(0, 0), gableUvFor(1, 0), gableUvFor(0.5, 1)));
+        };
+
+        // See buildGableRoof's own note on the ridgeAlongX/ridgeAlongZ handedness flip:
+        // each branch's point order below is individually verified outward-facing, not
+        // mirrored from the other.
         if (ridgeAlongX) {
             const eaveNear = [new THREE.Vector3(cx - halfWidth, baseY, cz - halfDepth), new THREE.Vector3(cx + halfWidth, baseY, cz - halfDepth)];
             const eaveFar = [new THREE.Vector3(cx + halfWidth, baseY, cz + halfDepth), new THREE.Vector3(cx - halfWidth, baseY, cz + halfDepth)];
             const ridgeNear = new THREE.Vector3(cx - halfWidth, ridgeY, cz);
             const ridgeFar = new THREE.Vector3(cx + halfWidth, ridgeY, cz);
-            addQuad(ridgeNear, ridgeFar, eaveNear[1], eaveNear[0]);
-            addQuad(ridgeFar, ridgeNear, eaveFar[1], eaveFar[0]);
-            addTri(eaveNear[0], eaveFar[1], ridgeNear);
-            addTri(eaveNear[1], ridgeFar, eaveFar[0]);
+            addThickPanel([ridgeNear, ridgeFar, eaveNear[1], eaveNear[0]]);
+            addThickPanel([ridgeFar, ridgeNear, eaveFar[1], eaveFar[0]]);
+            addGableWall(eaveNear[0], eaveFar[1], ridgeNear);
+            addGableWall(eaveNear[1], ridgeFar, eaveFar[0]);
         } else {
             const eaveNear = [new THREE.Vector3(cx - halfWidth, baseY, cz - halfDepth), new THREE.Vector3(cx - halfWidth, baseY, cz + halfDepth)];
             const eaveFar = [new THREE.Vector3(cx + halfWidth, baseY, cz + halfDepth), new THREE.Vector3(cx + halfWidth, baseY, cz - halfDepth)];
             const ridgeNear = new THREE.Vector3(cx, ridgeY, cz - halfDepth);
             const ridgeFar = new THREE.Vector3(cx, ridgeY, cz + halfDepth);
-            addQuad(eaveNear[0], eaveNear[1], ridgeFar, ridgeNear);
-            addQuad(eaveFar[0], eaveFar[1], ridgeNear, ridgeFar);
-            addTri(eaveNear[0], ridgeNear, eaveFar[1]);
-            addTri(eaveNear[1], eaveFar[0], ridgeFar);
+            addThickPanel([eaveNear[0], eaveNear[1], ridgeFar, ridgeNear]);
+            addThickPanel([eaveFar[0], eaveFar[1], ridgeNear, ridgeFar]);
+            addGableWall(eaveNear[0], ridgeNear, eaveFar[1]);
+            addGableWall(eaveNear[1], eaveFar[0], ridgeFar);
         }
 
         return triangles;
@@ -530,16 +670,25 @@ export default class Building extends WorldElement {
             nodes: [{ x: anchor.x, y: anchor.y, z: anchor.z }],
             textures,
             textureRotations,
-            uvTransforms: { walls: { ...this.wallUV }, roof: { ...this.roofUV }, railing: { ...this.railingUV } },
+            uvTransforms: {
+                walls: { ...this.wallUV },
+                roof: { ...this.roofUV },
+                railing: { ...this.railingUV },
+                gableWalls: { ...this.gableWallUV },
+                windows: { ...this.windowUV },
+                doors: { ...this.doorUV },
+            },
             buildingSegments: this.segments.map((segment) => ({ ...segment })),
             buildingWallHeight: this.wallHeight,
             buildingRoofType: this.roofType,
             buildingRoofOverhang: this.roofOverhang,
             buildingRoofRidgeHeight: this.roofRidgeHeight,
+            buildingRoofThickness: this.roofThickness,
             buildingRailingHeight: this.railingHeight,
+            buildingCutInGround: this.cutInGround,
             buildingOpenings: this.openings.map((opening, index) => {
                 const position = this.getOpeningNode(index).mesh.position;
-                return { x: position.x, y: position.y, z: position.z, type: opening.type, width: opening.width, height: opening.height, sill: opening.sill };
+                return { x: position.x, y: position.y, z: position.z, type: opening.type, width: opening.width, height: opening.height, depth: opening.depth };
             }),
         };
     }
@@ -558,7 +707,9 @@ export default class Building extends WorldElement {
         building.roofType = data.buildingRoofType === 'gable' ? 'gable' : 'flat';
         building.roofOverhang = Math.max(0, data.buildingRoofOverhang ?? 0.4);
         building.roofRidgeHeight = Math.max(0.1, data.buildingRoofRidgeHeight ?? 1.6);
+        building.roofThickness = Math.max(0.02, data.buildingRoofThickness ?? 0.15);
         building.railingHeight = Math.max(0.1, data.buildingRailingHeight ?? 1);
+        building.cutInGround = data.buildingCutInGround ?? false;
 
         for (const opening of data.buildingOpenings ?? []) {
             const nodeIndex = building.nodes.length;
@@ -567,7 +718,7 @@ export default class Building extends WorldElement {
                 type: opening.type === 'door' ? 'door' : 'window',
                 width: Math.max(0.2, opening.width),
                 height: Math.max(0.2, opening.height),
-                sill: Math.max(0, opening.sill),
+                depth: Math.max(0.02, opening.depth ?? 0.1),
             });
         }
 
@@ -575,6 +726,9 @@ export default class Building extends WorldElement {
         if (uv?.walls) building.wallUV = { ...uv.walls };
         if (uv?.roof) building.roofUV = { ...uv.roof };
         if (uv?.railing) building.railingUV = { ...uv.railing };
+        if (uv?.gableWalls) building.gableWallUV = { ...uv.gableWalls };
+        if (uv?.windows) building.windowUV = { ...uv.windows };
+        if (uv?.doors) building.doorUV = { ...uv.doors };
         return building;
     }
 
@@ -594,6 +748,12 @@ export default class Building extends WorldElement {
                 label: 'Structure',
                 properties: [
                     {
+                        type: 'boolean',
+                        label: 'Cut Ground',
+                        get: () => self.cutInGround,
+                        set: (value: boolean) => { self.cutInGround = value; self.update(); },
+                    },
+                    {
                         type: 'number',
                         label: 'Wall Height',
                         get: () => self.wallHeight,
@@ -608,6 +768,15 @@ export default class Building extends WorldElement {
                         options: [{ label: 'Flat (Railing)', value: 'flat' }, { label: 'Gable (Triangular)', value: 'gable' }],
                         get: () => self.roofType,
                         set: (value: string) => { self.roofType = value === 'gable' ? 'gable' : 'flat'; self.update(); self.onPropertiesChanged?.(); },
+                    },
+                    {
+                        type: 'number',
+                        label: 'Roof Thickness',
+                        get: () => self.roofThickness,
+                        set: (value: number) => { self.roofThickness = Math.max(0.02, value); self.update(); },
+                        min: 0.02,
+                        max: 1,
+                        step: 0.01,
                     },
                     ...(self.roofType === 'flat' ? [{
                         type: 'number' as const,
@@ -669,7 +838,22 @@ export default class Building extends WorldElement {
                     { type: 'vector3', label: 'Position', get: () => node.mesh.position.clone(), set: (v: THREE.Vector3) => { node.update(v); self.update(); } },
                     { type: 'number', label: 'Width', get: () => opening.width, set: (v: number) => { opening.width = Math.max(0.2, v); self.update(); }, min: 0.2, step: 0.05 },
                     { type: 'number', label: 'Height', get: () => opening.height, set: (v: number) => { opening.height = Math.max(0.2, v); self.update(); }, min: 0.2, step: 0.05 },
-                    { type: 'number', label: 'Sill Height', get: () => opening.sill, set: (v: number) => { opening.sill = Math.max(0, v); self.update(); }, min: 0, step: 0.05 },
+                    {
+                        type: 'number',
+                        label: 'Sill Height',
+                        // Derived from the node's own Y (relative to the building's base),
+                        // never a separate field - see the class-level note on why.
+                        get: () => node.mesh.position.y - self.getAnchor().y,
+                        set: (v: number) => {
+                            const position = node.mesh.position.clone();
+                            position.y = self.getAnchor().y + Math.max(0, v);
+                            node.update(position);
+                            self.update();
+                        },
+                        min: 0,
+                        step: 0.05,
+                    },
+                    { type: 'number', label: 'Depth', get: () => opening.depth, set: (v: number) => { opening.depth = Math.max(0.02, v); self.update(); }, min: 0.02, max: 1, step: 0.01 },
                     { type: 'button', label: 'Remove', onClick: () => self.removeOpening(index) },
                 ],
             });
