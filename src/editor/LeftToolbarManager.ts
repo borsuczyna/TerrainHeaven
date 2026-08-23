@@ -17,6 +17,9 @@ import HeightPaintTool from './tools/HeightPaintTool';
 import FenceTool from './tools/FenceTool';
 import MeshTool from './tools/MeshTool';
 import MeasureTool from './tools/MeasureTool';
+import BuildingTool from './tools/BuildingTool';
+import BuildingSegmentTool from './tools/BuildingSegmentTool';
+import BuildingOpeningTool from './tools/BuildingOpeningTool';
 import PresetPanel from './panels/PresetPanel';
 
 @singleton()
@@ -39,6 +42,9 @@ export default class LeftToolbarManager {
         @inject(FenceTool) private readonly fenceTool: FenceTool,
         @inject(MeshTool) private readonly meshTool: MeshTool,
         @inject(MeasureTool) private readonly measureTool: MeasureTool,
+        @inject(BuildingTool) private readonly buildingTool: BuildingTool,
+        @inject(BuildingSegmentTool) private readonly buildingSegmentTool: BuildingSegmentTool,
+        @inject(BuildingOpeningTool) private readonly buildingOpeningTool: BuildingOpeningTool,
         @inject(PresetPanel) private readonly presetPanel: PresetPanel,
     ) {}
 
@@ -79,6 +85,9 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.fenceTool);
         this.toolManager.registerTool(this.meshTool);
         this.toolManager.registerTool(this.measureTool);
+        this.toolManager.registerTool(this.buildingTool);
+        this.toolManager.registerTool(this.buildingSegmentTool);
+        this.toolManager.registerTool(this.buildingOpeningTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
@@ -107,6 +116,18 @@ export default class LeftToolbarManager {
                 river: { label: 'River Tool', icon: 'waves' },
             },
             'T',
+        );
+        this.toolManager.registerSwitcher(
+            'building-switcher',
+            document.getElementById('btn-building') as HTMLButtonElement,
+            ['building', 'building-segment', 'building-opening'],
+            'building',
+            {
+                building: { label: 'Building Tool', icon: 'home' },
+                'building-segment': { label: 'Add Building Segment', icon: 'square-plus' },
+                'building-opening': { label: 'Windows & Doors', icon: 'app-window' },
+            },
+            'B',
         );
         this.toolManager.bindButton('uv', document.getElementById('btn-uv') as HTMLButtonElement, 'UV Mapper', 'U');
         this.toolManager.bindButton('foliage', document.getElementById('btn-foliage') as HTMLButtonElement, 'Foliage Editor', 'F');

@@ -34,7 +34,7 @@ export interface OccupiedTriangle {
 }
 
 export interface ElementData {
-    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon';
+    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon' | 'building';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
@@ -106,6 +106,14 @@ export interface ElementData {
     fencePostShape?: string;
     fencePostSides?: number;
     fenceMaxAngleStep?: number;
+    // Building-specific
+    buildingSegments?: { offsetX: number; offsetZ: number; width: number; depth: number }[];
+    buildingWallHeight?: number;
+    buildingRoofType?: string;
+    buildingRoofOverhang?: number;
+    buildingRoofRidgeHeight?: number;
+    buildingRailingHeight?: number;
+    buildingOpenings?: { x: number; y: number; z: number; type: string; width: number; height: number; sill: number }[];
 }
 
 interface Connection {
