@@ -77,6 +77,20 @@ export default class Building extends WorldElement {
         this.segments = [firstSegment];
     }
 
+    public override update(): void {
+        super.update();
+        // Defensive, matching Terrain/PolygonTerrain: winding is verified correct for every
+        // face this class builds, but double-siding costs nothing noticeable for a handful
+        // of prop-sized meshes and means a future winding slip goes unnoticed as a lighting
+        // quirk rather than a face silently disappearing.
+        const mats = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+        for (const mat of mats) {
+            const material = mat as THREE.MeshStandardMaterial;
+            material.side = THREE.DoubleSide;
+            material.needsUpdate = true;
+        }
+    }
+
     private getAnchor(): THREE.Vector3 {
         return this.nodes[0].mesh.position;
     }
@@ -474,13 +488,21 @@ export default class Building extends WorldElement {
             triangles.push(new Triangle(a, b, c, uvFor(0, 0), uvFor(1, 0), uvFor(0.5, 1)));
         };
 
+        // The two branches below are mirror images of each other (ridge along X vs along
+        // Z), but swapping which axis is which flips handedness in a right-handed Y-up
+        // system - a vertex order that winds outward-facing normals for the slope quads in
+        // one branch winds them inward in the other (and vice versa for the gable-end
+        // triangles). Each branch below has its quad/triangle argument order individually
+        // verified (via the cross-product of its edges) to face outward, rather than
+        // mechanically mirrored from the other, which is what produced inside-out roof
+        // faces before.
         if (ridgeAlongX) {
             const eaveNear = [new THREE.Vector3(cx - halfWidth, baseY, cz - halfDepth), new THREE.Vector3(cx + halfWidth, baseY, cz - halfDepth)];
             const eaveFar = [new THREE.Vector3(cx + halfWidth, baseY, cz + halfDepth), new THREE.Vector3(cx - halfWidth, baseY, cz + halfDepth)];
             const ridgeNear = new THREE.Vector3(cx - halfWidth, ridgeY, cz);
             const ridgeFar = new THREE.Vector3(cx + halfWidth, ridgeY, cz);
-            addQuad(eaveNear[0], eaveNear[1], ridgeFar, ridgeNear);
-            addQuad(eaveFar[0], eaveFar[1], ridgeNear, ridgeFar);
+            addQuad(ridgeNear, ridgeFar, eaveNear[1], eaveNear[0]);
+            addQuad(ridgeFar, ridgeNear, eaveFar[1], eaveFar[0]);
             addTri(eaveNear[0], eaveFar[1], ridgeNear);
             addTri(eaveNear[1], ridgeFar, eaveFar[0]);
         } else {
@@ -490,8 +512,8 @@ export default class Building extends WorldElement {
             const ridgeFar = new THREE.Vector3(cx, ridgeY, cz + halfDepth);
             addQuad(eaveNear[0], eaveNear[1], ridgeFar, ridgeNear);
             addQuad(eaveFar[0], eaveFar[1], ridgeNear, ridgeFar);
-            addTri(eaveNear[0], eaveFar[1], ridgeNear);
-            addTri(eaveNear[1], ridgeFar, eaveFar[0]);
+            addTri(eaveNear[0], ridgeNear, eaveFar[1]);
+            addTri(eaveNear[1], eaveFar[0], ridgeFar);
         }
 
         return triangles;
