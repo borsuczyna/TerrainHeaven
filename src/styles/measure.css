@@ -1,0 +1,46 @@
+#measure-panel {
+    position: fixed;
+    right: 12px;
+    top: 108px;
+    width: 300px;
+    display: none;
+    overflow: hidden;
+    z-index: 16;
+    color: #d8dde5;
+    background: rgba(25, 27, 31, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 18px 55px rgba(0, 0, 0, 0.38);
+    font: 12px/1.35 'Segoe UI', system-ui, sans-serif;
+}
+
+#measure-panel.visible { display: block; }
+
+body:has(#measure-panel.visible) #view-gizmo,
+body:has(#measure-panel.visible) #history-panel,
+body:has(#measure-panel.visible) #transform-toolbar { right: 330px; }
+
+.measure-header { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.measure-header > div { display: flex; flex-direction: column; gap: 2px; }
+.measure-header span { color: #78baff; font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+.measure-header strong { color: #f2f5f8; font-size: 15px; }
+.measure-header button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; color: #aeb6c2; background: rgba(255,255,255,.06); cursor: pointer; }
+.measure-header button:hover { color: white; background: rgba(255,255,255,.13); }
+.measure-header svg { width: 15px; }
+.measure-body { padding: 12px; }
+.measure-readout { padding: 10px; border-radius: 10px; background: rgba(255,255,255,.04); }
+.measure-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; color: #aeb6c1; }
+.measure-row b { color: #e8ebef; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 11px; }
+.measure-distance { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+.measure-distance span { color: #aeb6c1; }
+.measure-distance strong { color: #67d986; font-size: 16px; }
+.measure-delta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 8px; }
+.measure-delta > div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border-radius: 7px; background: rgba(255,255,255,.03); }
+.measure-delta span { color: #8a93a1; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; }
+.measure-delta b { color: #dbe1e8; font-family: 'Cascadia Code', 'Consolas', monospace; }
+.measure-clear { width: 100%; margin-top: 12px; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(255,255,255,.04); color: #aeb7c2; cursor: pointer; }
+.measure-clear:hover { background: rgba(255,255,255,.09); color: white; }
+.measure-clear svg { width: 14px; }
+.measure-help { display: flex; gap: 9px; margin-top: 12px; padding: 10px; border-radius: 9px; color: #8f99a7; background: rgba(0,0,0,.17); font-size: 10px; }
+.measure-help svg { flex: 0 0 auto; width: 16px; color: #62b0f5; }
+.measure-help b { color: #cbd3dd; }

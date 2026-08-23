@@ -1,0 +1,44 @@
+#terrain-polygon-panel {
+    position: fixed;
+    right: 12px;
+    top: 108px;
+    width: 310px;
+    display: none;
+    overflow: hidden;
+    z-index: 16;
+    color: #d8dde5;
+    background: rgba(25, 27, 31, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 18px 55px rgba(0, 0, 0, 0.38);
+    font: 12px/1.35 'Segoe UI', system-ui, sans-serif;
+}
+
+#terrain-polygon-panel.visible { display: block; }
+
+body:has(#terrain-polygon-panel.visible) #view-gizmo,
+body:has(#terrain-polygon-panel.visible) #history-panel,
+body:has(#terrain-polygon-panel.visible) #transform-toolbar { right: 340px; }
+
+.terrain-polygon-header { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.terrain-polygon-header > div { display: flex; flex-direction: column; gap: 2px; }
+.terrain-polygon-header span { color: #78baff; font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+.terrain-polygon-header strong { color: #f2f5f8; font-size: 15px; }
+.terrain-polygon-header button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; color: #aeb6c2; background: rgba(255,255,255,.06); cursor: pointer; }
+.terrain-polygon-header button:hover { color: white; background: rgba(255,255,255,.13); }
+.terrain-polygon-header svg { width: 15px; }
+.terrain-polygon-body { padding: 12px; }
+.terrain-polygon-body section + section { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.07); }
+.terrain-polygon-body h3 { margin: 0 0 9px; color: #f0f2f5; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+.terrain-polygon-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.terrain-polygon-modes button, .terrain-polygon-cancel { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(255,255,255,.04); color: #aeb7c2; cursor: pointer; }
+.terrain-polygon-modes button:hover, .terrain-polygon-cancel:hover { background: rgba(255,255,255,.09); color: white; }
+.terrain-polygon-modes button.active { border-color: rgba(87,170,255,.42); background: rgba(87,170,255,.14); color: #a8d4ff; }
+.terrain-polygon-modes svg, .terrain-polygon-cancel svg { width: 14px; }
+.terrain-polygon-cancel { width: 100%; margin-top: 14px; }
+.terrain-polygon-count { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 9px 10px; border-radius: 9px; color: #cbd3dd; background: rgba(255,255,255,.05); font-size: 11px; }
+.terrain-polygon-count svg { width: 15px; color: #78baff; }
+.terrain-polygon-count b { color: #f2f5f8; }
+.terrain-polygon-help { display: flex; gap: 9px; margin-top: 12px; padding: 10px; border-radius: 9px; color: #8f99a7; background: rgba(0,0,0,.17); font-size: 10px; }
+.terrain-polygon-help svg { flex: 0 0 auto; width: 16px; color: #62b0f5; }
+.terrain-polygon-help b { color: #cbd3dd; }

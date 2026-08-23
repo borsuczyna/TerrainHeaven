@@ -34,7 +34,7 @@ export interface OccupiedTriangle {
 }
 
 export interface ElementData {
-    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence';
+    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;

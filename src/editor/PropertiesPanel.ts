@@ -6,7 +6,7 @@ import CopyManager from './CopyManager';
 import HistoryManager from './HistoryManager';
 import { createIcons, icons } from 'lucide';
 import PresetManager from './PresetManager';
-import PresetPanel from './panels/PresetPanel';
+import ToolManager from './ToolManager';
 
 @singleton()
 export default class PropertiesPanel {
@@ -21,7 +21,7 @@ export default class PropertiesPanel {
         @inject(CopyManager) copyManager: CopyManager,
         @inject(HistoryManager) history: HistoryManager,
         @inject(PresetManager) private readonly presets: PresetManager,
-        @inject(PresetPanel) private readonly presetPanel: PresetPanel,
+        @inject(ToolManager) private readonly toolManager: ToolManager,
     ) {
         this.copyManager = copyManager;
         this.history = history;
@@ -234,7 +234,7 @@ export default class PropertiesPanel {
         const name = window.prompt('Preset name', suggested);
         if (name === null) return;
         this.presets.savePreset(name, this.element);
-        this.presetPanel.show();
+        this.toolManager.setActive('presets');
     }
 
     private bindEvents(def: PropertyDefinition): void {

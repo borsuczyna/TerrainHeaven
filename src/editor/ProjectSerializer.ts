@@ -8,6 +8,7 @@ import Terrain from '../elements/Terrain.ts';
 import TerrainCutSpline from '../elements/TerrainCutSpline';
 import RiverSpline from '../elements/RiverSpline';
 import Fence from '../elements/Fence';
+import PolygonTerrain from '../elements/PolygonTerrain';
 import type WorldElement from '../elements/WorldElement';
 import type { ElementData } from '../elements/WorldElement';
 import TerrainCutPointManager from './TerrainCutPointManager';
@@ -143,6 +144,8 @@ export default class ProjectSerializer {
                 el = RiverSpline.deserialize(ed);
             } else if (ed.type === 'fence') {
                 el = Fence.deserialize(ed);
+            } else if (ed.type === 'terrainPolygon') {
+                el = PolygonTerrain.deserialize(ed);
             }
             if (!el) continue;
             const textureReferences = Object.fromEntries(

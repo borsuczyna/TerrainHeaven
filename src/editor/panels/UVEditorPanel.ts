@@ -63,7 +63,12 @@ export default class UVEditorPanel {
         this.container.querySelector('.uv-close')!.addEventListener('click', () => this.hide());
 
         this.canvas.addEventListener('mousedown', this.onMouseDown);
-        this.canvas.addEventListener('mousemove', this.onMouseMove);
+        // Bound to window, not the canvas: a drag that briefly leaves the small canvas
+        // rect (very easy to do, since the move/scale handles sit right at its edges)
+        // used to stop receiving mousemove entirely, freezing the drag until the pointer
+        // re-entered - matching the working pan-drag and header-drag handlers below, which
+        // were already window-bound for exactly this reason.
+        window.addEventListener('mousemove', this.onMouseMove);
         window.addEventListener('mouseup', this.onMouseUp);
         this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
