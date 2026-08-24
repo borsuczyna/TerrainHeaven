@@ -123,6 +123,7 @@ export interface ElementData {
     buildingRailingThickness?: number;
     buildingCutInGround?: boolean;
     buildingOpenings?: { x: number; y: number; z: number; type: string; width: number; height: number; depth: number }[];
+    buildingRoofWindows?: { x: number; y: number; z: number; width?: number; depth?: number; wallHeight?: number; ridgeHeight?: number }[];
 }
 
 interface Connection {

@@ -20,6 +20,7 @@ import MeasureTool from './tools/MeasureTool';
 import BuildingTool from './tools/BuildingTool';
 import BuildingSegmentTool from './tools/BuildingSegmentTool';
 import BuildingOpeningTool from './tools/BuildingOpeningTool';
+import BuildingRoofWindowTool from './tools/BuildingRoofWindowTool';
 import PresetPanel from './panels/PresetPanel';
 
 @singleton()
@@ -45,6 +46,7 @@ export default class LeftToolbarManager {
         @inject(BuildingTool) private readonly buildingTool: BuildingTool,
         @inject(BuildingSegmentTool) private readonly buildingSegmentTool: BuildingSegmentTool,
         @inject(BuildingOpeningTool) private readonly buildingOpeningTool: BuildingOpeningTool,
+        @inject(BuildingRoofWindowTool) private readonly buildingRoofWindowTool: BuildingRoofWindowTool,
         @inject(PresetPanel) private readonly presetPanel: PresetPanel,
     ) {}
 
@@ -88,6 +90,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.buildingTool);
         this.toolManager.registerTool(this.buildingSegmentTool);
         this.toolManager.registerTool(this.buildingOpeningTool);
+        this.toolManager.registerTool(this.buildingRoofWindowTool);
 
         this.toolManager.bindButton('select', document.getElementById('btn-select') as HTMLButtonElement, 'Select', 'V');
         this.toolManager.registerSwitcher(
@@ -120,12 +123,13 @@ export default class LeftToolbarManager {
         this.toolManager.registerSwitcher(
             'building-switcher',
             document.getElementById('btn-building') as HTMLButtonElement,
-            ['building', 'building-segment', 'building-opening'],
+            ['building', 'building-segment', 'building-opening', 'building-roof-window'],
             'building',
             {
                 building: { label: 'Building Tool', icon: 'home' },
                 'building-segment': { label: 'Add Building Segment', icon: 'square-plus' },
                 'building-opening': { label: 'Windows & Doors', icon: 'app-window' },
+                'building-roof-window': { label: 'Roof Window (Dormer)', icon: 'house-plus' },
             },
             'B',
         );

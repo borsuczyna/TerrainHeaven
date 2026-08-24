@@ -82,6 +82,20 @@ interface OpeningEntry {
     node: WorldNode;
 }
 
+// A gable-roofed dormer window sitting on a sloped roof panel - front wall (with one
+// window) facing outward, its own small gable roof running back into the parent roof.
+// Only placeable on 'gable' segments for now (see findGableSegmentIndexForPoint). Like
+// OpeningEntry, position-based rather than id-based: the node just carries a world-space
+// point, and buildRoofWindows re-matches it to the nearest gable segment/slope every
+// rebuild rather than storing a segment reference that could go stale.
+interface RoofWindowEntry {
+    node: WorldNode;
+    width: number;
+    depth: number;
+    wallHeight: number;
+    ridgeHeight: number;
+}
+
 interface FootprintPolygon {
     contour: Ring;
     holes: Ring[];
@@ -103,10 +117,15 @@ interface WallOpening {
     // one opening's own texture group (see the class-level note on per-instance texture
     // groups) instead of a single shared 'windows'/'doors' bucket for the whole building.
     index: number;
+    // Overrides the default "windows#<index>"/"doors#<index>" group prefix - used by
+    // buildRoofWindows so a dormer's synthetic window doesn't collide with a real
+    // building opening that happens to share the same index.
+    groupPrefix?: string;
 }
 
 const SEGMENT_NODE_COLOR = 0x4da6ff;
 const OPENING_NODE_COLOR = 0xffa64d;
+const ROOF_WINDOW_NODE_COLOR = 0xc266ff;
 const MIN_SEGMENT_SIZE = 1;
 const WALL_SNAP_DISTANCE = 0.6;
 const WALL_SNAP_MARGIN = 0.3;
@@ -129,6 +148,15 @@ const DEFAULT_GAMBREL_ROUNDNESS = 0.4;
 const DEFAULT_RAILING_HEIGHT = 1;
 const DEFAULT_RAILING_THICKNESS = 0.15;
 const DEFAULT_UV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+const DEFAULT_ROOF_WINDOW_WIDTH = 1.2;
+const DEFAULT_ROOF_WINDOW_DEPTH = 1.1;
+const DEFAULT_ROOF_WINDOW_WALL_HEIGHT = 1.0;
+const DEFAULT_ROOF_WINDOW_RIDGE_HEIGHT = 0.5;
+// A dormer is only placed sensibly somewhere between the ridge and the eave - t is the
+// fractional perpendicular distance from the ridge (0) to the eave (1) used throughout
+// buildRoofWindows; these keep it off both the ridge itself and the very edge of the roof.
+const ROOF_WINDOW_MIN_T = 0.18;
+const ROOF_WINDOW_MAX_T = 0.82;
 
 // A multi-room building: one or more rectangular footprint segments (unioned via the same
 // polygon-clipping approach TerrainMesher uses for touching terrain tiles) extruded into
@@ -164,6 +192,7 @@ export default class Building extends WorldElement {
     private handleMeshes: THREE.Mesh[] = [];
     private handlesVisible = false;
     private openings: OpeningEntry[] = [];
+    private roofWindows: RoofWindowEntry[] = [];
     // Per-texture-group UV offset/scale, keyed by the same dynamic group names getGeometry()
     // builds ("walls#0", "windows#3", ...) - see the class-level note. Missing entries fall
     // back to DEFAULT_UV, so a segment/opening that's never been customized just uses the
@@ -337,6 +366,43 @@ export default class Building extends WorldElement {
         return true;
     }
 
+    public get roofWindowCount(): number {
+        return this.roofWindows.length;
+    }
+
+    public getRoofWindowNode(index: number): WorldNode {
+        return this.roofWindows[index].node;
+    }
+
+    public getRoofWindowData(index: number): { width: number; depth: number; wallHeight: number; ridgeHeight: number } {
+        const entry = this.roofWindows[index];
+        return { width: entry.width, depth: entry.depth, wallHeight: entry.wallHeight, ridgeHeight: entry.ridgeHeight };
+    }
+
+    public addRoofWindow(worldPosition: THREE.Vector3): void {
+        const node = new WorldNode(worldPosition.clone(), ROOF_WINDOW_NODE_COLOR);
+        this.setNode(this.nodes.length, node);
+        this.roofWindows.push({
+            node,
+            width: DEFAULT_ROOF_WINDOW_WIDTH,
+            depth: DEFAULT_ROOF_WINDOW_DEPTH,
+            wallHeight: DEFAULT_ROOF_WINDOW_WALL_HEIGHT,
+            ridgeHeight: DEFAULT_ROOF_WINDOW_RIDGE_HEIGHT,
+        });
+        this.update();
+        this.onPropertiesChanged?.();
+    }
+
+    public removeRoofWindow(index: number): boolean {
+        const entry = this.roofWindows[index];
+        if (!entry) return false;
+        this.removeTrackedNode(entry.node);
+        this.roofWindows.splice(index, 1);
+        this.update();
+        this.onPropertiesChanged?.();
+        return true;
+    }
+
     private removeTrackedNode(node: WorldNode): void {
         const index = this.nodes.indexOf(node);
         if (index < 0) return;
@@ -434,6 +500,126 @@ export default class Building extends WorldElement {
             if (d < bestDist) { bestDist = d; best = idx; }
         }
         return best;
+    }
+
+    // Only 'gable' segments have a single flat sloped panel per side (hip/tented panels are
+    // trapezoids/triangles, gambrel's is a multi-segment profile) - dormers are restricted
+    // to those for now, matched the same position-based way openings match a wall: nearest
+    // eligible segment's rectangle to the point, not a stored reference.
+    private findGableSegmentIndexForPoint(x: number, z: number): number {
+        const candidates = this.segments
+            .map((segment, index) => ({ segment, index }))
+            .filter((entry) => entry.segment.roofType === 'gable')
+            .map((entry) => entry.index);
+        return this.matchSegmentIndexForPoint([x, z], candidates);
+    }
+
+    // Where a gable segment's roof surface sits above (x, z), and the local directions a
+    // dormer placed there needs: outward (horizontal, pointing down-slope toward the eave -
+    // the direction its front wall/window faces) and along (horizontal, parallel to the
+    // ridge - the direction its width runs). t is the point's own fractional distance from
+    // ridge (0) to eave (1), clamped to ROOF_WINDOW_MIN_T/MAX_T so a dormer can't be dragged
+    // onto the ridge itself or off the edge of the roof; clampedX/clampedZ is (x, z) moved
+    // back onto that clamped t so the dormer visually snaps into a valid range instead of
+    // just refusing to move further.
+    private computeGableRoofPlacement(segment: SegmentEntry, x: number, z: number): {
+        clampedX: number;
+        clampedZ: number;
+        y: number;
+        outward: THREE.Vector3;
+        along: THREE.Vector3;
+    } {
+        const cx = segment.node.mesh.position.x;
+        const cz = segment.node.mesh.position.z;
+        const wallTopY = this.getAnchor().y + segment.wallHeight;
+        const ridgeY = wallTopY + Math.max(0.1, segment.roofRidgeHeight);
+        const overhang = Math.max(0, segment.roofOverhang);
+        const wallHalfWidth = Math.max(MIN_SEGMENT_SIZE, segment.width) / 2 + FOOTPRINT_UNION_PADDING;
+        const wallHalfDepth = Math.max(MIN_SEGMENT_SIZE, segment.depth) / 2 + FOOTPRINT_UNION_PADDING;
+        const halfWidth = wallHalfWidth + overhang;
+        const halfDepth = wallHalfDepth + overhang;
+        const ridgeAlongX = segment.roofDirection === 'x' ? true
+            : segment.roofDirection === 'z' ? false
+            : segment.width >= segment.depth;
+
+        const half = Math.max(0.01, ridgeAlongX ? halfDepth : halfWidth);
+        const raw = ridgeAlongX ? z - cz : x - cx;
+        const sign = raw >= 0 ? 1 : -1;
+        const t = THREE.MathUtils.clamp(Math.abs(raw) / half, ROOF_WINDOW_MIN_T, ROOF_WINDOW_MAX_T);
+        const y = ridgeY - t * (ridgeY - wallTopY);
+        const offset = sign * t * half;
+
+        if (ridgeAlongX) {
+            return {
+                clampedX: x, clampedZ: cz + offset, y,
+                outward: new THREE.Vector3(0, 0, sign),
+                along: new THREE.Vector3(1, 0, 0),
+            };
+        }
+        return {
+            clampedX: cx + offset, clampedZ: z, y,
+            outward: new THREE.Vector3(sign, 0, 0),
+            along: new THREE.Vector3(0, 0, 1),
+        };
+    }
+
+    // Builds every roof dormer, bucketing straight into the shared walls/roof/windows maps
+    // getGeometry() already assembles the final GeometryGroup[] from. A dormer with no
+    // nearby gable segment (e.g. its segment's roof type was changed after placement) simply
+    // builds nothing - orphaned exactly the way a wall opening far from any wall does.
+    private buildRoofWindows(walls: Map<string, Triangle[]>, roof: Map<string, Triangle[]>, windows: Map<string, Triangle[]>): void {
+        this.roofWindows.forEach((entry, index) => {
+            const pos = entry.node.mesh.position;
+            const segIndex = this.findGableSegmentIndexForPoint(pos.x, pos.z);
+            if (segIndex < 0) return;
+            const segment = this.segments[segIndex];
+            const { clampedX, clampedZ, y, outward, along } = this.computeGableRoofPlacement(segment, pos.x, pos.z);
+
+            const wallKey = `dormerWalls#${index}`;
+            const roofKey = `dormerRoof#${index}`;
+            const wallUv = this.getUVFor(wallKey);
+            const roofUv = this.getUVFor(roofKey);
+
+            const frontCenter = new THREE.Vector3(clampedX, y, clampedZ);
+            const halfW = entry.width / 2;
+            let leftPoint = frontCenter.clone().addScaledVector(along, -halfW);
+            let rightPoint = frontCenter.clone().addScaledVector(along, halfW);
+            // buildWallStrip/appendWallSegment always derive "outward" from (a2->b2) via a
+            // fixed left-hand rule - pick whichever order actually matches this slope's own
+            // outward direction rather than assuming along's sign already agrees with it.
+            const testDir = rightPoint.clone().sub(leftPoint).normalize();
+            const testOutward = new THREE.Vector3(-testDir.z, 0, testDir.x);
+            if (testOutward.dot(outward) < 0) [leftPoint, rightPoint] = [rightPoint, leftPoint];
+
+            this.appendWallSegment(
+                this.bucket(walls, wallKey), wallUv, windows, new Map(),
+                [leftPoint.x, leftPoint.z], [rightPoint.x, rightPoint.z], y, entry.wallHeight,
+                [{
+                    u: halfW, width: entry.width * 0.6, height: entry.wallHeight * 0.65,
+                    sill: entry.wallHeight * 0.18, depth: 0.08, type: 'window', index, groupPrefix: 'dormerWindows',
+                }],
+            );
+
+            // The dormer's own little gable roof is geometrically identical to a segment's
+            // roof (an axis-aligned rectangle with a ridge along one axis) - buildGableRoofForRect
+            // already builds exactly that, including the front gable-end attic triangle above
+            // the wall just built. Its rear gable end lands embedded inside the parent roof's
+            // own (higher, since it's closer to the ridge) surface - invisible from outside, so
+            // it's left as-is rather than special-cased away (same interpenetration-over-true-
+            // intersection tradeoff the rest of this file already makes for overlapping roofs).
+            // buildGableRoofForRect's ridgeAlongX=true means "ridge along X" - the dormer's
+            // own ridge always runs along the PARENT slope's outward axis (see the class-
+            // level note above), which is X exactly when the parent's along axis is Z.
+            const dormerRidgeAlongX = along.x === 0;
+            const dormerCenter = frontCenter.clone().addScaledVector(outward, -entry.depth / 2);
+            const rectWidth = dormerRidgeAlongX ? entry.depth : entry.width;
+            const rectDepth = dormerRidgeAlongX ? entry.width : entry.depth;
+            this.bucket(roof, roofKey).push(...this.buildGableRoofForRect(
+                dormerCenter.x, dormerCenter.z, rectWidth, rectDepth,
+                y + entry.wallHeight, entry.ridgeHeight, 0.15, dormerRidgeAlongX,
+                this.bucket(walls, wallKey), roofUv, wallUv, windows, new Map(),
+            ));
+        });
     }
 
     public override getOccupiedArea(): OccupiedTriangle[] {
@@ -746,6 +932,8 @@ export default class Building extends WorldElement {
             }
         }
 
+        this.buildRoofWindows(walls, roof, windows);
+
         const groups: GeometryGroup[] = [];
         for (const [name, triangles] of walls) groups.push({ name, triangles });
         for (const [name, triangles] of roof) groups.push({ name, triangles });
@@ -938,7 +1126,7 @@ export default class Building extends WorldElement {
             const v0 = THREE.MathUtils.clamp(opening.sill, 0.02, height - 0.05);
             const v1 = THREE.MathUtils.clamp(opening.sill + opening.height, v0 + 0.05, height - 0.02);
             holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
-            const paneKey = `${opening.type === 'door' ? 'doors' : 'windows'}#${opening.index}`;
+            const paneKey = `${opening.groupPrefix ?? (opening.type === 'door' ? 'doors' : 'windows')}#${opening.index}`;
             const paneArr = this.bucket(opening.type === 'door' ? doorsOut : windowsOut, paneKey);
             this.appendOpeningInsert(
                 paneArr, out,
@@ -1255,7 +1443,7 @@ export default class Building extends WorldElement {
                 const v1 = Math.min(opening.sill + opening.height, limit);
                 if (v1 - v0 < 0.1) continue;
                 holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
-                const paneKey = `${opening.type === 'door' ? 'doors' : 'windows'}#${opening.index}`;
+                const paneKey = `${opening.groupPrefix ?? (opening.type === 'door' ? 'doors' : 'windows')}#${opening.index}`;
                 const paneArr = this.bucket(opening.type === 'door' ? doorsOut : windowsOut, paneKey);
                 this.appendOpeningInsert(
                     paneArr, gableWallsOut,
@@ -1516,7 +1704,7 @@ export default class Building extends WorldElement {
                 const v1 = Math.min(opening.sill + opening.height, limit);
                 if (v1 - v0 < 0.1) continue;
                 holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
-                const paneKey = `${opening.type === 'door' ? 'doors' : 'windows'}#${opening.index}`;
+                const paneKey = `${opening.groupPrefix ?? (opening.type === 'door' ? 'doors' : 'windows')}#${opening.index}`;
                 const paneArr = this.bucket(opening.type === 'door' ? doorsOut : windowsOut, paneKey);
                 this.appendOpeningInsert(
                     paneArr, gableWallsOut,
@@ -1727,6 +1915,15 @@ export default class Building extends WorldElement {
                 height: opening.height,
                 depth: opening.depth,
             })),
+            buildingRoofWindows: this.roofWindows.map((entry) => ({
+                x: entry.node.mesh.position.x,
+                y: entry.node.mesh.position.y,
+                z: entry.node.mesh.position.z,
+                width: entry.width,
+                depth: entry.depth,
+                wallHeight: entry.wallHeight,
+                ridgeHeight: entry.ridgeHeight,
+            })),
         };
     }
 
@@ -1799,6 +1996,15 @@ export default class Building extends WorldElement {
             entry.width = Math.max(0.2, opening.width);
             entry.height = Math.max(0.2, opening.height);
             entry.depth = Math.max(0.02, opening.depth ?? 0.1);
+        }
+
+        for (const roofWindow of data.buildingRoofWindows ?? []) {
+            building.addRoofWindow(new THREE.Vector3(roofWindow.x, roofWindow.y, roofWindow.z));
+            const entry = building.roofWindows[building.roofWindows.length - 1];
+            entry.width = Math.max(0.3, roofWindow.width ?? DEFAULT_ROOF_WINDOW_WIDTH);
+            entry.depth = Math.max(0.3, roofWindow.depth ?? DEFAULT_ROOF_WINDOW_DEPTH);
+            entry.wallHeight = Math.max(0.1, roofWindow.wallHeight ?? DEFAULT_ROOF_WINDOW_WALL_HEIGHT);
+            entry.ridgeHeight = Math.max(0.1, roofWindow.ridgeHeight ?? DEFAULT_ROOF_WINDOW_RIDGE_HEIGHT);
         }
 
         building.update();
@@ -2045,6 +2251,27 @@ export default class Building extends WorldElement {
                     { type: 'number', label: 'Depth', get: () => opening.depth, set: (v: number) => { opening.depth = Math.max(0.02, v); self.update(); }, min: 0.02, max: 1, step: 0.01 },
                     uvSizeProperty('Texture UV Size', `${opening.type === 'door' ? 'doors' : 'windows'}#${index}`),
                     { type: 'button', label: 'Remove', onClick: () => self.removeOpening(index) },
+                ],
+            });
+        });
+
+        this.roofWindows.forEach((entry, index) => {
+            sections.push({
+                label: `Roof Window ${index + 1}`,
+                properties: [
+                    // Y is ignored by the geometry (see computeGableRoofPlacement) - the node
+                    // just tracks the last dragged-to point on the roof slope, so exposing X/Z
+                    // as a full vector3 field here would be misleading; Position dragging in
+                    // the viewport already works via the node itself.
+                    { type: 'vector3', label: 'Position', get: () => entry.node.mesh.position.clone(), set: (v: THREE.Vector3) => { entry.node.update(v); self.update(); } },
+                    { type: 'number', label: 'Width', get: () => entry.width, set: (v: number) => { entry.width = Math.max(0.3, v); self.update(); }, min: 0.3, max: 6, step: 0.05 },
+                    { type: 'number', label: 'Depth', get: () => entry.depth, set: (v: number) => { entry.depth = Math.max(0.3, v); self.update(); }, min: 0.3, max: 6, step: 0.05 },
+                    { type: 'number', label: 'Wall Height', get: () => entry.wallHeight, set: (v: number) => { entry.wallHeight = Math.max(0.1, v); self.update(); }, min: 0.1, max: 3, step: 0.05 },
+                    { type: 'number', label: 'Roof Ridge Height', get: () => entry.ridgeHeight, set: (v: number) => { entry.ridgeHeight = Math.max(0.1, v); self.update(); }, min: 0.1, max: 2, step: 0.05 },
+                    uvSizeProperty('Wall UV Size', `dormerWalls#${index}`),
+                    uvSizeProperty('Roof UV Size', `dormerRoof#${index}`),
+                    uvSizeProperty('Window UV Size', `dormerWindows#${index}`),
+                    { type: 'button', label: 'Remove', onClick: () => self.removeRoofWindow(index) },
                 ],
             });
         });
