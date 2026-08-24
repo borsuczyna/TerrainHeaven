@@ -600,6 +600,28 @@ export default class Building extends WorldElement {
                 }],
             );
 
+            // Two flat side "cheek" walls closing the gap between the front wall and the
+            // parent roof surface rising up behind it - without these the dormer's own roof
+            // floated above open air on both sides, showing straight through past the
+            // window's recessed reveal to the sky beyond. Built as a plain rectangle at
+            // constant height rather than tapered to the parent's rising slope: the rear
+            // portion simply embeds into the parent roof's own solid thickness, the same
+            // interpenetration-over-true-intersection tradeoff the rear gable wall below
+            // already makes.
+            const rearCenter = frontCenter.clone().addScaledVector(outward, -entry.depth);
+            for (const side of [-1, 1] as const) {
+                const sideOffset = along.clone().multiplyScalar(side * halfW);
+                const frontEdge = frontCenter.clone().add(sideOffset);
+                const rearEdge = rearCenter.clone().add(sideOffset);
+                let sideA: Point2 = [frontEdge.x, frontEdge.z];
+                let sideB: Point2 = [rearEdge.x, rearEdge.z];
+                const sideDir = new THREE.Vector3(sideB[0] - sideA[0], 0, sideB[1] - sideA[1]).normalize();
+                const sideNormal = new THREE.Vector3(-sideDir.z, 0, sideDir.x);
+                const desiredSideOutward = along.clone().multiplyScalar(side);
+                if (sideNormal.dot(desiredSideOutward) < 0) [sideA, sideB] = [sideB, sideA];
+                this.appendWallSegment(this.bucket(walls, wallKey), wallUv, windows, new Map(), sideA, sideB, y, entry.wallHeight, []);
+            }
+
             // The dormer's own little gable roof is geometrically identical to a segment's
             // roof (an axis-aligned rectangle with a ridge along one axis) - buildGableRoofForRect
             // already builds exactly that, including the front gable-end attic triangle above
