@@ -898,6 +898,64 @@ export default class Building extends WorldElement {
                 0.1,
             );
         }
+
+        for (const opening of this.openings) {
+            const p = opening.node.mesh.position;
+            const along = this.findNearestWallDirection(p.x, p.z);
+            if (!along) continue;
+            const label = opening.type === 'door' ? 'Door' : 'Window';
+            const halfWidth = opening.width / 2;
+            const bottomY = p.y;
+            const topY = p.y + opening.height;
+            const center = new THREE.Vector3(p.x, bottomY, p.z);
+
+            // Width: a vertical line at the opening's own +along edge, same "line runs
+            // perpendicular to its own drag axis" convention every other handle here uses.
+            this.addHandleLine(
+                center.clone().addScaledVector(along, halfWidth),
+                center.clone().addScaledVector(along, halfWidth).setY(topY),
+                along, 0.5, `${label} Width`,
+                () => opening.width,
+                (v) => { opening.width = Math.max(0.2, v); this.update(); },
+                0.2,
+            );
+            // Height: a vertical line at the opposite edge, drag axis Y (matches Wall
+            // Height's one-directional-growth convention, not Width's symmetric one).
+            this.addHandleLine(
+                center.clone().addScaledVector(along, -halfWidth),
+                center.clone().addScaledVector(along, -halfWidth).setY(topY),
+                AXIS_Y, 1, `${label} Height`,
+                () => opening.height,
+                (v) => { opening.height = Math.max(0.2, v); this.update(); },
+                0.2,
+            );
+        }
+    }
+
+    // Horizontal direction of whichever wall edge (from the building's full, unfiltered
+    // footprint) passes closest to (x, z) - used only to orient a window/door's handle
+    // lines along its own wall face, not for the actual hole-cutting match (see
+    // collectOpeningsForEdge, which is per-height-group and margin-gated instead).
+    private findNearestWallDirection(x: number, z: number): THREE.Vector3 | null {
+        let best: THREE.Vector3 | null = null;
+        let bestDistSq = Infinity;
+        for (const edge of this.getWallEdges()) {
+            const [ax, az] = edge.a;
+            const [bx, bz] = edge.b;
+            const dx = bx - ax;
+            const dz = bz - az;
+            const lenSq = dx * dx + dz * dz;
+            if (lenSq < 1e-8) continue;
+            const t = THREE.MathUtils.clamp(((x - ax) * dx + (z - az) * dz) / lenSq, 0, 1);
+            const px = ax + dx * t;
+            const pz = az + dz * t;
+            const distSq = (x - px) * (x - px) + (z - pz) * (z - pz);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = new THREE.Vector3(dx, 0, dz).normalize();
+            }
+        }
+        return best;
     }
 
     protected override getGeometry(): GeometryGroup[] {
