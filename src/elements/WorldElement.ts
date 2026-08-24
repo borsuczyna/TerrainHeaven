@@ -107,7 +107,7 @@ export interface ElementData {
     fencePostSides?: number;
     fenceMaxAngleStep?: number;
     // Building-specific
-    buildingSegments?: { x: number; y: number; z: number; width: number; depth: number; wallHeight?: number; roofRidgeHeight?: number; roofOverhang?: number; separateRoof?: boolean }[];
+    buildingSegments?: { x: number; y: number; z: number; width: number; depth: number; wallHeight?: number; roofRidgeHeight?: number; roofOverhang?: number; roofDirection?: string }[];
     buildingWallHeight?: number;
     buildingRoofType?: string;
     buildingRoofOverhang?: number;

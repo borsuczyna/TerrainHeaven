@@ -22,11 +22,16 @@ export interface BuildingSegment {
     wallHeight?: number;
     roofRidgeHeight?: number;
     roofOverhang?: number;
-    separateRoof?: boolean;
+    roofDirection?: RoofDirection;
 }
 
 export type RoofType = 'flat' | 'gable';
 export type OpeningType = 'window' | 'door';
+// Gable roofs only: which axis the ridge runs along. 'auto' picks whichever of the
+// segment's own width/depth is larger (a wide, shallow segment gets a ridge running along
+// its width, and vice versa) - the same rule used before this was configurable. 'x'/'z'
+// pin the ridge to that axis regardless of the segment's proportions.
+export type RoofDirection = 'auto' | 'x' | 'z';
 
 interface SegmentEntry {
     width: number;
@@ -35,14 +40,7 @@ interface SegmentEntry {
     wallHeight: number;
     roofRidgeHeight: number;
     roofOverhang: number;
-    // Gable roofs only: off by default, a segment shares one merged gable roof (spanning
-    // the padded bounding box of every other same-height segment that also has this off)
-    // rather than building its own. Flipping it on pulls the segment out of that shared
-    // group and gives it its own independent roof, sized to its own rectangle - see
-    // buildGableRoofForRect's own note on why the shared case uses a bounding box (and can
-    // therefore drift out of alignment for an irregular/L-shaped group) while the individual
-    // case always stays perfectly flush with that segment's own walls.
-    separateRoof: boolean;
+    roofDirection: RoofDirection;
 }
 
 interface OpeningEntry {
@@ -133,7 +131,7 @@ export default class Building extends WorldElement {
             wallHeight: Math.max(0.5, firstSegment.wallHeight ?? DEFAULT_WALL_HEIGHT),
             roofRidgeHeight: Math.max(0.1, firstSegment.roofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT),
             roofOverhang: Math.max(0, firstSegment.roofOverhang ?? DEFAULT_ROOF_OVERHANG),
-            separateRoof: firstSegment.separateRoof ?? false,
+            roofDirection: firstSegment.roofDirection ?? 'auto',
         }];
     }
 
@@ -177,7 +175,7 @@ export default class Building extends WorldElement {
             wallHeight: entry.wallHeight,
             roofRidgeHeight: entry.roofRidgeHeight,
             roofOverhang: entry.roofOverhang,
-            separateRoof: entry.separateRoof,
+            roofDirection: entry.roofDirection,
         };
     }
 
@@ -189,7 +187,7 @@ export default class Building extends WorldElement {
         position: THREE.Vector3,
         width: number,
         depth: number,
-        options?: { wallHeight?: number; roofRidgeHeight?: number; roofOverhang?: number; separateRoof?: boolean },
+        options?: { wallHeight?: number; roofRidgeHeight?: number; roofOverhang?: number; roofDirection?: RoofDirection },
     ): void {
         const node = new WorldNode(position.clone(), SEGMENT_NODE_COLOR);
         this.setNode(this.nodes.length, node);
@@ -200,7 +198,7 @@ export default class Building extends WorldElement {
             wallHeight: Math.max(0.5, options?.wallHeight ?? DEFAULT_WALL_HEIGHT),
             roofRidgeHeight: Math.max(0.1, options?.roofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT),
             roofOverhang: Math.max(0, options?.roofOverhang ?? DEFAULT_ROOF_OVERHANG),
-            separateRoof: options?.separateRoof ?? false,
+            roofDirection: options?.roofDirection ?? 'auto',
         });
         this.update();
     }
@@ -318,7 +316,6 @@ export default class Building extends WorldElement {
         return result;
     }
 
-    // Finds which segment a wall-edge point belongs to (nearest by distance-to-rectangle,
     // Segments sharing the same wall height (rounded to the millimetre) are unioned into one
     // real merged footprint - the same polygon-clipping approach used everywhere else, with
     // the same padding - so touching same-height segments share one seamless wall loop (and,
@@ -349,58 +346,36 @@ export default class Building extends WorldElement {
         const railingTriangles: Triangle[] = [];
         const gableWalls: Triangle[] = [];
 
+        // Every segment always gets its own gable roof, sized to its own rectangle and built
+        // from its own wall height, ridge height and overhang - no merged/shared roof. Where
+        // two touching segments' roof volumes overlap, they simply interpenetrate rather than
+        // forming a true architectural valley - real hip/valley intersection is a straight-
+        // skeleton problem well beyond what a level editor's prop building needs.
+        if (this.roofType === 'gable') {
+            for (const segment of this.segments) {
+                const ridgeAlongX = segment.roofDirection === 'x' ? true
+                    : segment.roofDirection === 'z' ? false
+                    : segment.width >= segment.depth;
+                roofTriangles.push(...this.buildGableRoofForRect(
+                    segment.node.mesh.position.x, segment.node.mesh.position.z, segment.width, segment.depth,
+                    anchor.y + segment.wallHeight, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX,
+                    gableWalls, windows, doors,
+                ));
+            }
+        }
+
         for (const group of this.groupSegmentsByHeight()) {
-            const topY = anchor.y + group[0].wallHeight;
+            const groupHeight = group[0].wallHeight;
+            const topY = anchor.y + groupHeight;
             const groupPolygons = this.computeFootprintPolygons(group);
             const groupEdges = this.collectWallEdges(groupPolygons);
-            wallTriangles.push(...this.buildWallStrip(groupEdges, anchor.y, group[0].wallHeight, this.wallUV, true, windows, doors));
+            wallTriangles.push(...this.buildWallStrip(groupEdges, anchor.y, groupHeight, this.wallUV, true, windows, doors));
 
             if (this.roofType === 'flat') {
                 roofTriangles.push(...this.buildFlatRoofSlab(groupPolygons, groupEdges, topY));
                 railingTriangles.push(...this.buildParapetStrip(
                     groupEdges, topY, Math.max(0.1, this.railingHeight), Math.max(0.02, this.railingThickness), this.railingUV,
                 ));
-            } else {
-                const shared = group.filter((segment) => !segment.separateRoof);
-                const individual = group.filter((segment) => segment.separateRoof);
-
-                if (shared.length > 0) {
-                    let minX = Infinity;
-                    let maxX = -Infinity;
-                    let minZ = Infinity;
-                    let maxZ = -Infinity;
-                    let ridgeHeight = 0;
-                    let overhang = 0;
-                    for (const segment of shared) {
-                        const cx = segment.node.mesh.position.x;
-                        const cz = segment.node.mesh.position.z;
-                        // Unpadded here - buildGableRoofForRect below adds the same
-                        // FOOTPRINT_UNION_PADDING to whatever rect it's given (matching how
-                        // the wall union pads every segment once), so pre-padding here too
-                        // would pad this bounding box twice.
-                        const hw = Math.max(MIN_SEGMENT_SIZE, segment.width) / 2;
-                        const hd = Math.max(MIN_SEGMENT_SIZE, segment.depth) / 2;
-                        minX = Math.min(minX, cx - hw);
-                        maxX = Math.max(maxX, cx + hw);
-                        minZ = Math.min(minZ, cz - hd);
-                        maxZ = Math.max(maxZ, cz + hd);
-                        ridgeHeight = Math.max(ridgeHeight, segment.roofRidgeHeight);
-                        overhang = Math.max(overhang, segment.roofOverhang);
-                    }
-                    roofTriangles.push(...this.buildGableRoofForRect(
-                        (minX + maxX) / 2, (minZ + maxZ) / 2, maxX - minX, maxZ - minZ,
-                        topY, ridgeHeight, overhang,
-                        gableWalls, windows, doors,
-                    ));
-                }
-
-                for (const segment of individual) {
-                    roofTriangles.push(...this.buildGableRoofForRect(
-                        segment.node.mesh.position.x, segment.node.mesh.position.z, segment.width, segment.depth,
-                        topY, segment.roofRidgeHeight, segment.roofOverhang,
-                        gableWalls, windows, doors,
-                    ));
-                }
             }
         }
 
@@ -520,13 +495,13 @@ export default class Building extends WorldElement {
     private buildWallStrip(
         edges: WallEdge[],
         baseY: number,
-        height: number | ((mid: THREE.Vector3) => number),
+        height: number,
         uv: UVTransform,
         withOpenings: boolean,
         windowsOut: Triangle[],
         doorsOut: Triangle[],
     ): Triangle[] {
-        if (edges.length === 0) return [];
+        if (edges.length === 0 || height <= 0) return [];
         const centroid = this.computeEdgeCentroid(edges);
         const triangles: Triangle[] = [];
 
@@ -542,10 +517,8 @@ export default class Building extends WorldElement {
             if (faceNormal.dot(mid.clone().sub(centroid)) < 0) {
                 [a2, b2] = [b2, a2];
             }
-            const edgeHeight = typeof height === 'function' ? height(mid) : height;
-            if (edgeHeight <= 0) continue;
-            const openings = withOpenings ? this.collectOpeningsForEdge(a2, b2, baseY, baseY + edgeHeight) : [];
-            this.appendWallSegment(triangles, a2, b2, baseY, edgeHeight, uv, openings, windowsOut, doorsOut);
+            const openings = withOpenings ? this.collectOpeningsForEdge(a2, b2, baseY, baseY + height) : [];
+            this.appendWallSegment(triangles, a2, b2, baseY, height, uv, openings, windowsOut, doorsOut);
         }
         return triangles;
     }
@@ -787,6 +760,7 @@ export default class Building extends WorldElement {
         baseY: number,
         ridgeHeight: number,
         overhang: number,
+        ridgeAlongX: boolean,
         gableWallsOut: Triangle[],
         windowsOut: Triangle[],
         doorsOut: Triangle[],
@@ -804,7 +778,6 @@ export default class Building extends WorldElement {
         const halfWidth = wallHalfWidth + overhang;
         const halfDepth = wallHalfDepth + overhang;
         const ridgeY = baseY + Math.max(0.1, ridgeHeight);
-        const ridgeAlongX = rectWidth >= rectDepth;
         const thickness = Math.max(0.02, this.roofThickness);
 
         const uv = this.roofUV;
@@ -984,7 +957,7 @@ export default class Building extends WorldElement {
                 wallHeight: segment.wallHeight,
                 roofRidgeHeight: segment.roofRidgeHeight,
                 roofOverhang: segment.roofOverhang,
-                separateRoof: segment.separateRoof,
+                roofDirection: segment.roofDirection,
             })),
             buildingRoofType: this.roofType,
             buildingRoofThickness: this.roofThickness,
@@ -1016,6 +989,7 @@ export default class Building extends WorldElement {
         const legacyWallHeight = data.buildingWallHeight ?? DEFAULT_WALL_HEIGHT;
         const legacyRidgeHeight = data.buildingRoofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT;
         const legacyOverhang = data.buildingRoofOverhang ?? DEFAULT_ROOF_OVERHANG;
+        const parseDirection = (value: string | undefined): RoofDirection => (value === 'x' || value === 'z' ? value : 'auto');
 
         const building = new Building(anchor, {
             width: segmentsData[0].width,
@@ -1023,7 +997,7 @@ export default class Building extends WorldElement {
             wallHeight: segmentsData[0].wallHeight ?? legacyWallHeight,
             roofRidgeHeight: segmentsData[0].roofRidgeHeight ?? legacyRidgeHeight,
             roofOverhang: segmentsData[0].roofOverhang ?? legacyOverhang,
-            separateRoof: segmentsData[0].separateRoof ?? false,
+            roofDirection: parseDirection(segmentsData[0].roofDirection),
         });
         building.getSegmentNode(0).mesh.position.set(segmentsData[0].x, segmentsData[0].y, segmentsData[0].z);
         for (const segment of segmentsData.slice(1)) {
@@ -1031,7 +1005,7 @@ export default class Building extends WorldElement {
                 wallHeight: segment.wallHeight ?? legacyWallHeight,
                 roofRidgeHeight: segment.roofRidgeHeight ?? legacyRidgeHeight,
                 roofOverhang: segment.roofOverhang ?? legacyOverhang,
-                separateRoof: segment.separateRoof ?? false,
+                roofDirection: parseDirection(segment.roofDirection),
             });
         }
 
@@ -1184,10 +1158,15 @@ export default class Building extends WorldElement {
                             step: 0.05,
                         },
                         {
-                            type: 'boolean' as const,
-                            label: 'Separate Roof',
-                            get: () => segment.separateRoof,
-                            set: (v: boolean) => { segment.separateRoof = v; self.update(); },
+                            type: 'select' as const,
+                            label: 'Roof Direction',
+                            options: [
+                                { label: 'Auto', value: 'auto' },
+                                { label: 'Along Width (X)', value: 'x' },
+                                { label: 'Along Depth (Z)', value: 'z' },
+                            ],
+                            get: () => segment.roofDirection,
+                            set: (v: string) => { segment.roofDirection = v === 'x' || v === 'z' ? v : 'auto'; self.update(); },
                         },
                     ] : []),
                     ...(self.segments.length > 1 ? [{ type: 'button' as const, label: 'Remove Segment', onClick: () => self.removeSegment(index) }] : []),
