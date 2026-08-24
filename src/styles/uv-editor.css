@@ -17,6 +17,10 @@
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    /* Panning/dragging the canvas (or the header, to move the panel) moves the mouse over
+       the title/dropdown/footer text too - without this the browser starts a native text
+       selection mid-drag instead of just panning. */
+    user-select: none;
 }
 
 #uv-editor.visible {

@@ -576,6 +576,11 @@ export default class UVEditorPanel {
 
     private onWheel = (e: WheelEvent): void => {
         e.preventDefault();
+        // Camera's own wheel-zoom listener is window-level and only checks that the event's
+        // target is *a* <canvas> element - the UV editor's own canvas matches that too, so
+        // without stopping propagation here scrolling to zoom the UV view also zoomed the
+        // main 3D camera underneath it at the same time.
+        e.stopPropagation();
         const factor = e.deltaY > 0 ? 0.9 : 1.1;
         const rect = this.canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
