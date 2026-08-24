@@ -461,6 +461,10 @@ export default class UVEditorPanel {
 
     private onMouseDown = (e: MouseEvent): void => {
         if (!this.element || !this.activeGroup) return;
+        // Camera's own orbit/pan/look drag starts on any mousedown whose target is *a*
+        // <canvas> element (same loose check onWheel had) - without this, right-dragging to
+        // pan the UV view also spun the main 3D camera underneath the panel.
+        e.stopPropagation();
         const rect = this.canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;

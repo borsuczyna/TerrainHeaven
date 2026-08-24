@@ -3,6 +3,7 @@ import { singleton, inject } from 'tsyringe';
 import type WorldNode from '../elements/WorldNode';
 import type WorldElement from '../elements/WorldElement';
 import Camera from './Camera';
+import Renderer from './Renderer';
 import SceneManager from './SceneManager';
 import type { PropertyDefinition } from './Properties';
 import GizmoManager from './GizmoManager';
@@ -47,6 +48,7 @@ export default class SelectionManager {
 
     constructor(
         @inject(Camera) camera: Camera,
+        @inject(Renderer) private readonly renderer: Renderer,
         @inject(SceneManager) scene: SceneManager,
         @inject(GizmoManager) gizmo: GizmoManager,
         @inject(ToolManager) toolManager: ToolManager,
@@ -83,8 +85,11 @@ export default class SelectionManager {
     private onMouseDown = (e: MouseEvent): void => {
         if (e.button !== 0) return;
 
-        // Ignore clicks on any UI element (only respond to canvas)
-        if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
+        // Ignore clicks on any UI element - specifically the main render canvas, not just
+        // "any <canvas> tag": the UV editor panel's own preview canvas is also a <canvas>
+        // element, and a plain tagName check let mousedowns inside it also fall through to
+        // box-select/node-pick against the 3D scene underneath the panel.
+        if (e.target !== this.renderer.domElement) return;
 
         // The move/rotate gizmo (see CustomTransformGizmo) and building resize handles (see
         // BuildingHandleManager) both take priority over the normal node/element pick below -
