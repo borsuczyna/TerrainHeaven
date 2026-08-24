@@ -10,6 +10,7 @@ import WorldElement, {
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
+import type { BuildingHandleDescriptor } from '../editor/BuildingHandleManager';
 
 type Point2 = [number, number];
 type Ring = Point2[];
@@ -130,6 +131,11 @@ export default class Building extends WorldElement {
     public cutInGround = false;
 
     private segments: SegmentEntry[];
+    // In-viewport resize handles (see BuildingHandleManager) - only exist while the
+    // building is selected, torn down and rebuilt from scratch on every geometry update so
+    // they never drift out of sync with the segment/roof data they're derived from.
+    private handleMeshes: THREE.Mesh[] = [];
+    private handlesVisible = false;
     private openings: OpeningEntry[] = [];
     private wallUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
     private roofUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
@@ -194,6 +200,16 @@ export default class Building extends WorldElement {
             material.side = THREE.DoubleSide;
             material.needsUpdate = true;
         }
+        // Handles reposition themselves off the same segment/roof data the geometry above
+        // was just rebuilt from, so this has to run after every update() - including the
+        // ones a handle's own drag triggers - not just once on selection change.
+        this.rebuildHandles();
+    }
+
+    public override setSelected(selected: boolean): void {
+        super.setSelected(selected);
+        this.handlesVisible = selected;
+        this.rebuildHandles();
     }
 
     public override cutsTerrainSurface(): boolean {
@@ -376,6 +392,113 @@ export default class Building extends WorldElement {
             else groups.set(key, [segment]);
         }
         return [...groups.values()];
+    }
+
+    // --- viewport resize handles -----------------------------------------------------
+
+    private clearHandles(): void {
+        for (const mesh of this.handleMeshes) {
+            this.mesh.remove(mesh);
+            mesh.geometry.dispose();
+            (mesh.material as THREE.Material).dispose();
+        }
+        this.handleMeshes = [];
+    }
+
+    // position/axis are world-space; sensitivity is how many world units the handle's own
+    // position moves per 1 unit of value change (see BuildingHandleDescriptor). The handle
+    // mesh is added under this.mesh (like every other node marker), so its local position
+    // has to be converted from the world-space position callers pass in.
+    private addHandle(
+        position: THREE.Vector3,
+        axis: THREE.Vector3,
+        sensitivity: number,
+        label: string,
+        getValue: () => number,
+        setValue: (v: number) => void,
+        min?: number,
+        max?: number,
+    ): void {
+        const geometry = new THREE.SphereGeometry(0.16, 12, 8);
+        const material = new THREE.MeshBasicMaterial({ color: 0xffcc33, depthTest: false, transparent: true, opacity: 0.9 });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(this.mesh.worldToLocal(position.clone()));
+        mesh.renderOrder = 998;
+        const descriptor: BuildingHandleDescriptor = {
+            getValue,
+            setValue,
+            getPosition: () => {
+                const p = new THREE.Vector3();
+                mesh.getWorldPosition(p);
+                return p;
+            },
+            axis,
+            sensitivity,
+            label,
+            min,
+            max,
+        };
+        mesh.userData.buildingHandle = descriptor;
+        this.mesh.add(mesh);
+        this.handleMeshes.push(mesh);
+    }
+
+    private rebuildHandles(): void {
+        this.clearHandles();
+        if (!this.handlesVisible) return;
+
+        const AXIS_X = new THREE.Vector3(1, 0, 0);
+        const AXIS_Y = new THREE.Vector3(0, 1, 0);
+        const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+        for (const segment of this.segments) {
+            const cx = segment.node.mesh.position.x;
+            const cz = segment.node.mesh.position.z;
+            const baseY = segment.node.mesh.position.y;
+            const hw = Math.max(MIN_SEGMENT_SIZE, segment.width) / 2;
+            const hd = Math.max(MIN_SEGMENT_SIZE, segment.depth) / 2;
+            const wallTopY = baseY + segment.wallHeight;
+
+            // Width/depth: dragging the edge resizes symmetrically about the segment's own
+            // (fixed) center, so the edge only moves half as far as the width/depth change -
+            // hence sensitivity 0.5, not 1.
+            this.addHandle(
+                new THREE.Vector3(cx + hw, baseY + segment.wallHeight / 2, cz),
+                AXIS_X, 0.5, 'Segment Width',
+                () => segment.width,
+                (v) => { segment.width = Math.max(MIN_SEGMENT_SIZE, v); this.update(); },
+                MIN_SEGMENT_SIZE,
+            );
+            this.addHandle(
+                new THREE.Vector3(cx, baseY + segment.wallHeight / 2, cz + hd),
+                AXIS_Z, 0.5, 'Segment Depth',
+                () => segment.depth,
+                (v) => { segment.depth = Math.max(MIN_SEGMENT_SIZE, v); this.update(); },
+                MIN_SEGMENT_SIZE,
+            );
+
+            // Wall height: the handle sits right at the wall top and tracks it 1:1.
+            this.addHandle(
+                new THREE.Vector3(cx + hw * 0.5, wallTopY, cz + hd),
+                AXIS_Y, 1, 'Wall Height',
+                () => segment.wallHeight,
+                (v) => { segment.wallHeight = Math.max(0.5, v); this.update(); },
+                0.5,
+            );
+
+            // Roof ridge height: sits at the ridge/apex point, common to every pitched roof
+            // type (gable, hip, tented and gambrel all read the same roofRidgeHeight field) -
+            // tracks it 1:1 straight up from the wall top.
+            if (segment.roofType !== 'flat') {
+                this.addHandle(
+                    new THREE.Vector3(cx, wallTopY + segment.roofRidgeHeight, cz),
+                    AXIS_Y, 1, 'Roof Ridge Height',
+                    () => segment.roofRidgeHeight,
+                    (v) => { segment.roofRidgeHeight = Math.max(0.1, v); this.update(); },
+                    0.1,
+                );
+            }
+        }
     }
 
     protected override getGeometry(): GeometryGroup[] {

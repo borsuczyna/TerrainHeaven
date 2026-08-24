@@ -13,6 +13,7 @@ import HistoryManager from './HistoryManager';
 import TerrainCutPointManager from './TerrainCutPointManager';
 import XRayManager from './XRayManager';
 import MeshInstanceSelector from './MeshInstanceSelector';
+import BuildingHandleManager from './BuildingHandleManager';
 
 @singleton()
 export default class SelectionManager {
@@ -55,6 +56,7 @@ export default class SelectionManager {
         @inject(TerrainCutPointManager) private readonly terrainCutPoints: TerrainCutPointManager,
         @inject(XRayManager) private readonly xray: XRayManager,
         @inject(MeshInstanceSelector) private readonly meshInstanceSelector: MeshInstanceSelector,
+        @inject(BuildingHandleManager) private readonly buildingHandles: BuildingHandleManager,
     ) {
         this.cameraController = camera;
         this.sceneManager = scene;
@@ -84,12 +86,17 @@ export default class SelectionManager {
         // Ignore clicks on any UI element (only respond to canvas)
         if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
 
+        // Building resize handles (see BuildingHandleManager) take priority over the normal
+        // node/element pick below - grabbing one starts its own single-axis drag directly,
+        // and it would otherwise also select whatever node sits underneath it.
+        if (this.buildingHandles.tryStartDrag(e)) return;
+
         // Delegate to active tool first
         const activeTool = this.toolManager.getActive();
         if (activeTool?.name !== 'select' && activeTool?.onMouseDown?.(e)) return;
 
         // Ignore when gizmo is being used
-        if (this.gizmo.isDragging || this.meshInstanceSelector.isDragging) return;
+        if (this.gizmo.isDragging || this.meshInstanceSelector.isDragging || this.buildingHandles.isDragging) return;
 
         this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
