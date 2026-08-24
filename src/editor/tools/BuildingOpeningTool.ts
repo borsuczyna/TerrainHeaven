@@ -41,7 +41,7 @@ export default class BuildingOpeningTool implements Tool {
 
         const targets: THREE.Object3D[] = [];
         for (const child of this.scene.instance.children) {
-            if (child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane') {
+            if (!child.userData.isGizmoWidget) {
                 targets.push(child);
             }
         }

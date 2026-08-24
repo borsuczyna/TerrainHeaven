@@ -61,7 +61,7 @@ export default class TextureDropManager {
 
         const targets: THREE.Object3D[] = [];
         for (const child of this.scene.instance.children) {
-            if (child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane') {
+            if (!child.userData.isGizmoWidget) {
                 targets.push(child);
             }
         }
@@ -88,8 +88,7 @@ export default class TextureDropManager {
             -(e.clientY / window.innerHeight) * 2 + 1,
         );
         this.raycaster.setFromCamera(mouse, this.camera.instance);
-        const targets = this.scene.instance.children.filter((child) =>
-            child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane');
+        const targets = this.scene.instance.children.filter((child) => !child.userData.isGizmoWidget);
         for (const hit of this.raycaster.intersectObjects(targets, true)) {
             let object: THREE.Object3D | null = hit.object;
             let element: WorldElement | undefined;

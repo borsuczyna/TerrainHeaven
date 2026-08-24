@@ -405,12 +405,16 @@ export default class Building extends WorldElement {
         this.handleMeshes = [];
     }
 
-    // position/axis are world-space; sensitivity is how many world units the handle's own
-    // position moves per 1 unit of value change (see BuildingHandleDescriptor). The handle
-    // mesh is added under this.mesh (like every other node marker), so its local position
-    // has to be converted from the world-space position callers pass in.
-    private addHandle(
-        position: THREE.Vector3,
+    // pointA/pointB (world-space) are the two ends of the visible line - it doubles as the
+    // draggable hit target, so a wall-height handle for instance actually looks like the
+    // wall's own height rather than a dot floating at the top of it. axis/sensitivity work
+    // the same as before: axis is the world-space direction the value increases in, and
+    // sensitivity is how many world units the LINE'S REFERENCE POINT (its midpoint) would
+    // move per 1 unit of value change - used only to calibrate the drag, not to move the
+    // line directly (rebuildHandles already redraws it from scratch after every change).
+    private addHandleLine(
+        pointA: THREE.Vector3,
+        pointB: THREE.Vector3,
         axis: THREE.Vector3,
         sensitivity: number,
         label: string,
@@ -419,10 +423,15 @@ export default class Building extends WorldElement {
         min?: number,
         max?: number,
     ): void {
-        const geometry = new THREE.SphereGeometry(0.16, 12, 8);
+        const length = pointA.distanceTo(pointB);
+        if (length < 1e-4) return;
+        const geometry = new THREE.CylinderGeometry(0.045, 0.045, length, 8);
         const material = new THREE.MeshBasicMaterial({ color: 0xffcc33, depthTest: false, transparent: true, opacity: 0.9 });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(this.mesh.worldToLocal(position.clone()));
+        const midWorld = pointA.clone().add(pointB).multiplyScalar(0.5);
+        mesh.position.copy(this.mesh.worldToLocal(midWorld.clone()));
+        const dir = pointB.clone().sub(pointA).normalize();
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
         mesh.renderOrder = 998;
         const descriptor: BuildingHandleDescriptor = {
             getValue,
@@ -459,43 +468,78 @@ export default class Building extends WorldElement {
             const hd = Math.max(MIN_SEGMENT_SIZE, segment.depth) / 2;
             const wallTopY = baseY + segment.wallHeight;
 
-            // Width/depth: dragging the edge resizes symmetrically about the segment's own
-            // (fixed) center, so the edge only moves half as far as the width/depth change -
-            // hence sensitivity 0.5, not 1.
-            this.addHandle(
-                new THREE.Vector3(cx + hw, baseY + segment.wallHeight / 2, cz),
+            // Width/depth: a line along the wall face being resized, so it reads as "this is
+            // that edge" rather than a dot floating off to the side. Dragging it resizes
+            // symmetrically about the segment's own (fixed) center, so the edge only moves
+            // half as far as the width/depth change - hence sensitivity 0.5, not 1.
+            this.addHandleLine(
+                new THREE.Vector3(cx + hw, baseY, cz - hd), new THREE.Vector3(cx + hw, baseY, cz + hd),
                 AXIS_X, 0.5, 'Segment Width',
                 () => segment.width,
                 (v) => { segment.width = Math.max(MIN_SEGMENT_SIZE, v); this.update(); },
                 MIN_SEGMENT_SIZE,
             );
-            this.addHandle(
-                new THREE.Vector3(cx, baseY + segment.wallHeight / 2, cz + hd),
+            this.addHandleLine(
+                new THREE.Vector3(cx - hw, baseY, cz + hd), new THREE.Vector3(cx + hw, baseY, cz + hd),
                 AXIS_Z, 0.5, 'Segment Depth',
                 () => segment.depth,
                 (v) => { segment.depth = Math.max(MIN_SEGMENT_SIZE, v); this.update(); },
                 MIN_SEGMENT_SIZE,
             );
 
-            // Wall height: the handle sits right at the wall top and tracks it 1:1.
-            this.addHandle(
-                new THREE.Vector3(cx + hw * 0.5, wallTopY, cz + hd),
+            // Wall height: a vertical line spanning the wall's own height, at one corner.
+            this.addHandleLine(
+                new THREE.Vector3(cx + hw, baseY, cz + hd), new THREE.Vector3(cx + hw, wallTopY, cz + hd),
                 AXIS_Y, 1, 'Wall Height',
                 () => segment.wallHeight,
                 (v) => { segment.wallHeight = Math.max(0.5, v); this.update(); },
                 0.5,
             );
 
-            // Roof ridge height: sits at the ridge/apex point, common to every pitched roof
-            // type (gable, hip, tented and gambrel all read the same roofRidgeHeight field) -
-            // tracks it 1:1 straight up from the wall top.
+            // Roof ridge height: a vertical line from the wall top up to the ridge/apex,
+            // common to every pitched roof type (gable, hip, tented and gambrel all read the
+            // same roofRidgeHeight field).
             if (segment.roofType !== 'flat') {
-                this.addHandle(
-                    new THREE.Vector3(cx, wallTopY + segment.roofRidgeHeight, cz),
+                this.addHandleLine(
+                    new THREE.Vector3(cx, wallTopY, cz), new THREE.Vector3(cx, wallTopY + segment.roofRidgeHeight, cz),
                     AXIS_Y, 1, 'Roof Ridge Height',
                     () => segment.roofRidgeHeight,
                     (v) => { segment.roofRidgeHeight = Math.max(0.1, v); this.update(); },
                     0.1,
+                );
+            }
+
+            // Hip ridge length: a line along the ridge itself (both ends move together as
+            // the ratio changes), only meaningful for 'hip' - 'tented' always collapses it
+            // to a point and every other type has no ridge line at all.
+            if (segment.roofType === 'hip') {
+                const ridgeAlongX = segment.roofDirection === 'x' ? true
+                    : segment.roofDirection === 'z' ? false
+                    : segment.width >= segment.depth;
+                const overhang = Math.max(0, segment.roofOverhang);
+                const wallHalfWidth = hw + FOOTPRINT_UNION_PADDING;
+                const wallHalfDepth = hd + FOOTPRINT_UNION_PADDING;
+                const halfWidth = wallHalfWidth + overhang;
+                const halfDepth = wallHalfDepth + overhang;
+                const ridgeHalfLenMax = (ridgeAlongX ? halfWidth : halfDepth) * 0.95;
+                const ridgeHalfLen = THREE.MathUtils.clamp(segment.hipRidgeRatio, 0, 1) * ridgeHalfLenMax;
+                const ridgeY = wallTopY + segment.roofRidgeHeight;
+                const ridgeA = ridgeAlongX
+                    ? new THREE.Vector3(cx - ridgeHalfLen, ridgeY, cz)
+                    : new THREE.Vector3(cx, ridgeY, cz - ridgeHalfLen);
+                const ridgeB = ridgeAlongX
+                    ? new THREE.Vector3(cx + ridgeHalfLen, ridgeY, cz)
+                    : new THREE.Vector3(cx, ridgeY, cz + ridgeHalfLen);
+                // Degenerate (ridge collapsed to a point, ratio 0) - fall back to a minimal
+                // visible nub along the ridge axis so there's still something to grab.
+                const axisDir = ridgeAlongX ? AXIS_X : AXIS_Z;
+                const a = ridgeHalfLen > 1e-3 ? ridgeA : ridgeA.clone().addScaledVector(axisDir, -0.15);
+                const b = ridgeHalfLen > 1e-3 ? ridgeB : ridgeB.clone().addScaledVector(axisDir, 0.15);
+                this.addHandleLine(
+                    a, b, axisDir, ridgeHalfLenMax, 'Hip Ridge Length',
+                    () => segment.hipRidgeRatio,
+                    (v) => { segment.hipRidgeRatio = THREE.MathUtils.clamp(v, 0, 1); this.update(); },
+                    0, 1,
                 );
             }
         }

@@ -246,7 +246,7 @@ export default abstract class SplinePlacementTool<T extends CurvePlacementElemen
         const targets: THREE.Object3D[] = [];
         for (const child of this.scene.instance.children) {
             if (this.preview && child === this.preview.mesh) continue;
-            if (child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane') {
+            if (!child.userData.isGizmoWidget) {
                 targets.push(child);
             }
         }

@@ -86,9 +86,13 @@ export default class SelectionManager {
         // Ignore clicks on any UI element (only respond to canvas)
         if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
 
-        // Building resize handles (see BuildingHandleManager) take priority over the normal
-        // node/element pick below - grabbing one starts its own single-axis drag directly,
-        // and it would otherwise also select whatever node sits underneath it.
+        // The move/rotate gizmo (see CustomTransformGizmo) and building resize handles (see
+        // BuildingHandleManager) both take priority over the normal node/element pick below -
+        // grabbing either starts its own drag directly, and would otherwise also select
+        // whatever node/element sits underneath it (or, with nothing underneath, start a
+        // box-select instead).
+        if (this.gizmo.tryHandleMouseDown(e)) return;
+        if (this.meshInstanceSelector.tryStartDrag(e)) return;
         if (this.buildingHandles.tryStartDrag(e)) return;
 
         // Delegate to active tool first
@@ -106,7 +110,7 @@ export default class SelectionManager {
         // Collect non-gizmo objects for raycasting
         const targets: THREE.Object3D[] = [];
         for (const child of this.scene.children) {
-            if (child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane') {
+            if (!child.userData.isGizmoWidget) {
                 targets.push(child);
             }
         }

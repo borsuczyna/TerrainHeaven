@@ -108,7 +108,7 @@ export default class UVTool implements Tool {
     private getSceneTargets(): THREE.Object3D[] {
         const targets: THREE.Object3D[] = [];
         for (const child of this.scene.children) {
-            if (child.type !== 'TransformControlsRoot' && child.type !== 'TransformControlsGizmo' && child.type !== 'TransformControlsPlane') {
+            if (!child.userData.isGizmoWidget) {
                 targets.push(child);
             }
         }

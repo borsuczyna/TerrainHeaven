@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import CustomTransformGizmo from '../CustomTransformGizmo';
 import { createIcons, icons } from 'lucide';
 import { inject, singleton } from 'tsyringe';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -40,7 +40,7 @@ export default class MeshCalibrationPanel {
     private scene: THREE.Scene | null = null;
     private camera: THREE.PerspectiveCamera | null = null;
     private orbitControls: OrbitControls | null = null;
-    private transformControls: TransformControls | null = null;
+    private transformControls: CustomTransformGizmo | null = null;
     private previewContainer: THREE.Group | null = null;
     private rafHandle: number | null = null;
 
@@ -351,11 +351,18 @@ export default class MeshCalibrationPanel {
         // Lets the user drag the model directly into place instead of only typing offset
         // numbers - attached to previewContainer, whose own .position IS the calibration
         // PositionOffset (see applyContainerTransform), so a drag maps onto it 1:1.
-        this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+        this.transformControls = new CustomTransformGizmo(this.camera, this.renderer.domElement);
         this.transformControls.setMode('translate');
         this.transformControls.setSize(0.9);
         this.transformControls.attach(this.previewContainer);
         this.scene.add(this.transformControls.getHelper());
+        // This preview has its own isolated renderer/scene/camera, not routed through
+        // SelectionManager, so (unlike GizmoManager/MeshInstanceSelector) it needs its own
+        // explicit call into tryStartDrag - see that method's own note on why it isn't a
+        // DOM listener owned by the gizmo itself.
+        this.renderer.domElement.addEventListener('mousedown', (e) => {
+            this.transformControls?.tryStartDrag(e);
+        });
         this.transformControls.addEventListener('dragging-changed', (event) => {
             if (this.orbitControls) this.orbitControls.enabled = !event.value;
             if (event.value) {

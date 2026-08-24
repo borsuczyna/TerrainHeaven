@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import CustomTransformGizmo from './CustomTransformGizmo';
 import { inject, singleton } from 'tsyringe';
 import SceneManager from './SceneManager';
 import Camera from './Camera';
@@ -17,7 +17,7 @@ import type { MeshInstanceData } from '../mesh/MeshData';
 @singleton()
 export default class MeshInstanceSelector {
     private readonly proxy = new THREE.Object3D();
-    private readonly controls: TransformControls;
+    private readonly controls: CustomTransformGizmo;
     private readonly label: HTMLElement;
     private mode: 'translate' | 'rotate' = 'translate';
     private selection: { assetIndex: number; instanceIndex: number } | null = null;
@@ -29,7 +29,7 @@ export default class MeshInstanceSelector {
         @inject(HistoryManager) private readonly history: HistoryManager,
         @inject(MeshManager) private readonly meshes: MeshManager,
     ) {
-        this.controls = new TransformControls(camera.instance, renderer.domElement);
+        this.controls = new CustomTransformGizmo(camera.instance, renderer.domElement);
         camera.onChanged(() => { this.controls.camera = camera.instance; });
         this.controls.setMode('translate');
         this.controls.setSize(0.8);
@@ -59,6 +59,13 @@ export default class MeshInstanceSelector {
 
     public get isDragging(): boolean {
         return this.controls.dragging;
+    }
+
+    // Called explicitly by SelectionManager before its own click-pick logic, exactly like
+    // GizmoManager.tryHandleMouseDown - see CustomTransformGizmo.tryStartDrag's own note on
+    // why this is a direct method call rather than the gizmo's own DOM listener.
+    public tryStartDrag(e: MouseEvent): boolean {
+        return this.controls.tryStartDrag(e);
     }
 
     public get hasSelection(): boolean {

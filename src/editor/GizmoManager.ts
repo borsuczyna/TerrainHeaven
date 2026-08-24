@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { singleton, inject, delay } from 'tsyringe';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import CustomTransformGizmo from './CustomTransformGizmo';
 import type WorldNode from '../elements/WorldNode';
 import type WorldElement from '../elements/WorldElement';
 import Camera from './Camera';
@@ -16,7 +16,7 @@ export interface GizmoModeState {
 
 @singleton()
 export default class GizmoManager {
-    private controls: TransformControls;
+    private controls: CustomTransformGizmo;
     private activeNodes: WorldNode[] = [];
     private activeElements: WorldElement[] = [];
     private helper: THREE.Object3D = new THREE.Object3D();
@@ -36,7 +36,7 @@ export default class GizmoManager {
         @inject(HistoryManager) private readonly history: HistoryManager,
     ) {
         this.sceneManager = scene;
-        this.controls = new TransformControls(camera.instance, renderer.domElement);
+        this.controls = new CustomTransformGizmo(camera.instance, renderer.domElement);
         camera.onChanged(() => {
             this.controls.camera = camera.instance;
         });
@@ -106,6 +106,13 @@ export default class GizmoManager {
         this.activeElements = [];
         this.updateControlMode();
         this.controls.detach();
+    }
+
+    // Called explicitly by SelectionManager before its own node/element pick, exactly like
+    // BuildingHandleManager.tryStartDrag - see CustomTransformGizmo.tryStartDrag's own note
+    // on why this is a direct method call rather than the gizmo's own DOM listener.
+    public tryHandleMouseDown(e: MouseEvent): boolean {
+        return this.controls.tryStartDrag(e);
     }
 
     public handleShortcut(key: string): boolean {
@@ -299,9 +306,11 @@ export default class GizmoManager {
         this.effectiveMode = this.desiredMode === 'rotate' && canRotateSelection ? 'rotate' : 'translate';
         this.controls.setMode(this.effectiveMode);
         this.controls.setSpace('world');
+        // Rotation is restricted to spinning around the real vertical axis - which the
+        // gizmo's own 'z' letter now points along (see CustomTransformGizmo's y/z swap).
         this.controls.showX = this.effectiveMode === 'translate';
-        this.controls.showY = true;
-        this.controls.showZ = this.effectiveMode === 'translate';
+        this.controls.showY = this.effectiveMode === 'translate';
+        this.controls.showZ = true;
         this.onModeStateChanged?.(this.getModeState());
     }
 
