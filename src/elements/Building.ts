@@ -155,8 +155,8 @@ const DEFAULT_ROOF_WINDOW_RIDGE_HEIGHT = 0.5;
 // A dormer is only placed sensibly somewhere between the ridge and the eave - t is the
 // fractional perpendicular distance from the ridge (0) to the eave (1) used throughout
 // buildRoofWindows; these keep it off both the ridge itself and the very edge of the roof.
-const ROOF_WINDOW_MIN_T = 0.18;
-const ROOF_WINDOW_MAX_T = 0.82;
+const ROOF_WINDOW_MIN_T = 0.12;
+const ROOF_WINDOW_MAX_T = 0.94;
 
 // A multi-room building: one or more rectangular footprint segments (unioned via the same
 // polygon-clipping approach TerrainMesher uses for touching terrain tiles) extruded into
@@ -581,9 +581,14 @@ export default class Building extends WorldElement {
             const roofUv = this.getUVFor(roofKey);
 
             const frontCenter = new THREE.Vector3(clampedX, y, clampedZ);
-            const halfW = entry.width / 2;
-            let leftPoint = frontCenter.clone().addScaledVector(along, -halfW);
-            let rightPoint = frontCenter.clone().addScaledVector(along, halfW);
+            // Matches buildGableRoofForRect's own internal wallHalfWidth/wallHalfDepth
+            // formula exactly (see its call below) - the front/cheek walls need the SAME
+            // half-extent the gable-end attic triangle's base uses, or the triangle's wider
+            // (padded) base overhangs past the wall's narrower corners with nothing filling
+            // the gap, which is what the reported hole at the roof/wall seam actually was.
+            const wallHalfW = Math.max(MIN_SEGMENT_SIZE, entry.width) / 2 + FOOTPRINT_UNION_PADDING;
+            let leftPoint = frontCenter.clone().addScaledVector(along, -wallHalfW);
+            let rightPoint = frontCenter.clone().addScaledVector(along, wallHalfW);
             // buildWallStrip/appendWallSegment always derive "outward" from (a2->b2) via a
             // fixed left-hand rule - pick whichever order actually matches this slope's own
             // outward direction rather than assuming along's sign already agrees with it.
@@ -595,7 +600,7 @@ export default class Building extends WorldElement {
                 this.bucket(walls, wallKey), wallUv, windows, new Map(),
                 [leftPoint.x, leftPoint.z], [rightPoint.x, rightPoint.z], y, entry.wallHeight,
                 [{
-                    u: halfW, width: entry.width * 0.6, height: entry.wallHeight * 0.65,
+                    u: wallHalfW, width: entry.width * 0.6, height: entry.wallHeight * 0.65,
                     sill: entry.wallHeight * 0.18, depth: 0.08, type: 'window', index, groupPrefix: 'dormerWindows',
                 }],
             );
@@ -610,7 +615,7 @@ export default class Building extends WorldElement {
             // already makes.
             const rearCenter = frontCenter.clone().addScaledVector(outward, -entry.depth);
             for (const side of [-1, 1] as const) {
-                const sideOffset = along.clone().multiplyScalar(side * halfW);
+                const sideOffset = along.clone().multiplyScalar(side * wallHalfW);
                 const frontEdge = frontCenter.clone().add(sideOffset);
                 const rearEdge = rearCenter.clone().add(sideOffset);
                 let sideA: Point2 = [frontEdge.x, frontEdge.z];
