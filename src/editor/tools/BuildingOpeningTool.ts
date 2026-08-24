@@ -50,7 +50,9 @@ export default class BuildingOpeningTool implements Tool {
             if (!candidate.face) continue;
             const element = candidate.object.userData.worldElement as unknown;
             if (!(element instanceof Building)) continue;
-            if (element.getGroupNameAtFace(candidate.faceIndex ?? 0) !== 'walls') continue;
+            // Group names are now per-segment ("walls#0", "walls#1", ...) rather than one
+            // shared "walls" - see the class-level note in Building.ts.
+            if (!element.getGroupNameAtFace(candidate.faceIndex ?? 0)?.startsWith('walls#')) continue;
 
             element.addOpening(candidate.point, this.panel.settings.type);
             this.history.record(this.panel.settings.type === 'door' ? 'Add Door' : 'Add Window');

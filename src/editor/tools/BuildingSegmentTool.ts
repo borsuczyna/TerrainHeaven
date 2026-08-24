@@ -66,8 +66,10 @@ export default class BuildingSegmentTool implements Tool {
             if (!candidate.face) continue;
             const element = candidate.object.userData.worldElement as unknown;
             if (!(element instanceof Building)) continue;
+            // Group names are now per-segment ("walls#0", "walls#1", ...) rather than one
+            // shared "walls" - see the class-level note in Building.ts.
             const groupName = element.getGroupNameAtFace(candidate.faceIndex ?? 0);
-            if (groupName !== 'walls') continue;
+            if (!groupName?.startsWith('walls#')) continue;
 
             const outward = candidate.face.normal.clone().transformDirection(candidate.object.matrixWorld);
             outward.y = 0;
