@@ -23,14 +23,21 @@ export interface BuildingSegment {
     roofRidgeHeight?: number;
     roofOverhang?: number;
     roofDirection?: RoofDirection;
+    roofType?: RoofType;
+    hipRidgeRatio?: number;
+    gambrelSegments?: number;
+    gambrelRoundness?: number;
 }
 
-export type RoofType = 'flat' | 'gable';
+// Roof type is per-segment, not building-wide, so a building can mix e.g. a gable main
+// block with a hip-roofed wing. Flat segments sharing a wall height still merge into one
+// slab/parapet (see groupSegmentsByHeight); every pitched type is always built per-segment
+// with its own roof, never merged - see buildGableRoofForRect's own note on why.
+export type RoofType = 'flat' | 'gable' | 'hip' | 'tented' | 'gambrel';
 export type OpeningType = 'window' | 'door';
-// Gable roofs only: which axis the ridge runs along. 'auto' picks whichever of the
-// segment's own width/depth is larger (a wide, shallow segment gets a ridge running along
-// its width, and vice versa) - the same rule used before this was configurable. 'x'/'z'
-// pin the ridge to that axis regardless of the segment's proportions.
+// Which axis the ridge (or, for hip, the long axis) runs along. 'auto' picks whichever of
+// the segment's own width/depth is larger. 'x'/'z' pin it regardless of the segment's
+// proportions. Not used for 'flat' or 'tented' (tented has no ridge axis).
 export type RoofDirection = 'auto' | 'x' | 'z';
 
 interface SegmentEntry {
@@ -41,6 +48,18 @@ interface SegmentEntry {
     roofRidgeHeight: number;
     roofOverhang: number;
     roofDirection: RoofDirection;
+    roofType: RoofType;
+    // hip only: how long the ridge line is, as a fraction (0..1) of the standard equal-
+    // pitch-on-all-sides length (long half-dimension minus short half-dimension). 0
+    // collapses the ridge to a point (same shape as 'tented'); 1 is the standard hip
+    // proportions. Not used by 'tented', which always collapses to a point regardless.
+    hipRidgeRatio: number;
+    // gambrel only: how many slope segments per side (2 = classic barn gambrel break;
+    // more reads as a smoother curve) and how much each segment bulges from a straight
+    // gable line (0 = plain straight gable subdivided; positive = convex/barn curve;
+    // negative = concave/reverse curve).
+    gambrelSegments: number;
+    gambrelRoundness: number;
 }
 
 interface OpeningEntry {
@@ -88,6 +107,9 @@ const FOOTPRINT_UNION_PADDING = 0.1;
 const DEFAULT_WALL_HEIGHT = 3;
 const DEFAULT_ROOF_RIDGE_HEIGHT = 1.6;
 const DEFAULT_ROOF_OVERHANG = 0.4;
+const DEFAULT_HIP_RIDGE_RATIO = 0.5;
+const DEFAULT_GAMBREL_SEGMENTS = 2;
+const DEFAULT_GAMBREL_ROUNDNESS = 0.4;
 
 // A multi-room building: one or more rectangular footprint segments (unioned via the same
 // polygon-clipping approach TerrainMesher uses for touching terrain tiles) extruded into
@@ -100,7 +122,6 @@ const DEFAULT_ROOF_OVERHANG = 0.4;
 // multi-node element together when the whole element is dragged, so nothing here can go
 // stale the way a separately-stored offset or sill height used to).
 export default class Building extends WorldElement {
-    public roofType: RoofType = 'flat';
     public roofThickness = 0.15;
     public railingHeight = 1;
     public railingThickness = 0.15;
@@ -128,11 +149,33 @@ export default class Building extends WorldElement {
             width: Math.max(MIN_SEGMENT_SIZE, firstSegment.width),
             depth: Math.max(MIN_SEGMENT_SIZE, firstSegment.depth),
             node: segmentNode,
-            wallHeight: Math.max(0.5, firstSegment.wallHeight ?? DEFAULT_WALL_HEIGHT),
-            roofRidgeHeight: Math.max(0.1, firstSegment.roofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT),
-            roofOverhang: Math.max(0, firstSegment.roofOverhang ?? DEFAULT_ROOF_OVERHANG),
-            roofDirection: firstSegment.roofDirection ?? 'auto',
+            ...Building.normalizeSegmentOptions(firstSegment),
         }];
+    }
+
+    // Shared clamping/defaulting for every roof-shape field a segment carries, used by the
+    // constructor, addSegment and deserialize alike so a new segment (however it's created)
+    // always ends up with the same sane defaults.
+    private static normalizeSegmentOptions(options?: {
+        wallHeight?: number;
+        roofRidgeHeight?: number;
+        roofOverhang?: number;
+        roofDirection?: RoofDirection;
+        roofType?: RoofType;
+        hipRidgeRatio?: number;
+        gambrelSegments?: number;
+        gambrelRoundness?: number;
+    }): Omit<SegmentEntry, 'width' | 'depth' | 'node'> {
+        return {
+            wallHeight: Math.max(0.5, options?.wallHeight ?? DEFAULT_WALL_HEIGHT),
+            roofRidgeHeight: Math.max(0.1, options?.roofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT),
+            roofOverhang: Math.max(0, options?.roofOverhang ?? DEFAULT_ROOF_OVERHANG),
+            roofDirection: options?.roofDirection ?? 'auto',
+            roofType: options?.roofType ?? 'flat',
+            hipRidgeRatio: THREE.MathUtils.clamp(options?.hipRidgeRatio ?? DEFAULT_HIP_RIDGE_RATIO, 0, 1),
+            gambrelSegments: Math.max(2, Math.round(options?.gambrelSegments ?? DEFAULT_GAMBREL_SEGMENTS)),
+            gambrelRoundness: THREE.MathUtils.clamp(options?.gambrelRoundness ?? DEFAULT_GAMBREL_ROUNDNESS, -0.95, 0.95),
+        };
     }
 
     public override update(): void {
@@ -168,15 +211,8 @@ export default class Building extends WorldElement {
     }
 
     public getSegment(index: number): BuildingSegment {
-        const entry = this.segments[index];
-        return {
-            width: entry.width,
-            depth: entry.depth,
-            wallHeight: entry.wallHeight,
-            roofRidgeHeight: entry.roofRidgeHeight,
-            roofOverhang: entry.roofOverhang,
-            roofDirection: entry.roofDirection,
-        };
+        const { node: _node, ...rest } = this.segments[index];
+        return rest;
     }
 
     public getSegmentNode(index: number): WorldNode {
@@ -187,7 +223,7 @@ export default class Building extends WorldElement {
         position: THREE.Vector3,
         width: number,
         depth: number,
-        options?: { wallHeight?: number; roofRidgeHeight?: number; roofOverhang?: number; roofDirection?: RoofDirection },
+        options?: Omit<BuildingSegment, 'width' | 'depth'>,
     ): void {
         const node = new WorldNode(position.clone(), SEGMENT_NODE_COLOR);
         this.setNode(this.nodes.length, node);
@@ -195,12 +231,10 @@ export default class Building extends WorldElement {
             width: Math.max(MIN_SEGMENT_SIZE, width),
             depth: Math.max(MIN_SEGMENT_SIZE, depth),
             node,
-            wallHeight: Math.max(0.5, options?.wallHeight ?? DEFAULT_WALL_HEIGHT),
-            roofRidgeHeight: Math.max(0.1, options?.roofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT),
-            roofOverhang: Math.max(0, options?.roofOverhang ?? DEFAULT_ROOF_OVERHANG),
-            roofDirection: options?.roofDirection ?? 'auto',
+            ...Building.normalizeSegmentOptions(options),
         });
         this.update();
+        this.onPropertiesChanged?.();
     }
 
     public removeSegment(index: number): boolean {
@@ -208,6 +242,7 @@ export default class Building extends WorldElement {
         this.removeTrackedNode(this.segments[index].node);
         this.segments.splice(index, 1);
         this.update();
+        this.onPropertiesChanged?.();
         return true;
     }
 
@@ -237,6 +272,7 @@ export default class Building extends WorldElement {
             ? { type, width: 0.9, height: 2.05, depth: 0.1, node }
             : { type, width: 1.2, height: 1.2, depth: 0.1, node });
         this.update();
+        this.onPropertiesChanged?.();
     }
 
     public removeOpening(index: number): boolean {
@@ -245,6 +281,7 @@ export default class Building extends WorldElement {
         this.removeTrackedNode(entry.node);
         this.openings.splice(index, 1);
         this.update();
+        this.onPropertiesChanged?.();
         return true;
     }
 
@@ -346,35 +383,67 @@ export default class Building extends WorldElement {
         const railingTriangles: Triangle[] = [];
         const gableWalls: Triangle[] = [];
 
-        // Every segment always gets its own gable roof, sized to its own rectangle and built
-        // from its own wall height, ridge height and overhang - no merged/shared roof. Where
-        // two touching segments' roof volumes overlap, they simply interpenetrate rather than
-        // forming a true architectural valley - real hip/valley intersection is a straight-
-        // skeleton problem well beyond what a level editor's prop building needs.
-        if (this.roofType === 'gable') {
-            for (const segment of this.segments) {
-                const ridgeAlongX = segment.roofDirection === 'x' ? true
-                    : segment.roofDirection === 'z' ? false
-                    : segment.width >= segment.depth;
-                roofTriangles.push(...this.buildGableRoofForRect(
-                    segment.node.mesh.position.x, segment.node.mesh.position.z, segment.width, segment.depth,
-                    anchor.y + segment.wallHeight, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX,
-                    gableWalls, windows, doors,
-                ));
+        // Every pitched segment always gets its own roof, sized to its own rectangle and
+        // built from its own wall height, ridge height and overhang - no merged/shared roof
+        // (see buildGableRoofForRect's own note on why). Where two touching segments' roof
+        // volumes overlap, they simply interpenetrate rather than forming a true
+        // architectural valley - real hip/valley intersection is a straight-skeleton problem
+        // well beyond what a level editor's prop building needs.
+        for (const segment of this.segments) {
+            if (segment.roofType === 'flat') continue;
+            const ridgeAlongX = segment.roofDirection === 'x' ? true
+                : segment.roofDirection === 'z' ? false
+                : segment.width >= segment.depth;
+            const cx = segment.node.mesh.position.x;
+            const cz = segment.node.mesh.position.z;
+            const baseY = anchor.y + segment.wallHeight;
+            switch (segment.roofType) {
+                case 'gable':
+                    roofTriangles.push(...this.buildGableRoofForRect(
+                        cx, cz, segment.width, segment.depth,
+                        baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX,
+                        gableWalls, windows, doors,
+                    ));
+                    break;
+                case 'hip':
+                    roofTriangles.push(...this.buildHipRoofForRect(
+                        cx, cz, segment.width, segment.depth,
+                        baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX, segment.hipRidgeRatio,
+                    ));
+                    break;
+                case 'tented':
+                    roofTriangles.push(...this.buildHipRoofForRect(
+                        cx, cz, segment.width, segment.depth,
+                        baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX, 0,
+                    ));
+                    break;
+                case 'gambrel':
+                    roofTriangles.push(...this.buildProfiledGableRoofForRect(
+                        cx, cz, segment.width, segment.depth,
+                        baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX,
+                        this.buildGambrelProfile(segment.gambrelSegments, segment.gambrelRoundness),
+                        gableWalls, windows, doors,
+                    ));
+                    break;
+                default:
+                    break;
             }
         }
 
         for (const group of this.groupSegmentsByHeight()) {
             const groupHeight = group[0].wallHeight;
-            const topY = anchor.y + groupHeight;
             const groupPolygons = this.computeFootprintPolygons(group);
             const groupEdges = this.collectWallEdges(groupPolygons);
             wallTriangles.push(...this.buildWallStrip(groupEdges, anchor.y, groupHeight, this.wallUV, true, windows, doors));
 
-            if (this.roofType === 'flat') {
-                roofTriangles.push(...this.buildFlatRoofSlab(groupPolygons, groupEdges, topY));
+            const flatSegments = group.filter((segment) => segment.roofType === 'flat');
+            if (flatSegments.length > 0) {
+                const topY = anchor.y + groupHeight;
+                const flatPolygons = this.computeFootprintPolygons(flatSegments);
+                const flatEdges = this.collectWallEdges(flatPolygons);
+                roofTriangles.push(...this.buildFlatRoofSlab(flatPolygons, flatEdges, topY));
                 railingTriangles.push(...this.buildParapetStrip(
-                    groupEdges, topY, Math.max(0.1, this.railingHeight), Math.max(0.02, this.railingThickness), this.railingUV,
+                    flatEdges, topY, Math.max(0.1, this.railingHeight), Math.max(0.02, this.railingThickness), this.railingUV,
                 ));
             }
         }
@@ -929,6 +998,367 @@ export default class Building extends WorldElement {
         return triangles;
     }
 
+    // --- additional roof shapes ------------------------------------------------------
+
+    // heightFrac is divided evenly (N equal height steps from ridge to eave); the matching
+    // horizontal distance is heightFrac raised to a power driven by roundness. At roundness
+    // 0 the exponent is 1, so distance tracks height linearly (a plain straight gable, just
+    // subdivided). Roundness > 0 raises the exponent above 1: distance grows slowly near the
+    // ridge and rapidly near the eave - a steep upper run and a flared, shallow lower run,
+    // the classic convex barn silhouette. Roundness < 0 pushes the exponent below 1 (but
+    // always > 0, so it never blows up at the ridge): distance grows rapidly near the ridge
+    // and slowly near the eave instead - a concave, reverse-curved profile.
+    private buildGambrelProfile(segments: number, roundness: number): { t: number; h: number }[] {
+        const n = Math.max(2, Math.round(segments));
+        const exponent = Math.pow(2, THREE.MathUtils.clamp(roundness, -0.95, 0.95) * 3);
+        const profile: { t: number; h: number }[] = [];
+        for (let i = 0; i <= n; i++) {
+            const heightFrac = i / n;
+            profile.push({ t: Math.pow(heightFrac, exponent), h: 1 - heightFrac });
+        }
+        return profile;
+    }
+
+    // A gable roof whose slope, instead of one straight run from ridge to eave, follows an
+    // arbitrary piecewise-linear profile (ridge at profile[0] = {t:0,h:1}, eave at the last
+    // entry = {t:1,h:0}) - currently only used for gambrel (an N-point profile approximating
+    // a barrel curve), kept general in case another profiled roof is added later. The gable
+    // end walls follow the same profile (scaled to the wall's own, non-overhang footprint)
+    // so the roof and end wall always meet exactly regardless of the profile's shape. Each
+    // slope segment gets the same real 3D thickness/fascia treatment buildGableRoofForRect's
+    // own single-segment panels use (see addThickPanel there) - just repeated once per
+    // profile step instead of once per whole slope.
+    //
+    // Opening clipping on the end wall still uses a single straight ridge-to-corner line as
+    // the height limit (not each individual kink) - a conservative approximation that keeps
+    // a window correctly clear of the roofline even though it doesn't hug an actual kink.
+    private buildProfiledGableRoofForRect(
+        cx: number,
+        cz: number,
+        rectWidth: number,
+        rectDepth: number,
+        baseY: number,
+        ridgeHeight: number,
+        overhang: number,
+        ridgeAlongX: boolean,
+        profile: { t: number; h: number }[],
+        gableWallsOut: Triangle[],
+        windowsOut: Triangle[],
+        doorsOut: Triangle[],
+    ): Triangle[] {
+        overhang = Math.max(0, overhang);
+        const wallHalfWidth = Math.max(MIN_SEGMENT_SIZE, rectWidth) / 2 + FOOTPRINT_UNION_PADDING;
+        const wallHalfDepth = Math.max(MIN_SEGMENT_SIZE, rectDepth) / 2 + FOOTPRINT_UNION_PADDING;
+        const halfWidth = wallHalfWidth + overhang;
+        const halfDepth = wallHalfDepth + overhang;
+        const ridgeDrop = Math.max(0.1, ridgeHeight);
+        const ridgeY = baseY + ridgeDrop;
+
+        const uv = this.roofUV;
+        const gableUv = this.gableWallUV;
+        const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
+        const gableUvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * gableUv.scaleX + gableUv.offsetX, v * gableUv.scaleY + gableUv.offsetY);
+        const triangles: Triangle[] = [];
+        const thickness = Math.max(0.02, this.roofThickness);
+
+        // Real 3D thickness: a top face, a bottom face, and fascia strips - but only on the
+        // two edges that run along the slope's own width (always a true boundary, matching
+        // the gable end wall), plus the ridge-ward edge when this is the first segment and
+        // the eave-ward edge when it's the last. A profile with more than one segment shares
+        // its intermediate breakpoint edges between two consecutive panels with different
+        // slopes (that's the whole point of a profile), and fasciaing a shared edge at all
+        // produced a visible wedge poking out at the seam - fixed by only fasciaing
+        // genuinely unshared edges (see buildHipRoofForRect's own note on the same fix).
+        // The bottom face is offset straight down rather than along the panel's own normal -
+        // two adjacent panels' corners need to land on the exact same point directly below
+        // the shared top corner, and only a fixed world-down offset guarantees that
+        // regardless of which panel's (different) normal is doing the computing; a
+        // per-panel-normal offset put the two panels' bottom corners at different points,
+        // which is what the reported "corner" gap/wedge actually was.
+        const addThickPanel = (
+            p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, p3: THREE.Vector3,
+            isFirstSegment: boolean, isLastSegment: boolean,
+        ): void => {
+            const corners: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3] = [p0, p1, p2, p3];
+            const offset = new THREE.Vector3(0, -thickness, 0);
+            const bottom = corners.map((c) => c.clone().add(offset)) as [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
+            const widthDist = p0.distanceTo(p1);
+            const heightDist = p0.distanceTo(p3);
+            triangles.push(new Triangle(p0, p1, p2, uvFor(0, 0), uvFor(widthDist, 0), uvFor(widthDist, heightDist)));
+            triangles.push(new Triangle(p0, p2, p3, uvFor(0, 0), uvFor(widthDist, heightDist), uvFor(0, heightDist)));
+            triangles.push(new Triangle(bottom[2], bottom[1], bottom[0], uvFor(widthDist, heightDist), uvFor(widthDist, 0), uvFor(0, 0)));
+            triangles.push(new Triangle(bottom[3], bottom[2], bottom[0], uvFor(0, heightDist), uvFor(widthDist, heightDist), uvFor(0, 0)));
+            const fasciaEdges = [isFirstSegment, true, isLastSegment, true];
+            for (let i = 0; i < 4; i++) {
+                if (!fasciaEdges[i]) continue;
+                const j = (i + 1) % 4;
+                const edgeLength = corners[i].distanceTo(corners[j]);
+                triangles.push(new Triangle(corners[j], corners[i], bottom[i], uvFor(0, 0), uvFor(edgeLength, 0), uvFor(edgeLength, thickness)));
+                triangles.push(new Triangle(corners[j], bottom[i], bottom[j], uvFor(0, 0), uvFor(edgeLength, thickness), uvFor(0, thickness)));
+            }
+        };
+
+        // Each step down the profile reuses the exact same corner-order template
+        // buildGableRoofForRect's own (single-segment) panels use, just at the profile's
+        // intermediate heights instead of jumping straight from ridge to eave.
+        if (ridgeAlongX) {
+            for (let i = 0; i < profile.length - 1; i++) {
+                const isFirst = i === 0;
+                const isLast = i === profile.length - 2;
+                const y0 = baseY + profile[i].h * ridgeDrop;
+                const y1 = baseY + profile[i + 1].h * ridgeDrop;
+                const zNear0 = cz - profile[i].t * halfDepth;
+                const zNear1 = cz - profile[i + 1].t * halfDepth;
+                const zFar0 = cz + profile[i].t * halfDepth;
+                const zFar1 = cz + profile[i + 1].t * halfDepth;
+                addThickPanel(
+                    new THREE.Vector3(cx - halfWidth, y0, zNear0), new THREE.Vector3(cx + halfWidth, y0, zNear0),
+                    new THREE.Vector3(cx + halfWidth, y1, zNear1), new THREE.Vector3(cx - halfWidth, y1, zNear1),
+                    isFirst, isLast,
+                );
+                addThickPanel(
+                    new THREE.Vector3(cx + halfWidth, y0, zFar0), new THREE.Vector3(cx - halfWidth, y0, zFar0),
+                    new THREE.Vector3(cx - halfWidth, y1, zFar1), new THREE.Vector3(cx + halfWidth, y1, zFar1),
+                    isFirst, isLast,
+                );
+            }
+        } else {
+            for (let i = 0; i < profile.length - 1; i++) {
+                const isFirst = i === 0;
+                const isLast = i === profile.length - 2;
+                const y0 = baseY + profile[i].h * ridgeDrop;
+                const y1 = baseY + profile[i + 1].h * ridgeDrop;
+                const xNear0 = cx - profile[i].t * halfWidth;
+                const xNear1 = cx - profile[i + 1].t * halfWidth;
+                const xFar0 = cx + profile[i].t * halfWidth;
+                const xFar1 = cx + profile[i + 1].t * halfWidth;
+                addThickPanel(
+                    new THREE.Vector3(xNear1, y1, cz - halfDepth), new THREE.Vector3(xNear1, y1, cz + halfDepth),
+                    new THREE.Vector3(xNear0, y0, cz + halfDepth), new THREE.Vector3(xNear0, y0, cz - halfDepth),
+                    isLast, isFirst,
+                );
+                addThickPanel(
+                    new THREE.Vector3(xFar1, y1, cz + halfDepth), new THREE.Vector3(xFar1, y1, cz - halfDepth),
+                    new THREE.Vector3(xFar0, y0, cz - halfDepth), new THREE.Vector3(xFar0, y0, cz + halfDepth),
+                    isLast, isFirst,
+                );
+            }
+        }
+
+        // Same apex auto-detection and cyclic-rotation-to-(a,b,apex) trick
+        // buildGableRoofForRect's addGableWall uses, so this can be called with the exact
+        // same argument order/positions that were already verified outward-facing there -
+        // only the contour built from (a,b,apex) is new (a fan through the profile's
+        // intermediate points instead of a plain 3-point triangle).
+        const addProfiledGableWall = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3): void => {
+            let a: THREE.Vector3;
+            let b: THREE.Vector3;
+            let apex: THREE.Vector3;
+            if (Math.abs(p0.y - baseY) > 0.01) { apex = p0; a = p1; b = p2; }
+            else if (Math.abs(p1.y - baseY) > 0.01) { apex = p1; a = p2; b = p0; }
+            else { apex = p2; a = p0; b = p1; }
+
+            const tangent = b.clone().sub(a);
+            const width = tangent.length();
+            if (width < 1e-4) return;
+            const outward = tangent.clone().cross(apex.clone().sub(a)).normalize();
+            tangent.normalize();
+            const point3 = (u: number, v: number): THREE.Vector3 => new THREE.Vector3(a.x + tangent.x * u, a.y + v, a.z + tangent.z * u);
+            const apexV = apex.y - a.y;
+            const half = width / 2;
+
+            const contour: THREE.Vector2[] = [new THREE.Vector2(0, 0), new THREE.Vector2(width, 0)];
+            for (let i = profile.length - 2; i >= 1; i--) contour.push(new THREE.Vector2(half + half * profile[i].t, profile[i].h * apexV));
+            contour.push(new THREE.Vector2(half, apexV));
+            for (let i = 1; i <= profile.length - 2; i++) contour.push(new THREE.Vector2(half - half * profile[i].t, profile[i].h * apexV));
+
+            const limitAt = (u: number): number => (u <= half
+                ? apexV * (u / Math.max(1e-4, half))
+                : apexV * ((width - u) / Math.max(1e-4, half)));
+
+            const openings = this.collectOpeningsForEdge([a.x, a.z], [b.x, b.z], baseY, ridgeY);
+            const holes: THREE.Vector2[][] = [];
+            for (const opening of openings) {
+                const halfW = opening.width / 2;
+                const u0 = THREE.MathUtils.clamp(opening.u - halfW, WALL_SNAP_MARGIN, width - WALL_SNAP_MARGIN);
+                const u1 = THREE.MathUtils.clamp(opening.u + halfW, WALL_SNAP_MARGIN, width - WALL_SNAP_MARGIN);
+                if (u1 - u0 < 0.1) continue;
+                const limit = Math.min(limitAt(u0), limitAt(u1)) - 0.1;
+                if (limit <= 0.15) continue;
+                const v0 = THREE.MathUtils.clamp(opening.sill, 0.02, limit - 0.1);
+                const v1 = Math.min(opening.sill + opening.height, limit);
+                if (v1 - v0 < 0.1) continue;
+                holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
+                this.appendOpeningInsert(
+                    opening.type === 'door' ? doorsOut : windowsOut,
+                    gableWallsOut,
+                    point3, outward, u0, v0, u1, v1, opening.depth,
+                    opening.type === 'door' ? this.doorUV : this.windowUV,
+                    gableUv,
+                );
+            }
+
+            const indices = THREE.ShapeUtils.triangulateShape(contour, holes);
+            const points = [...contour, ...holes.flat()];
+            for (const [ia, ib, ic] of indices) {
+                const pa = points[ia];
+                const pb = points[ib];
+                const pc = points[ic];
+                gableWallsOut.push(new Triangle(
+                    point3(pa.x, pa.y), point3(pb.x, pb.y), point3(pc.x, pc.y),
+                    gableUvFor(pa.x, pa.y), gableUvFor(pb.x, pb.y), gableUvFor(pc.x, pc.y),
+                ));
+            }
+        };
+
+        if (ridgeAlongX) {
+            addProfiledGableWall(
+                new THREE.Vector3(cx - wallHalfWidth, baseY, cz - wallHalfDepth),
+                new THREE.Vector3(cx - wallHalfWidth, baseY, cz + wallHalfDepth),
+                new THREE.Vector3(cx - wallHalfWidth, ridgeY, cz),
+            );
+            addProfiledGableWall(
+                new THREE.Vector3(cx + wallHalfWidth, baseY, cz - wallHalfDepth),
+                new THREE.Vector3(cx + wallHalfWidth, ridgeY, cz),
+                new THREE.Vector3(cx + wallHalfWidth, baseY, cz + wallHalfDepth),
+            );
+        } else {
+            addProfiledGableWall(
+                new THREE.Vector3(cx - wallHalfWidth, baseY, cz - wallHalfDepth),
+                new THREE.Vector3(cx, ridgeY, cz - wallHalfDepth),
+                new THREE.Vector3(cx + wallHalfWidth, baseY, cz - wallHalfDepth),
+            );
+            addProfiledGableWall(
+                new THREE.Vector3(cx - wallHalfWidth, baseY, cz + wallHalfDepth),
+                new THREE.Vector3(cx + wallHalfWidth, baseY, cz + wallHalfDepth),
+                new THREE.Vector3(cx, ridgeY, cz + wallHalfDepth),
+            );
+        }
+
+        return triangles;
+    }
+
+    // A hip roof: all four sides slope up to a ridge line (tented=true collapses the ridge
+    // to a single point, forming a pyramid instead) - no vertical gable end walls at all, so
+    // no opening-cutting applies here (a hip/tented segment can still have windows cut into
+    // its ordinary walls below the roofline, just not into the roof itself). Ridge half-
+    // length uses the standard equal-pitch-on-all-sides convention (long dimension minus
+    // short dimension), clamped to zero (a pyramid) once the footprint is square enough that
+    // convention would go negative.
+    private buildHipRoofForRect(
+        cx: number,
+        cz: number,
+        rectWidth: number,
+        rectDepth: number,
+        baseY: number,
+        ridgeHeight: number,
+        overhang: number,
+        ridgeAlongX: boolean,
+        ridgeRatio: number,
+    ): Triangle[] {
+        overhang = Math.max(0, overhang);
+        const wallHalfWidth = Math.max(MIN_SEGMENT_SIZE, rectWidth) / 2 + FOOTPRINT_UNION_PADDING;
+        const wallHalfDepth = Math.max(MIN_SEGMENT_SIZE, rectDepth) / 2 + FOOTPRINT_UNION_PADDING;
+        const halfWidth = wallHalfWidth + overhang;
+        const halfDepth = wallHalfDepth + overhang;
+        const ridgeY = baseY + Math.max(0.1, ridgeHeight);
+        // Scales with the ridge's own axis only (not "long side minus short side") so a
+        // forced direction still produces a real ridge even when that axis is the shorter
+        // of the two - the old long-minus-short convention went negative (clamped to 0, a
+        // pyramid) whenever the ridge was forced onto the shorter axis. The 0.95 cap keeps a
+        // sliver of hip end visible even at ridgeRatio 1 instead of the ends vanishing
+        // entirely into the eave corners.
+        const ridgeHalfLenMax = (ridgeAlongX ? halfWidth : halfDepth) * 0.95;
+        const ridgeHalfLen = THREE.MathUtils.clamp(ridgeRatio, 0, 1) * ridgeHalfLenMax;
+
+        const uv = this.roofUV;
+        const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
+        const triangles: Triangle[] = [];
+        const thickness = Math.max(0.02, this.roofThickness);
+
+        // Real 3D thickness: a top face, a bottom face, and a fascia strip ONLY along the
+        // one edge given as eaveEdge - unlike buildGableRoofForRect's 2-panel gable (where
+        // every edge is either the ridge or a true boundary), a hip roof's panels also share
+        // edges with their NEIGHBOURING panels (the diagonal hip lines, and the ridge line
+        // itself) at a different dihedral angle each. Fascia-ing those shared edges too
+        // produced a visible wedge poking out wherever two panels meet - only the outer eave
+        // edge is a true unshared boundary, so it's the only one that gets a fascia strip.
+        // The bottom face is offset straight down (not along the panel's own normal) so
+        // that two adjacent panels sharing a top corner land on the exact same bottom point
+        // there regardless of their different normals - offsetting along each panel's own
+        // normal put the two panels' corners at different points, which is what the
+        // reported wedge at the roof corners actually was.
+        const addThickTri = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, eaveEdge: [number, number]): void => {
+            const corners: [THREE.Vector3, THREE.Vector3, THREE.Vector3] = [p0, p1, p2];
+            const offset = new THREE.Vector3(0, -thickness, 0);
+            const bottom = corners.map((c) => c.clone().add(offset)) as [THREE.Vector3, THREE.Vector3, THREE.Vector3];
+            const ab = p0.distanceTo(p1);
+            const ac = p0.distanceTo(p2);
+            triangles.push(new Triangle(p0, p1, p2, uvFor(0, 0), uvFor(ab, 0), uvFor(ac, ac)));
+            triangles.push(new Triangle(bottom[2], bottom[1], bottom[0], uvFor(ac, ac), uvFor(ab, 0), uvFor(0, 0)));
+            const [i, j] = eaveEdge;
+            const edgeLength = corners[i].distanceTo(corners[j]);
+            triangles.push(new Triangle(corners[j], corners[i], bottom[i], uvFor(0, 0), uvFor(edgeLength, 0), uvFor(edgeLength, thickness)));
+            triangles.push(new Triangle(corners[j], bottom[i], bottom[j], uvFor(0, 0), uvFor(edgeLength, thickness), uvFor(0, thickness)));
+        };
+        // Falls back to a single thick triangle when the ridge has collapsed to a point
+        // (ridgeHalfLen 0, i.e. tented, or hip with hipRidgeRatio near 0) - the quad's two
+        // ridge corners coincide in that case, which would otherwise divide by a zero-length
+        // cross product when computing the panel's normal. eaveEdgeIfDegenerate is the
+        // fallback triangle's own eave-edge index pair, since it's a different pair of
+        // corners than the quad's own eaveEdge once one side collapses away.
+        const addThickPanel = (
+            p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, p3: THREE.Vector3,
+            eaveEdge: [number, number], eaveEdgeIfDegenerate: [number, number],
+        ): void => {
+            if (p0.distanceToSquared(p1) < 1e-6) { addThickTri(p0, p2, p3, eaveEdgeIfDegenerate); return; }
+            if (p2.distanceToSquared(p3) < 1e-6) { addThickTri(p0, p1, p2, eaveEdgeIfDegenerate); return; }
+            const corners: [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3] = [p0, p1, p2, p3];
+            const offset = new THREE.Vector3(0, -thickness, 0);
+            const bottom = corners.map((c) => c.clone().add(offset)) as [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
+            const widthDist = p0.distanceTo(p1);
+            const heightDist = p0.distanceTo(p3);
+            triangles.push(new Triangle(p0, p1, p2, uvFor(0, 0), uvFor(widthDist, 0), uvFor(widthDist, heightDist)));
+            triangles.push(new Triangle(p0, p2, p3, uvFor(0, 0), uvFor(widthDist, heightDist), uvFor(0, heightDist)));
+            triangles.push(new Triangle(bottom[2], bottom[1], bottom[0], uvFor(widthDist, heightDist), uvFor(widthDist, 0), uvFor(0, 0)));
+            triangles.push(new Triangle(bottom[3], bottom[2], bottom[0], uvFor(0, heightDist), uvFor(widthDist, heightDist), uvFor(0, 0)));
+            const [i, j] = eaveEdge;
+            const edgeLength = corners[i].distanceTo(corners[j]);
+            triangles.push(new Triangle(corners[j], corners[i], bottom[i], uvFor(0, 0), uvFor(edgeLength, 0), uvFor(edgeLength, thickness)));
+            triangles.push(new Triangle(corners[j], bottom[i], bottom[j], uvFor(0, 0), uvFor(edgeLength, thickness), uvFor(0, thickness)));
+        };
+
+        // Same corner-order convention as buildGableRoofForRect's own thick panels (verified
+        // outward-facing there): [ridge-left, ridge-right, eave-right, eave-left] for the
+        // near slope, mirrored for the far slope. The two hip-end triangles use the same
+        // "ridge point last" order as a degenerate case of that same pattern.
+        if (ridgeAlongX) {
+            const ridgeNear = new THREE.Vector3(cx - ridgeHalfLen, ridgeY, cz);
+            const ridgeFar = new THREE.Vector3(cx + ridgeHalfLen, ridgeY, cz);
+            const eaveA = new THREE.Vector3(cx - halfWidth, baseY, cz - halfDepth);
+            const eaveB = new THREE.Vector3(cx + halfWidth, baseY, cz - halfDepth);
+            const eaveC = new THREE.Vector3(cx + halfWidth, baseY, cz + halfDepth);
+            const eaveD = new THREE.Vector3(cx - halfWidth, baseY, cz + halfDepth);
+            addThickPanel(ridgeNear, ridgeFar, eaveB, eaveA, [2, 3], [1, 2]);
+            addThickPanel(ridgeFar, ridgeNear, eaveD, eaveC, [2, 3], [1, 2]);
+            addThickTri(eaveA, eaveD, ridgeNear, [0, 1]);
+            addThickTri(eaveC, eaveB, ridgeFar, [0, 1]);
+        } else {
+            const ridgeNear = new THREE.Vector3(cx, ridgeY, cz - ridgeHalfLen);
+            const ridgeFar = new THREE.Vector3(cx, ridgeY, cz + ridgeHalfLen);
+            const eaveA = new THREE.Vector3(cx - halfWidth, baseY, cz - halfDepth);
+            const eaveB = new THREE.Vector3(cx - halfWidth, baseY, cz + halfDepth);
+            const eaveC = new THREE.Vector3(cx + halfWidth, baseY, cz + halfDepth);
+            const eaveD = new THREE.Vector3(cx + halfWidth, baseY, cz - halfDepth);
+            addThickPanel(eaveA, eaveB, ridgeFar, ridgeNear, [0, 1], [0, 1]);
+            addThickPanel(eaveC, eaveD, ridgeNear, ridgeFar, [0, 1], [0, 1]);
+            addThickTri(eaveD, eaveA, ridgeNear, [0, 1]);
+            addThickTri(eaveB, eaveC, ridgeFar, [0, 1]);
+        }
+
+        return triangles;
+    }
+
     // --- serialization -------------------------------------------------------------
 
     public override serialize(id: number): ElementData {
@@ -958,8 +1388,11 @@ export default class Building extends WorldElement {
                 roofRidgeHeight: segment.roofRidgeHeight,
                 roofOverhang: segment.roofOverhang,
                 roofDirection: segment.roofDirection,
+                roofType: segment.roofType,
+                hipRidgeRatio: segment.hipRidgeRatio,
+                gambrelSegments: segment.gambrelSegments,
+                gambrelRoundness: segment.gambrelRoundness,
             })),
-            buildingRoofType: this.roofType,
             buildingRoofThickness: this.roofThickness,
             buildingRailingHeight: this.railingHeight,
             buildingRailingThickness: this.railingThickness,
@@ -989,7 +1422,17 @@ export default class Building extends WorldElement {
         const legacyWallHeight = data.buildingWallHeight ?? DEFAULT_WALL_HEIGHT;
         const legacyRidgeHeight = data.buildingRoofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT;
         const legacyOverhang = data.buildingRoofOverhang ?? DEFAULT_ROOF_OVERHANG;
+        const legacyRoofType = data.buildingRoofType === 'gable' ? 'gable' : 'flat';
         const parseDirection = (value: string | undefined): RoofDirection => (value === 'x' || value === 'z' ? value : 'auto');
+        const validRoofTypes: RoofType[] = ['flat', 'gable', 'hip', 'tented', 'gambrel'];
+        // halfHip and gableBreak were removed shortly after being added - map any save that
+        // briefly picked them up to the closest surviving type instead of silently reverting
+        // to the legacy default.
+        const legacyTypeMigration: Record<string, RoofType> = { halfHip: 'gable', gableBreak: 'gambrel' };
+        const parseRoofType = (value: string | undefined): RoofType => {
+            if (value && value in legacyTypeMigration) return legacyTypeMigration[value];
+            return validRoofTypes.includes(value as RoofType) ? (value as RoofType) : legacyRoofType;
+        };
 
         const building = new Building(anchor, {
             width: segmentsData[0].width,
@@ -998,6 +1441,10 @@ export default class Building extends WorldElement {
             roofRidgeHeight: segmentsData[0].roofRidgeHeight ?? legacyRidgeHeight,
             roofOverhang: segmentsData[0].roofOverhang ?? legacyOverhang,
             roofDirection: parseDirection(segmentsData[0].roofDirection),
+            roofType: parseRoofType(segmentsData[0].roofType),
+            hipRidgeRatio: segmentsData[0].hipRidgeRatio,
+            gambrelSegments: segmentsData[0].gambrelSegments,
+            gambrelRoundness: segmentsData[0].gambrelRoundness,
         });
         building.getSegmentNode(0).mesh.position.set(segmentsData[0].x, segmentsData[0].y, segmentsData[0].z);
         for (const segment of segmentsData.slice(1)) {
@@ -1006,10 +1453,13 @@ export default class Building extends WorldElement {
                 roofRidgeHeight: segment.roofRidgeHeight ?? legacyRidgeHeight,
                 roofOverhang: segment.roofOverhang ?? legacyOverhang,
                 roofDirection: parseDirection(segment.roofDirection),
+                roofType: parseRoofType(segment.roofType),
+                hipRidgeRatio: segment.hipRidgeRatio,
+                gambrelSegments: segment.gambrelSegments,
+                gambrelRoundness: segment.gambrelRoundness,
             });
         }
 
-        building.roofType = data.buildingRoofType === 'gable' ? 'gable' : 'flat';
         building.roofThickness = Math.max(0.02, data.buildingRoofThickness ?? 0.15);
         building.railingHeight = Math.max(0.1, data.buildingRailingHeight ?? 1);
         building.railingThickness = Math.max(0.02, data.buildingRailingThickness ?? 0.15);
@@ -1071,13 +1521,6 @@ export default class Building extends WorldElement {
                         set: (value: boolean) => { self.cutInGround = value; self.update(); },
                     },
                     {
-                        type: 'select',
-                        label: 'Roof',
-                        options: [{ label: 'Flat (Railing)', value: 'flat' }, { label: 'Gable (Triangular)', value: 'gable' }],
-                        get: () => self.roofType,
-                        set: (value: string) => { self.roofType = value === 'gable' ? 'gable' : 'flat'; self.update(); self.onPropertiesChanged?.(); },
-                    },
-                    {
                         type: 'number',
                         label: 'Roof Thickness',
                         get: () => self.roofThickness,
@@ -1086,7 +1529,7 @@ export default class Building extends WorldElement {
                         max: 1,
                         step: 0.01,
                     },
-                    ...(self.roofType === 'flat' ? [
+                    ...(self.segments.some((s) => s.roofType === 'flat') ? [
                         {
                             type: 'number' as const,
                             label: 'Railing Height',
@@ -1113,13 +1556,20 @@ export default class Building extends WorldElement {
                 properties: [
                     uvSizeProperty('Wall UV Size', self.wallUV, (uv) => { self.wallUV = uv; }),
                     uvSizeProperty('Roof UV Size', self.roofUV, (uv) => { self.roofUV = uv; }),
-                    self.roofType === 'flat'
-                        ? uvSizeProperty('Railing UV Size', self.railingUV, (uv) => { self.railingUV = uv; })
-                        : uvSizeProperty('Gable Wall UV Size', self.gableWallUV, (uv) => { self.gableWallUV = uv; }),
+                    uvSizeProperty('Railing UV Size', self.railingUV, (uv) => { self.railingUV = uv; }),
+                    uvSizeProperty('Gable Wall UV Size', self.gableWallUV, (uv) => { self.gableWallUV = uv; }),
                     uvSizeProperty('Window UV Size', self.windowUV, (uv) => { self.windowUV = uv; }),
                     uvSizeProperty('Door UV Size', self.doorUV, (uv) => { self.doorUV = uv; }),
                 ],
             },
+        ];
+
+        const ROOF_TYPE_OPTIONS = [
+            { label: 'Flat (Railing)', value: 'flat' },
+            { label: 'Gable (Triangular)', value: 'gable' },
+            { label: 'Hip (4-Slope)', value: 'hip' },
+            { label: 'Tented (Pyramid)', value: 'tented' },
+            { label: 'Gambrel', value: 'gambrel' },
         ];
 
         this.segments.forEach((segment, index) => {
@@ -1138,7 +1588,18 @@ export default class Building extends WorldElement {
                         max: 20,
                         step: 0.1,
                     },
-                    ...(self.roofType === 'gable' ? [
+                    {
+                        type: 'select',
+                        label: 'Roof',
+                        options: ROOF_TYPE_OPTIONS,
+                        get: () => segment.roofType,
+                        set: (v: string) => {
+                            segment.roofType = (ROOF_TYPE_OPTIONS.some((o) => o.value === v) ? v : 'flat') as RoofType;
+                            self.update();
+                            self.onPropertiesChanged?.();
+                        },
+                    },
+                    ...(segment.roofType !== 'flat' ? [
                         {
                             type: 'number' as const,
                             label: 'Roof Ridge Height',
@@ -1157,16 +1618,45 @@ export default class Building extends WorldElement {
                             max: 5,
                             step: 0.05,
                         },
+                    ] : []),
+                    ...(segment.roofType !== 'flat' && segment.roofType !== 'tented' ? [{
+                        type: 'select' as const,
+                        label: 'Roof Direction',
+                        options: [
+                            { label: 'Auto', value: 'auto' },
+                            { label: 'Along Width (X)', value: 'x' },
+                            { label: 'Along Depth (Z)', value: 'z' },
+                        ],
+                        get: () => segment.roofDirection,
+                        set: (v: string) => { segment.roofDirection = v === 'x' || v === 'z' ? v : 'auto'; self.update(); },
+                    }] : []),
+                    ...(segment.roofType === 'hip' ? [{
+                        type: 'number' as const,
+                        label: 'Ridge Length',
+                        get: () => segment.hipRidgeRatio,
+                        set: (v: number) => { segment.hipRidgeRatio = THREE.MathUtils.clamp(v, 0, 1); self.update(); },
+                        min: 0,
+                        max: 1,
+                        step: 0.05,
+                    }] : []),
+                    ...(segment.roofType === 'gambrel' ? [
                         {
-                            type: 'select' as const,
-                            label: 'Roof Direction',
-                            options: [
-                                { label: 'Auto', value: 'auto' },
-                                { label: 'Along Width (X)', value: 'x' },
-                                { label: 'Along Depth (Z)', value: 'z' },
-                            ],
-                            get: () => segment.roofDirection,
-                            set: (v: string) => { segment.roofDirection = v === 'x' || v === 'z' ? v : 'auto'; self.update(); },
+                            type: 'number' as const,
+                            label: 'Gambrel Segments',
+                            get: () => segment.gambrelSegments,
+                            set: (v: number) => { segment.gambrelSegments = Math.max(2, Math.round(v)); self.update(); },
+                            min: 2,
+                            max: 8,
+                            step: 1,
+                        },
+                        {
+                            type: 'number' as const,
+                            label: 'Roundness',
+                            get: () => segment.gambrelRoundness,
+                            set: (v: number) => { segment.gambrelRoundness = THREE.MathUtils.clamp(v, -0.95, 0.95); self.update(); },
+                            min: -0.95,
+                            max: 0.95,
+                            step: 0.05,
                         },
                     ] : []),
                     ...(self.segments.length > 1 ? [{ type: 'button' as const, label: 'Remove Segment', onClick: () => self.removeSegment(index) }] : []),
