@@ -333,22 +333,61 @@ export default class Intersection extends WorldElement {
             (p.z - center.z) / sh + this.roadTexOffsetY,
         );
 
-        for (let i = 0; i < this._nodeCount; i++) {
-            const nextIdx = (i + 1) % this._nodeCount;
+        // Perimeter order by angle around center, not raw node index - the constructor's
+        // own circular layout happens to start out angle-sorted, but a junction merged onto
+        // real, differently-angled roads gets its nodes dragged away from that circle, and
+        // nothing keeps their array indices in perimeter order afterward. Using raw index
+        // order here produced a self-crossing ring for exactly that (the normal, expected)
+        // case, which is what made the road/sidewalk triangulation below fail/degenerate.
+        const order = [...Array(this._nodeCount).keys()].sort((i, j) => {
+            const angleI = Math.atan2(this.nodes[i].mesh.position.z - center.z, this.nodes[i].mesh.position.x - center.x);
+            const angleJ = Math.atan2(this.nodes[j].mesh.position.z - center.z, this.nodes[j].mesh.position.x - center.x);
+            return angleI - angleJ;
+        });
 
-            // Road mouth quad at node i
-            roadTris.push(new Triangle(center.clone(), rightEdges[i].clone(), leftEdges[i].clone(),
-                uvOf(center), uvOf(rightEdges[i]), uvOf(leftEdges[i])));
-
-            // Fill gap between node i's right edge and next node's left edge
-            roadTris.push(new Triangle(center.clone(), leftEdges[nextIdx].clone(), rightEdges[i].clone(),
-                uvOf(center), uvOf(leftEdges[nextIdx]), uvOf(rightEdges[i])));
+        // The paved surface is the polygon that walks each node's own mouth (leftEdge to
+        // rightEdge) then straight across to the next node's leftEdge - triangulated as one
+        // simple polygon, not fanned out from an external "center" point. center is only
+        // the average of the node positions, and for anything other than a perfectly even
+        // circle (any junction whose nodes have actually been dragged onto real, unevenly-
+        // spaced road ends - which is every junction merged onto real roads) that average
+        // can land outside the polygon the nodes actually bound. Fanning triangles from a
+        // point outside the polygon is exactly what produced the self-intersecting spike
+        // this replaces - poking down through the surface wherever center fell on the wrong
+        // side of an edge.
+        //
+        // leftEdge-then-rightEdge (not the other way around) matters: right/left come from
+        // basis.right = forward rotated +90 CCW (see getNodeBasis), so for arms walked in
+        // increasing-angle (CCW) order, each arm's rightEdge is the side facing the NEXT
+        // arm and its leftEdge faces the PREVIOUS one. The gap edge connecting arm i to
+        // arm i+1 therefore has to be rightEdge[i] -> leftEdge[i+1] - pushing rightEdge
+        // first put that gap edge backwards (leftEdge[i] -> rightEdge[i+1]), which crossed
+        // the opposite gap edge for any junction whose arms aren't evenly spread around a
+        // circle (i.e. every junction actually merged onto real, unevenly-angled roads).
+        const ring: THREE.Vector3[] = [];
+        for (const i of order) {
+            ring.push(leftEdges[i], rightEdges[i]);
+        }
+        const ringContour = ring.map((p) => new THREE.Vector2(p.x, p.z));
+        const ringIndices = THREE.ShapeUtils.triangulateShape(ringContour, []);
+        for (const [ia, ib, ic] of ringIndices) {
+            let a = ring[ia];
+            let b = ring[ib];
+            let c = ring[ic];
+            // Winding isn't guaranteed by triangulateShape to face +Y for every contour
+            // orientation - correct each triangle individually rather than assuming the
+            // whole ring is wound one particular way.
+            const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+            if (normal.y < 0) { const tmp = b; b = c; c = tmp; }
+            roadTris.push(new Triangle(a.clone(), b.clone(), c.clone(), uvOf(a), uvOf(b), uvOf(c)));
         }
 
-        // Sidewalk around the perimeter
+        // Sidewalk around the perimeter - same angle-sorted adjacency as the road ring
+        // above, so a sidewalk segment always connects genuinely neighboring arms.
         if (this.edgeType === 'sidewalk') {
-            for (let i = 0; i < this._nodeCount; i++) {
-                const nextIdx = (i + 1) % this._nodeCount;
+            for (let k = 0; k < this._nodeCount; k++) {
+                const i = order[k];
+                const nextIdx = order[(k + 1) % this._nodeCount];
                 const nodePos = this.nodes[i].mesh.position;
                 const nextNodePos = this.nodes[nextIdx].mesh.position;
                 const basis = this.getResolvedNodeBasis(i);
