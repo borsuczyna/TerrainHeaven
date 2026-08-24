@@ -112,6 +112,7 @@ export interface ElementData {
         wallHeight?: number; roofRidgeHeight?: number; roofOverhang?: number; roofDirection?: string;
         roofType?: string; hipRidgeRatio?: number;
         gambrelSegments?: number; gambrelRoundness?: number;
+        railingEnabled?: boolean; railingHeight?: number; railingThickness?: number;
     }[];
     buildingWallHeight?: number;
     buildingRoofType?: string;

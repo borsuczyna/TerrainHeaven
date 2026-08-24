@@ -27,6 +27,9 @@ export interface BuildingSegment {
     hipRidgeRatio?: number;
     gambrelSegments?: number;
     gambrelRoundness?: number;
+    railingEnabled?: boolean;
+    railingHeight?: number;
+    railingThickness?: number;
 }
 
 // Roof type is per-segment, not building-wide, so a building can mix e.g. a gable main
@@ -60,6 +63,15 @@ interface SegmentEntry {
     // negative = concave/reverse curve).
     gambrelSegments: number;
     gambrelRoundness: number;
+    // Flat-roof-only: whether this segment gets a parapet at all, and its own height/
+    // thickness - per-segment (not building-wide) so touching flat wings can have
+    // different railings, or none. Segments sharing identical height+railing settings
+    // (see groupByRailingSettings) still merge into one seamless parapet loop the same
+    // way groupSegmentsByHeight merges walls - only segments that actually differ get
+    // split apart.
+    railingEnabled: boolean;
+    railingHeight: number;
+    railingThickness: number;
 }
 
 interface OpeningEntry {
@@ -87,6 +99,10 @@ interface WallOpening {
     sill: number;
     depth: number;
     type: OpeningType;
+    // Index into this.openings - lets a cut opening's recessed pane/reveal land in that
+    // one opening's own texture group (see the class-level note on per-instance texture
+    // groups) instead of a single shared 'windows'/'doors' bucket for the whole building.
+    index: number;
 }
 
 const SEGMENT_NODE_COLOR = 0x4da6ff;
@@ -110,6 +126,9 @@ const DEFAULT_ROOF_OVERHANG = 0.4;
 const DEFAULT_HIP_RIDGE_RATIO = 0.5;
 const DEFAULT_GAMBREL_SEGMENTS = 2;
 const DEFAULT_GAMBREL_ROUNDNESS = 0.4;
+const DEFAULT_RAILING_HEIGHT = 1;
+const DEFAULT_RAILING_THICKNESS = 0.15;
+const DEFAULT_UV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 
 // A multi-room building: one or more rectangular footprint segments (unioned via the same
 // polygon-clipping approach TerrainMesher uses for touching terrain tiles) extruded into
@@ -121,10 +140,18 @@ const DEFAULT_GAMBREL_ROUNDNESS = 0.4;
 // pattern PolygonTerrain uses, and for the same reason: GizmoManager moves every node of a
 // multi-node element together when the whole element is dragged, so nothing here can go
 // stale the way a separately-stored offset or sill height used to).
+//
+// Texture groups: every wall/roof/gable-wall/railing group is named "<kind>#<segmentIndex>"
+// and every window/door pane group "windows#<openingIndex>"/"doors#<openingIndex>" - one
+// real material per segment/opening instead of one shared material for the whole building,
+// so dropping a texture onto one wall (or one window) doesn't repaint every other one. Wall
+// geometry itself still merges seamlessly across touching same-height segments exactly as
+// before (see groupSegmentsByHeight) - matchSegmentIndexForEdge/matchSegmentIndexForPoint
+// re-attribute each already-merged wall edge or roof triangle back to whichever original
+// segment's rectangle it actually lies on, purely for texture-group bucketing, without
+// giving up the merge (no interior seam reappears at a shared boundary).
 export default class Building extends WorldElement {
     public roofThickness = 0.15;
-    public railingHeight = 1;
-    public railingThickness = 0.15;
     // Off by default: a building sitting on top of a rectangular Terrain tile used to
     // always punch a hole under itself with no way to opt out, which is wrong for e.g. a
     // building meant to float above a slope or sit on an existing platform.
@@ -137,12 +164,11 @@ export default class Building extends WorldElement {
     private handleMeshes: THREE.Mesh[] = [];
     private handlesVisible = false;
     private openings: OpeningEntry[] = [];
-    private wallUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
-    private roofUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
-    private railingUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
-    private gableWallUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
-    private windowUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
-    private doorUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    // Per-texture-group UV offset/scale, keyed by the same dynamic group names getGeometry()
+    // builds ("walls#0", "windows#3", ...) - see the class-level note. Missing entries fall
+    // back to DEFAULT_UV, so a segment/opening that's never been customized just uses the
+    // identity transform rather than needing to be pre-populated.
+    private uvTransforms: Map<string, UVTransform> = new Map();
 
     constructor(anchor: THREE.Vector3, firstSegment: BuildingSegment) {
         super();
@@ -175,6 +201,9 @@ export default class Building extends WorldElement {
         hipRidgeRatio?: number;
         gambrelSegments?: number;
         gambrelRoundness?: number;
+        railingEnabled?: boolean;
+        railingHeight?: number;
+        railingThickness?: number;
     }): Omit<SegmentEntry, 'width' | 'depth' | 'node'> {
         return {
             wallHeight: Math.max(0.5, options?.wallHeight ?? DEFAULT_WALL_HEIGHT),
@@ -185,6 +214,9 @@ export default class Building extends WorldElement {
             hipRidgeRatio: THREE.MathUtils.clamp(options?.hipRidgeRatio ?? DEFAULT_HIP_RIDGE_RATIO, 0, 1),
             gambrelSegments: Math.max(2, Math.round(options?.gambrelSegments ?? DEFAULT_GAMBREL_SEGMENTS)),
             gambrelRoundness: THREE.MathUtils.clamp(options?.gambrelRoundness ?? DEFAULT_GAMBREL_ROUNDNESS, -0.95, 0.95),
+            railingEnabled: options?.railingEnabled ?? true,
+            railingHeight: Math.max(0.1, options?.railingHeight ?? DEFAULT_RAILING_HEIGHT),
+            railingThickness: Math.max(0.02, options?.railingThickness ?? DEFAULT_RAILING_THICKNESS),
         };
     }
 
@@ -321,44 +353,87 @@ export default class Building extends WorldElement {
         };
     }
 
+    // Dynamic: whatever getGeometry() actually built last (segment/opening count and roof
+    // types can change from one rebuild to the next) - see the class-level note on why each
+    // segment/opening gets its own group name instead of one shared "walls"/"windows"/etc.
     public override getUVGroups(): string[] {
-        return ['walls', 'roof', 'railing', 'gableWalls', 'windows', 'doors'];
+        return this.getGroupNames();
     }
 
     public override getUVTransform(group: string): UVTransform {
-        const map = this.uvMapFor(group);
-        return map ? { ...map } : super.getUVTransform(group);
+        const current = this.uvTransforms.get(group);
+        return current ? { ...current } : super.getUVTransform(group);
     }
 
     public override setUVTransform(group: string, transform: UVTransform): void {
-        const current = this.uvMapFor(group);
-        if (!current) {
-            super.setUVTransform(group, transform);
-            return;
-        }
-        const next: UVTransform = {
+        this.uvTransforms.set(group, {
             offsetX: Number.isFinite(transform.offsetX) ? transform.offsetX : 0,
             offsetY: Number.isFinite(transform.offsetY) ? transform.offsetY : 0,
             scaleX: Number.isFinite(transform.scaleX) ? Math.max(0.05, transform.scaleX) : 1,
             scaleY: Number.isFinite(transform.scaleY) ? Math.max(0.05, transform.scaleY) : 1,
-        };
-        if (group === 'walls') this.wallUV = next;
-        else if (group === 'roof') this.roofUV = next;
-        else if (group === 'railing') this.railingUV = next;
-        else if (group === 'gableWalls') this.gableWallUV = next;
-        else if (group === 'windows') this.windowUV = next;
-        else this.doorUV = next;
+        });
         this.update();
     }
 
-    private uvMapFor(group: string): UVTransform | null {
-        if (group === 'walls') return this.wallUV;
-        if (group === 'roof') return this.roofUV;
-        if (group === 'railing') return this.railingUV;
-        if (group === 'gableWalls') return this.gableWallUV;
-        if (group === 'windows') return this.windowUV;
-        if (group === 'doors') return this.doorUV;
-        return null;
+    private getUVFor(groupName: string): UVTransform {
+        return this.uvTransforms.get(groupName) ?? DEFAULT_UV;
+    }
+
+    private bucket(map: Map<string, Triangle[]>, key: string): Triangle[] {
+        let arr = map.get(key);
+        if (!arr) { arr = []; map.set(key, arr); }
+        return arr;
+    }
+
+    // Attributes an already-merged wall/parapet/fascia edge back to whichever ORIGINAL
+    // (pre-union) segment rectangle it lies flush against, purely for texture-group
+    // bucketing - the union itself (computeFootprintPolygons) still fully merges touching
+    // same-settings segments into one seamless loop; this only decides which segment's
+    // material a given surviving boundary edge should render with. candidates is a list of
+    // indices into this.segments to consider (usually just the segments that contributed to
+    // whichever merged group this edge came from).
+    private matchSegmentIndexForEdge(a2: Point2, b2: Point2, candidates: number[]): number {
+        const mid: Point2 = [(a2[0] + b2[0]) / 2, (a2[1] + b2[1]) / 2];
+        const eps = FOOTPRINT_UNION_PADDING + 0.05;
+        let best = candidates[0] ?? -1;
+        let bestDist = Infinity;
+        for (const idx of candidates) {
+            const s = this.segments[idx];
+            if (!s) continue;
+            const cx = s.node.mesh.position.x;
+            const cz = s.node.mesh.position.z;
+            const hw = Math.max(MIN_SEGMENT_SIZE, s.width) / 2 + FOOTPRINT_UNION_PADDING;
+            const hd = Math.max(MIN_SEGMENT_SIZE, s.depth) / 2 + FOOTPRINT_UNION_PADDING;
+            if (mid[0] < cx - hw - eps || mid[0] > cx + hw + eps || mid[1] < cz - hd - eps || mid[1] > cz + hd + eps) continue;
+            const d = Math.min(
+                Math.abs(mid[0] - (cx - hw)), Math.abs(mid[0] - (cx + hw)),
+                Math.abs(mid[1] - (cz - hd)), Math.abs(mid[1] - (cz + hd)),
+            );
+            if (d < bestDist) { bestDist = d; best = idx; }
+        }
+        return best;
+    }
+
+    // Same idea as matchSegmentIndexForEdge but for an area (a flat roof slab's top/bottom
+    // triangles) rather than a boundary edge - picks whichever candidate segment's padded
+    // rectangle the point falls inside (or is nearest to, as a fallback for slivers the
+    // union padding creates right at a shared boundary).
+    private matchSegmentIndexForPoint(p: Point2, candidates: number[]): number {
+        let best = candidates[0] ?? -1;
+        let bestDist = Infinity;
+        for (const idx of candidates) {
+            const s = this.segments[idx];
+            if (!s) continue;
+            const cx = s.node.mesh.position.x;
+            const cz = s.node.mesh.position.z;
+            const hw = Math.max(MIN_SEGMENT_SIZE, s.width) / 2 + FOOTPRINT_UNION_PADDING;
+            const hd = Math.max(MIN_SEGMENT_SIZE, s.depth) / 2 + FOOTPRINT_UNION_PADDING;
+            const dx = Math.max(0, Math.abs(p[0] - cx) - hw);
+            const dz = Math.max(0, Math.abs(p[1] - cz) - hd);
+            const d = dx * dx + dz * dz;
+            if (d < bestDist) { bestDist = d; best = idx; }
+        }
+        return best;
     }
 
     public override getOccupiedArea(): OccupiedTriangle[] {
@@ -376,17 +451,33 @@ export default class Building extends WorldElement {
     // Segments sharing the same wall height (rounded to the millimetre) are unioned into one
     // real merged footprint - the same polygon-clipping approach used everywhere else, with
     // the same padding - so touching same-height segments share one seamless wall loop (and,
-    // for flat roofs, one slab and parapet loop) with no interior seam. Segments at a
-    // different height simply can't share a wall loop (there's no single top height that
-    // would fit both), so they fall into their own group and get their own fully independent
-    // walls - stepping a single shared wall loop down at the height boundary was tried and
-    // produced broken, inconsistent notch geometry, so this deliberately does not attempt
-    // that: differently-tall segments always get separate, non-optimized, possibly
-    // overlapping wall loops instead of one clever-but-fragile stepped one.
+    // for flat roofs, one slab loop) with no interior seam. Segments at a different height
+    // simply can't share a wall loop (there's no single top height that would fit both), so
+    // they fall into their own group and get their own fully independent walls - stepping a
+    // single shared wall loop down at the height boundary was tried and produced broken,
+    // inconsistent notch geometry, so this deliberately does not attempt that: differently-
+    // tall segments always get separate, non-optimized, possibly overlapping wall loops
+    // instead of one clever-but-fragile stepped one.
     private groupSegmentsByHeight(): SegmentEntry[][] {
         const groups = new Map<number, SegmentEntry[]>();
         for (const segment of this.segments) {
             const key = Math.round(segment.wallHeight * 1000);
+            const group = groups.get(key);
+            if (group) group.push(segment);
+            else groups.set(key, [segment]);
+        }
+        return [...groups.values()];
+    }
+
+    // Same idea, one level further: among a set of flat segments that already share a wall
+    // height, sub-group by their own railing settings too - a parapet is one continuous
+    // physical strip, so two touching segments can only share one only if their height AND
+    // thickness AND enabled state actually match. A segment with railingEnabled=false is
+    // expected to already be filtered out by the caller before this runs.
+    private groupByRailingSettings(segments: SegmentEntry[]): SegmentEntry[][] {
+        const groups = new Map<string, SegmentEntry[]>();
+        for (const segment of segments) {
+            const key = `${Math.round(segment.railingHeight * 1000)}_${Math.round(segment.railingThickness * 1000)}`;
             const group = groups.get(key);
             if (group) group.push(segment);
             else groups.set(key, [segment]);
@@ -547,86 +638,122 @@ export default class Building extends WorldElement {
 
     protected override getGeometry(): GeometryGroup[] {
         const anchor = this.getAnchor();
-        const windows: Triangle[] = [];
-        const doors: Triangle[] = [];
-        const wallTriangles: Triangle[] = [];
-        const roofTriangles: Triangle[] = [];
-        const railingTriangles: Triangle[] = [];
-        const gableWalls: Triangle[] = [];
+        const windows = new Map<string, Triangle[]>();
+        const doors = new Map<string, Triangle[]>();
+        const walls = new Map<string, Triangle[]>();
+        const roof = new Map<string, Triangle[]>();
+        const railing = new Map<string, Triangle[]>();
+        const gableWalls = new Map<string, Triangle[]>();
 
         // Every pitched segment always gets its own roof, sized to its own rectangle and
         // built from its own wall height, ridge height and overhang - no merged/shared roof
         // (see buildGableRoofForRect's own note on why). Where two touching segments' roof
         // volumes overlap, they simply interpenetrate rather than forming a true
         // architectural valley - real hip/valley intersection is a straight-skeleton problem
-        // well beyond what a level editor's prop building needs.
-        for (const segment of this.segments) {
-            if (segment.roofType === 'flat') continue;
+        // well beyond what a level editor's prop building needs. Bucketed directly by that
+        // segment's own index - no matching needed, each pitched roof is already built one
+        // segment at a time.
+        this.segments.forEach((segment, index) => {
+            if (segment.roofType === 'flat') return;
             const ridgeAlongX = segment.roofDirection === 'x' ? true
                 : segment.roofDirection === 'z' ? false
                 : segment.width >= segment.depth;
             const cx = segment.node.mesh.position.x;
             const cz = segment.node.mesh.position.z;
             const baseY = anchor.y + segment.wallHeight;
+            const roofKey = `roof#${index}`;
+            const gableKey = `gableWalls#${index}`;
+            const roofOut = this.bucket(roof, roofKey);
+            const gableOut = this.bucket(gableWalls, gableKey);
             switch (segment.roofType) {
                 case 'gable':
-                    roofTriangles.push(...this.buildGableRoofForRect(
+                    roofOut.push(...this.buildGableRoofForRect(
                         cx, cz, segment.width, segment.depth,
                         baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX,
-                        gableWalls, windows, doors,
+                        gableOut, this.getUVFor(roofKey), this.getUVFor(gableKey), windows, doors,
                     ));
                     break;
                 case 'hip':
-                    roofTriangles.push(...this.buildHipRoofForRect(
+                    roofOut.push(...this.buildHipRoofForRect(
                         cx, cz, segment.width, segment.depth,
                         baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX, segment.hipRidgeRatio,
+                        this.getUVFor(roofKey),
                     ));
                     break;
                 case 'tented':
-                    roofTriangles.push(...this.buildHipRoofForRect(
+                    roofOut.push(...this.buildHipRoofForRect(
                         cx, cz, segment.width, segment.depth,
                         baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX, 0,
+                        this.getUVFor(roofKey),
                     ));
                     break;
                 case 'gambrel':
-                    roofTriangles.push(...this.buildProfiledGableRoofForRect(
+                    roofOut.push(...this.buildProfiledGableRoofForRect(
                         cx, cz, segment.width, segment.depth,
                         baseY, segment.roofRidgeHeight, segment.roofOverhang, ridgeAlongX,
                         this.buildGambrelProfile(segment.gambrelSegments, segment.gambrelRoundness),
-                        gableWalls, windows, doors,
+                        gableOut, this.getUVFor(roofKey), this.getUVFor(gableKey), windows, doors,
                     ));
                     break;
                 default:
                     break;
             }
-        }
+        });
 
         for (const group of this.groupSegmentsByHeight()) {
             const groupHeight = group[0].wallHeight;
+            const groupIndices = group.map((segment) => this.segments.indexOf(segment));
             const groupPolygons = this.computeFootprintPolygons(group);
             const groupEdges = this.collectWallEdges(groupPolygons);
-            wallTriangles.push(...this.buildWallStrip(groupEdges, anchor.y, groupHeight, this.wallUV, true, windows, doors));
+
+            // A pure-flat-roof group's own flat slab (below) already lays a thickness-tall
+            // fascia band from (topY - roofThickness) to topY along this exact same boundary
+            // - if the ordinary wall also reached all the way up to topY, that band would be
+            // covered twice by two different, exactly coplanar quads (one wall-textured, one
+            // roof-textured), which is what the reported z-fighting between the parapet/roof
+            // edge and the wall right below it actually was. Stopping the wall short leaves
+            // that band to the slab's own fascia instead. A mixed group (flat segments next
+            // to pitched ones at the same height) keeps the wall at full height - a pitched
+            // segment has no such fascia band to hand off to, and narrowing the wall there
+            // would open a gap under its eave.
+            const isPureFlat = group.every((segment) => segment.roofType === 'flat');
+            const wallHeight = isPureFlat
+                ? Math.max(0.1, groupHeight - Math.max(0.02, this.roofThickness))
+                : groupHeight;
+            this.buildWallStrip(
+                groupEdges, anchor.y, wallHeight, walls,
+                (a2, b2) => `walls#${this.matchSegmentIndexForEdge(a2, b2, groupIndices)}`,
+                true, windows, doors,
+            );
 
             const flatSegments = group.filter((segment) => segment.roofType === 'flat');
             if (flatSegments.length > 0) {
                 const topY = anchor.y + groupHeight;
+                const flatIndices = flatSegments.map((segment) => this.segments.indexOf(segment));
                 const flatPolygons = this.computeFootprintPolygons(flatSegments);
                 const flatEdges = this.collectWallEdges(flatPolygons);
-                roofTriangles.push(...this.buildFlatRoofSlab(flatPolygons, flatEdges, topY));
-                railingTriangles.push(...this.buildParapetStrip(
-                    flatEdges, topY, Math.max(0.1, this.railingHeight), Math.max(0.02, this.railingThickness), this.railingUV,
-                ));
+                this.buildFlatRoofSlab(flatIndices, flatPolygons, flatEdges, topY, roof);
+
+                const railingSegments = flatSegments.filter((segment) => segment.railingEnabled);
+                for (const sub of this.groupByRailingSettings(railingSegments)) {
+                    const subIndices = sub.map((segment) => this.segments.indexOf(segment));
+                    const subEdges = this.collectWallEdges(this.computeFootprintPolygons(sub));
+                    this.buildParapetStrip(
+                        subEdges, topY, Math.max(0.1, sub[0].railingHeight), Math.max(0.02, sub[0].railingThickness),
+                        railing, (a2, b2) => `railing#${this.matchSegmentIndexForEdge(a2, b2, subIndices)}`,
+                    );
+                }
             }
         }
 
-        return [
-            { name: 'walls', triangles: wallTriangles },
-            { name: 'roof', triangles: roofTriangles },
-            { name: 'railing', triangles: railingTriangles },
-            { name: 'gableWalls', triangles: gableWalls },
-            { name: 'windows', triangles: windows },
-            { name: 'doors', triangles: doors },
-        ];
+        const groups: GeometryGroup[] = [];
+        for (const [name, triangles] of walls) groups.push({ name, triangles });
+        for (const [name, triangles] of roof) groups.push({ name, triangles });
+        for (const [name, triangles] of railing) groups.push({ name, triangles });
+        for (const [name, triangles] of gableWalls) groups.push({ name, triangles });
+        for (const [name, triangles] of windows) groups.push({ name, triangles });
+        for (const [name, triangles] of doors) groups.push({ name, triangles });
+        return groups;
     }
 
     public getExportGeometry(_lodIndex: number): GeometryGroup[] {
@@ -730,20 +857,22 @@ export default class Building extends WorldElement {
 
     // Builds a vertical strip of quads (with rectangular holes cut in for any window/door
     // that falls within [baseY, baseY+height], plus a small margin) along a set of world-
-    // space edges. windowsOut/doorsOut collect the 3D frame/pane inserts for any opening
-    // actually cut (see appendOpeningInsert).
+    // space edges, bucketing each edge's quads into wallsOut under whichever group name
+    // groupKeyForEdge assigns it (see the class-level note on per-segment texture groups).
+    // windowsOut/doorsOut collect the 3D frame/pane inserts for any opening actually cut,
+    // each under its own per-opening group (see appendOpeningInsert/appendWallSegment).
     private buildWallStrip(
         edges: WallEdge[],
         baseY: number,
         height: number,
-        uv: UVTransform,
+        wallsOut: Map<string, Triangle[]>,
+        groupKeyForEdge: (a2: Point2, b2: Point2) => string,
         withOpenings: boolean,
-        windowsOut: Triangle[],
-        doorsOut: Triangle[],
-    ): Triangle[] {
-        if (edges.length === 0 || height <= 0) return [];
+        windowsOut: Map<string, Triangle[]>,
+        doorsOut: Map<string, Triangle[]>,
+    ): void {
+        if (edges.length === 0 || height <= 0) return;
         const centroid = this.computeEdgeCentroid(edges);
-        const triangles: Triangle[] = [];
 
         for (const edge of edges) {
             let a2 = edge.a;
@@ -757,10 +886,13 @@ export default class Building extends WorldElement {
             if (faceNormal.dot(mid.clone().sub(centroid)) < 0) {
                 [a2, b2] = [b2, a2];
             }
+            const groupKey = groupKeyForEdge(a2, b2);
             const openings = withOpenings ? this.collectOpeningsForEdge(a2, b2, baseY, baseY + height) : [];
-            this.appendWallSegment(triangles, a2, b2, baseY, height, uv, openings, windowsOut, doorsOut);
+            this.appendWallSegment(
+                this.bucket(wallsOut, groupKey), this.getUVFor(groupKey),
+                windowsOut, doorsOut, a2, b2, baseY, height, openings,
+            );
         }
-        return triangles;
     }
 
     private computeEdgeCentroid(edges: WallEdge[]): THREE.Vector3 {
@@ -771,14 +903,14 @@ export default class Building extends WorldElement {
 
     private appendWallSegment(
         out: Triangle[],
+        uv: UVTransform,
+        windowsOut: Map<string, Triangle[]>,
+        doorsOut: Map<string, Triangle[]>,
         a2: Point2,
         b2: Point2,
         baseY: number,
         height: number,
-        uv: UVTransform,
         openings: WallOpening[],
-        windowsOut: Triangle[],
-        doorsOut: Triangle[],
     ): void {
         const dir = new THREE.Vector3(b2[0] - a2[0], 0, b2[1] - a2[1]);
         const length = dir.length();
@@ -806,12 +938,12 @@ export default class Building extends WorldElement {
             const v0 = THREE.MathUtils.clamp(opening.sill, 0.02, height - 0.05);
             const v1 = THREE.MathUtils.clamp(opening.sill + opening.height, v0 + 0.05, height - 0.02);
             holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
+            const paneKey = `${opening.type === 'door' ? 'doors' : 'windows'}#${opening.index}`;
+            const paneArr = this.bucket(opening.type === 'door' ? doorsOut : windowsOut, paneKey);
             this.appendOpeningInsert(
-                opening.type === 'door' ? doorsOut : windowsOut,
-                out,
+                paneArr, out,
                 point3, outward, u0, v0, u1, v1, opening.depth,
-                opening.type === 'door' ? this.doorUV : this.windowUV,
-                uv,
+                this.getUVFor(paneKey), uv,
             );
         }
 
@@ -892,15 +1024,15 @@ export default class Building extends WorldElement {
         const anchorY = this.getAnchor().y;
         const result: WallOpening[] = [];
 
-        for (const entry of this.openings) {
+        this.openings.forEach((entry, index) => {
             const pos = entry.node.mesh.position;
-            if (pos.y < minY - HEIGHT_SNAP_MARGIN || pos.y > maxY + HEIGHT_SNAP_MARGIN) continue;
+            if (pos.y < minY - HEIGHT_SNAP_MARGIN || pos.y > maxY + HEIGHT_SNAP_MARGIN) return;
             const relX = pos.x - a2[0];
             const relZ = pos.z - a2[1];
             const t = relX * dx + relZ * dz;
-            if (t < -WALL_SNAP_MARGIN || t > length + WALL_SNAP_MARGIN) continue;
+            if (t < -WALL_SNAP_MARGIN || t > length + WALL_SNAP_MARGIN) return;
             const perp = Math.abs(relX * dz - relZ * dx);
-            if (perp > WALL_SNAP_DISTANCE) continue;
+            if (perp > WALL_SNAP_DISTANCE) return;
             result.push({
                 u: THREE.MathUtils.clamp(t, 0, length),
                 width: entry.width,
@@ -908,46 +1040,62 @@ export default class Building extends WorldElement {
                 sill: pos.y - anchorY,
                 depth: entry.depth,
                 type: entry.type,
+                index,
             });
-        }
+        });
         return result;
     }
 
     // --- roofs -------------------------------------------------------------------
 
-    private buildFlatRoofSlab(polygons: FootprintPolygon[], edges: WallEdge[], topY: number): Triangle[] {
+    private buildFlatRoofSlab(
+        flatIndices: number[],
+        polygons: FootprintPolygon[],
+        edges: WallEdge[],
+        topY: number,
+        roofOut: Map<string, Triangle[]>,
+    ): void {
         const thickness = Math.max(0.02, this.roofThickness);
         const bottomY = topY - thickness;
-        const uv = this.roofUV;
-        const uvFor = (p: THREE.Vector2): THREE.Vector2 => new THREE.Vector2(p.x * 0.2 * uv.scaleX + uv.offsetX, p.y * 0.2 * uv.scaleY + uv.offsetY);
-        const triangles: Triangle[] = [];
         for (const polygon of polygons) {
             for (const [pa, pb, pc] of this.triangulatePolygon(polygon)) {
+                const centroid: Point2 = [(pa.x + pb.x + pc.x) / 3, (pa.y + pb.y + pc.y) / 3];
+                const segIndex = this.matchSegmentIndexForPoint(centroid, flatIndices);
+                const key = `roof#${segIndex}`;
+                const uv = this.getUVFor(key);
+                const uvFor = (p: THREE.Vector2): THREE.Vector2 => new THREE.Vector2(p.x * 0.2 * uv.scaleX + uv.offsetX, p.y * 0.2 * uv.scaleY + uv.offsetY);
                 const at = (p: THREE.Vector2, y: number): THREE.Vector3 => new THREE.Vector3(p.x, y, p.y);
-                triangles.push(new Triangle(at(pa, topY), at(pb, topY), at(pc, topY), uvFor(pa), uvFor(pb), uvFor(pc)));
-                triangles.push(new Triangle(at(pa, bottomY), at(pc, bottomY), at(pb, bottomY), uvFor(pa), uvFor(pc), uvFor(pb)));
+                const arr = this.bucket(roofOut, key);
+                arr.push(new Triangle(at(pa, topY), at(pb, topY), at(pc, topY), uvFor(pa), uvFor(pb), uvFor(pc)));
+                arr.push(new Triangle(at(pa, bottomY), at(pc, bottomY), at(pb, bottomY), uvFor(pa), uvFor(pc), uvFor(pb)));
             }
         }
         // The fascia closing the slab's outer (and any inner-hole) edges is the exact same
         // vertical box-strip operation the walls already use - just spanning from the
-        // underside up to the top surface instead of from the ground up.
-        triangles.push(...this.buildWallStrip(edges, bottomY, thickness, uv, false, [], []));
-        return triangles;
+        // underside up to the top surface instead of from the ground up. See getGeometry's
+        // own note on why the ordinary wall below stops short of topY for a pure-flat group,
+        // leaving exactly this band free for the fascia rather than the two overlapping.
+        this.buildWallStrip(
+            edges, bottomY, thickness, roofOut,
+            (a2, b2) => `roof#${this.matchSegmentIndexForEdge(a2, b2, flatIndices)}`,
+            false, new Map(), new Map(),
+        );
     }
 
     // A solid parapet wall around a flat roof's edge: an outer face, an inner face (facing
     // back toward the roof), and a top cap - a real 3D "murek", not the single infinitely-
     // thin plane the ordinary walls use (a parapet is looked at edge-on far more often than
     // a wall is, so its lack of thickness was much more noticeable).
-    private buildParapetStrip(edges: WallEdge[], baseY: number, height: number, thickness: number, uv: UVTransform): Triangle[] {
-        if (edges.length === 0 || height <= 0) return [];
+    private buildParapetStrip(
+        edges: WallEdge[],
+        baseY: number,
+        height: number,
+        thickness: number,
+        railingOut: Map<string, Triangle[]>,
+        groupKeyForEdge: (a2: Point2, b2: Point2) => string,
+    ): void {
+        if (edges.length === 0 || height <= 0) return;
         const centroid = this.computeEdgeCentroid(edges);
-        const triangles: Triangle[] = [];
-        const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
-        const addQuad = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, p3: THREE.Vector3, uWidth: number, vHeight: number): void => {
-            triangles.push(new Triangle(p0, p1, p2, uvFor(0, 0), uvFor(uWidth, 0), uvFor(uWidth, vHeight)));
-            triangles.push(new Triangle(p0, p2, p3, uvFor(0, 0), uvFor(uWidth, vHeight), uvFor(0, vHeight)));
-        };
 
         for (const edge of edges) {
             let a2 = edge.a;
@@ -960,6 +1108,15 @@ export default class Building extends WorldElement {
             if (rawFaceNormal.dot(mid.clone().sub(centroid)) < 0) {
                 [a2, b2] = [b2, a2];
             }
+            const groupKey = groupKeyForEdge(a2, b2);
+            const uv = this.getUVFor(groupKey);
+            const out = this.bucket(railingOut, groupKey);
+            const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
+            const addQuad = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, p3: THREE.Vector3, uWidth: number, vHeight: number): void => {
+                out.push(new Triangle(p0, p1, p2, uvFor(0, 0), uvFor(uWidth, 0), uvFor(uWidth, vHeight)));
+                out.push(new Triangle(p0, p2, p3, uvFor(0, 0), uvFor(uWidth, vHeight), uvFor(0, vHeight)));
+            };
+
             // Recomputed from the (possibly just-swapped) a2/b2, not the pre-swap dir above -
             // reusing the stale direction here was the actual bug: outward matched the
             // original edge order even on edges the swap just reversed, so the offset below
@@ -981,7 +1138,6 @@ export default class Building extends WorldElement {
             addQuad(innerB, innerA, innerA2, innerB2, length, height);
             addQuad(outerA2, outerB2, innerB2, innerA2, length, thickness);
         }
-        return triangles;
     }
 
     // Every segment gets its own complete gable roof, sized to that segment's own rectangle
@@ -1002,8 +1158,10 @@ export default class Building extends WorldElement {
         overhang: number,
         ridgeAlongX: boolean,
         gableWallsOut: Triangle[],
-        windowsOut: Triangle[],
-        doorsOut: Triangle[],
+        uv: UVTransform,
+        gableUv: UVTransform,
+        windowsOut: Map<string, Triangle[]>,
+        doorsOut: Map<string, Triangle[]>,
     ): Triangle[] {
         overhang = Math.max(0, overhang);
         // wallHalf* is the real wall footprint (what the gable end wall sits at) - padded by
@@ -1020,8 +1178,6 @@ export default class Building extends WorldElement {
         const ridgeY = baseY + Math.max(0.1, ridgeHeight);
         const thickness = Math.max(0.02, this.roofThickness);
 
-        const uv = this.roofUV;
-        const gableUv = this.gableWallUV;
         const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
         const gableUvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * gableUv.scaleX + gableUv.offsetX, v * gableUv.scaleY + gableUv.offsetY);
         const triangles: Triangle[] = [];
@@ -1099,12 +1255,12 @@ export default class Building extends WorldElement {
                 const v1 = Math.min(opening.sill + opening.height, limit);
                 if (v1 - v0 < 0.1) continue;
                 holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
+                const paneKey = `${opening.type === 'door' ? 'doors' : 'windows'}#${opening.index}`;
+                const paneArr = this.bucket(opening.type === 'door' ? doorsOut : windowsOut, paneKey);
                 this.appendOpeningInsert(
-                    opening.type === 'door' ? doorsOut : windowsOut,
-                    gableWallsOut,
+                    paneArr, gableWallsOut,
                     point3, outward, u0, v0, u1, v1, opening.depth,
-                    opening.type === 'door' ? this.doorUV : this.windowUV,
-                    gableUv,
+                    this.getUVFor(paneKey), gableUv,
                 );
             }
 
@@ -1214,8 +1370,10 @@ export default class Building extends WorldElement {
         ridgeAlongX: boolean,
         profile: { t: number; h: number }[],
         gableWallsOut: Triangle[],
-        windowsOut: Triangle[],
-        doorsOut: Triangle[],
+        uv: UVTransform,
+        gableUv: UVTransform,
+        windowsOut: Map<string, Triangle[]>,
+        doorsOut: Map<string, Triangle[]>,
     ): Triangle[] {
         overhang = Math.max(0, overhang);
         const wallHalfWidth = Math.max(MIN_SEGMENT_SIZE, rectWidth) / 2 + FOOTPRINT_UNION_PADDING;
@@ -1225,8 +1383,6 @@ export default class Building extends WorldElement {
         const ridgeDrop = Math.max(0.1, ridgeHeight);
         const ridgeY = baseY + ridgeDrop;
 
-        const uv = this.roofUV;
-        const gableUv = this.gableWallUV;
         const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
         const gableUvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * gableUv.scaleX + gableUv.offsetX, v * gableUv.scaleY + gableUv.offsetY);
         const triangles: Triangle[] = [];
@@ -1360,12 +1516,12 @@ export default class Building extends WorldElement {
                 const v1 = Math.min(opening.sill + opening.height, limit);
                 if (v1 - v0 < 0.1) continue;
                 holes.push([new THREE.Vector2(u0, v0), new THREE.Vector2(u1, v0), new THREE.Vector2(u1, v1), new THREE.Vector2(u0, v1)]);
+                const paneKey = `${opening.type === 'door' ? 'doors' : 'windows'}#${opening.index}`;
+                const paneArr = this.bucket(opening.type === 'door' ? doorsOut : windowsOut, paneKey);
                 this.appendOpeningInsert(
-                    opening.type === 'door' ? doorsOut : windowsOut,
-                    gableWallsOut,
+                    paneArr, gableWallsOut,
                     point3, outward, u0, v0, u1, v1, opening.depth,
-                    opening.type === 'door' ? this.doorUV : this.windowUV,
-                    gableUv,
+                    this.getUVFor(paneKey), gableUv,
                 );
             }
 
@@ -1426,6 +1582,7 @@ export default class Building extends WorldElement {
         overhang: number,
         ridgeAlongX: boolean,
         ridgeRatio: number,
+        uv: UVTransform,
     ): Triangle[] {
         overhang = Math.max(0, overhang);
         const wallHalfWidth = Math.max(MIN_SEGMENT_SIZE, rectWidth) / 2 + FOOTPRINT_UNION_PADDING;
@@ -1442,7 +1599,6 @@ export default class Building extends WorldElement {
         const ridgeHalfLenMax = (ridgeAlongX ? halfWidth : halfDepth) * 0.95;
         const ridgeHalfLen = THREE.MathUtils.clamp(ridgeRatio, 0, 1) * ridgeHalfLenMax;
 
-        const uv = this.roofUV;
         const uvFor = (u: number, v: number): THREE.Vector2 => new THREE.Vector2(u * uv.scaleX + uv.offsetX, v * uv.scaleY + uv.offsetY);
         const triangles: Triangle[] = [];
         const thickness = Math.max(0.02, this.roofThickness);
@@ -1541,14 +1697,7 @@ export default class Building extends WorldElement {
             nodes: [{ x: anchor.x, y: anchor.y, z: anchor.z }],
             textures,
             textureRotations,
-            uvTransforms: {
-                walls: { ...this.wallUV },
-                roof: { ...this.roofUV },
-                railing: { ...this.railingUV },
-                gableWalls: { ...this.gableWallUV },
-                windows: { ...this.windowUV },
-                doors: { ...this.doorUV },
-            },
+            uvTransforms: Object.fromEntries(this.uvTransforms),
             buildingSegments: this.segments.map((segment) => ({
                 x: segment.node.mesh.position.x,
                 y: segment.node.mesh.position.y,
@@ -1563,10 +1712,11 @@ export default class Building extends WorldElement {
                 hipRidgeRatio: segment.hipRidgeRatio,
                 gambrelSegments: segment.gambrelSegments,
                 gambrelRoundness: segment.gambrelRoundness,
+                railingEnabled: segment.railingEnabled,
+                railingHeight: segment.railingHeight,
+                railingThickness: segment.railingThickness,
             })),
             buildingRoofThickness: this.roofThickness,
-            buildingRailingHeight: this.railingHeight,
-            buildingRailingThickness: this.railingThickness,
             buildingCutInGround: this.cutInGround,
             buildingOpenings: this.openings.map((opening) => ({
                 x: opening.node.mesh.position.x,
@@ -1587,12 +1737,14 @@ export default class Building extends WorldElement {
             ? data.buildingSegments
             : [{ x: anchor.x, y: anchor.y, z: anchor.z, width: 8, depth: 6 }];
 
-        // Legacy saves stored wall/ridge/overhang once for the whole building rather than
-        // per segment - fall back to those values (or the same defaults used for a brand
-        // new segment) when a segment entry doesn't carry its own.
+        // Legacy saves stored wall/ridge/overhang/railing once for the whole building
+        // rather than per segment - fall back to those values (or the same defaults used
+        // for a brand new segment) when a segment entry doesn't carry its own.
         const legacyWallHeight = data.buildingWallHeight ?? DEFAULT_WALL_HEIGHT;
         const legacyRidgeHeight = data.buildingRoofRidgeHeight ?? DEFAULT_ROOF_RIDGE_HEIGHT;
         const legacyOverhang = data.buildingRoofOverhang ?? DEFAULT_ROOF_OVERHANG;
+        const legacyRailingHeight = data.buildingRailingHeight ?? DEFAULT_RAILING_HEIGHT;
+        const legacyRailingThickness = data.buildingRailingThickness ?? DEFAULT_RAILING_THICKNESS;
         const legacyRoofType = data.buildingRoofType === 'gable' ? 'gable' : 'flat';
         const parseDirection = (value: string | undefined): RoofDirection => (value === 'x' || value === 'z' ? value : 'auto');
         const validRoofTypes: RoofType[] = ['flat', 'gable', 'hip', 'tented', 'gambrel'];
@@ -1616,6 +1768,9 @@ export default class Building extends WorldElement {
             hipRidgeRatio: segmentsData[0].hipRidgeRatio,
             gambrelSegments: segmentsData[0].gambrelSegments,
             gambrelRoundness: segmentsData[0].gambrelRoundness,
+            railingEnabled: segmentsData[0].railingEnabled,
+            railingHeight: segmentsData[0].railingHeight ?? legacyRailingHeight,
+            railingThickness: segmentsData[0].railingThickness ?? legacyRailingThickness,
         });
         building.getSegmentNode(0).mesh.position.set(segmentsData[0].x, segmentsData[0].y, segmentsData[0].z);
         for (const segment of segmentsData.slice(1)) {
@@ -1628,12 +1783,13 @@ export default class Building extends WorldElement {
                 hipRidgeRatio: segment.hipRidgeRatio,
                 gambrelSegments: segment.gambrelSegments,
                 gambrelRoundness: segment.gambrelRoundness,
+                railingEnabled: segment.railingEnabled,
+                railingHeight: segment.railingHeight ?? legacyRailingHeight,
+                railingThickness: segment.railingThickness ?? legacyRailingThickness,
             });
         }
 
         building.roofThickness = Math.max(0.02, data.buildingRoofThickness ?? 0.15);
-        building.railingHeight = Math.max(0.1, data.buildingRailingHeight ?? 1);
-        building.railingThickness = Math.max(0.02, data.buildingRailingThickness ?? 0.15);
         building.cutInGround = data.buildingCutInGround ?? false;
 
         for (const opening of data.buildingOpenings ?? []) {
@@ -1645,27 +1801,57 @@ export default class Building extends WorldElement {
             entry.depth = Math.max(0.02, opening.depth ?? 0.1);
         }
 
-        const uv = data.uvTransforms;
-        if (uv?.walls) building.wallUV = { ...uv.walls };
-        if (uv?.roof) building.roofUV = { ...uv.roof };
-        if (uv?.railing) building.railingUV = { ...uv.railing };
-        if (uv?.gableWalls) building.gableWallUV = { ...uv.gableWalls };
-        if (uv?.windows) building.windowUV = { ...uv.windows };
-        if (uv?.doors) building.doorUV = { ...uv.doors };
+        building.update();
+
+        // Legacy saves keyed UV/texture data by one shared name per kind ('walls', 'roof',
+        // 'railing', 'gableWalls', 'windows', 'doors') rather than per segment/opening -
+        // fan each legacy key out to every live group of that kind so an old save keeps
+        // looking the same after loading into the new per-segment scheme, rather than
+        // silently losing its textures. Must run after building.update() above so
+        // getGroupNames() reflects the actual geometry that was just built.
+        Building.migrateLegacyGroupData(data, building);
+
+        const uv = data.uvTransforms ?? {};
+        for (const [group, transform] of Object.entries(uv)) {
+            building.uvTransforms.set(group, { ...transform });
+        }
         building.update();
         return building;
     }
 
+    private static migrateLegacyGroupData(data: ElementData, building: Building): void {
+        const prefixFor: Record<string, string> = {
+            walls: 'walls#', roof: 'roof#', gableWalls: 'gableWalls#',
+            railing: 'railing#', windows: 'windows#', doors: 'doors#',
+        };
+        data.textures = data.textures ?? {};
+        data.textureRotations = data.textureRotations ?? {};
+        data.uvTransforms = data.uvTransforms ?? {};
+        const liveNames = building.getGroupNames();
+        for (const [legacyKey, prefix] of Object.entries(prefixFor)) {
+            const path = data.textures[legacyKey];
+            const rotation = data.textureRotations[legacyKey];
+            const transform = data.uvTransforms[legacyKey];
+            if (path === undefined && rotation === undefined && transform === undefined) continue;
+            for (const name of liveNames) {
+                if (!name.startsWith(prefix)) continue;
+                if (path !== undefined && !(name in data.textures)) data.textures[name] = path;
+                if (rotation !== undefined && !(name in data.textureRotations)) data.textureRotations[name] = rotation;
+                if (transform !== undefined && !(name in data.uvTransforms)) data.uvTransforms[name] = { ...transform };
+            }
+        }
+    }
+
     public override getProperties(): PropertyDefinition {
         const self = this;
-        const uvSizeProperty = (label: string, uv: UVTransform, apply: (uv: UVTransform) => void): SectionItem => ({
+        const uvSizeProperty = (label: string, groupKey: string): SectionItem => ({
             type: 'number',
             label,
-            get: () => uv.scaleX,
+            get: () => self.getUVFor(groupKey).scaleX,
             set: (value: number) => {
                 const size = THREE.MathUtils.clamp(value, 0.05, 50);
-                apply({ ...uv, scaleX: size, scaleY: size });
-                self.update();
+                const current = self.getUVFor(groupKey);
+                self.setUVTransform(groupKey, { ...current, scaleX: size, scaleY: size });
             },
             min: 0.05,
             max: 50,
@@ -1674,7 +1860,10 @@ export default class Building extends WorldElement {
 
         // No separate "Transform > Anchor" section - since segment 0's own node doubles as
         // the anchor (see the class-level note on why), that would just be a second field
-        // editing the exact same position as "Segment 1 > Position" below.
+        // editing the exact same position as "Segment 1 > Position" below. No building-wide
+        // "Textures" section either - now that every wall/roof/window/etc. group is per-
+        // segment/per-opening (see the class-level note), a single global slider wouldn't
+        // mean anything; each segment/opening's own section carries its own UV size fields.
         const sections: { label: string; properties: SectionItem[] }[] = [
             {
                 label: 'Structure',
@@ -1694,37 +1883,6 @@ export default class Building extends WorldElement {
                         max: 1,
                         step: 0.01,
                     },
-                    ...(self.segments.some((s) => s.roofType === 'flat') ? [
-                        {
-                            type: 'number' as const,
-                            label: 'Railing Height',
-                            get: () => self.railingHeight,
-                            set: (value: number) => { self.railingHeight = Math.max(0.1, value); self.update(); },
-                            min: 0.1,
-                            max: 3,
-                            step: 0.05,
-                        },
-                        {
-                            type: 'number' as const,
-                            label: 'Railing Thickness',
-                            get: () => self.railingThickness,
-                            set: (value: number) => { self.railingThickness = Math.max(0.02, value); self.update(); },
-                            min: 0.02,
-                            max: 1,
-                            step: 0.01,
-                        },
-                    ] : []),
-                ],
-            },
-            {
-                label: 'Textures',
-                properties: [
-                    uvSizeProperty('Wall UV Size', self.wallUV, (uv) => { self.wallUV = uv; }),
-                    uvSizeProperty('Roof UV Size', self.roofUV, (uv) => { self.roofUV = uv; }),
-                    uvSizeProperty('Railing UV Size', self.railingUV, (uv) => { self.railingUV = uv; }),
-                    uvSizeProperty('Gable Wall UV Size', self.gableWallUV, (uv) => { self.gableWallUV = uv; }),
-                    uvSizeProperty('Window UV Size', self.windowUV, (uv) => { self.windowUV = uv; }),
-                    uvSizeProperty('Door UV Size', self.doorUV, (uv) => { self.doorUV = uv; }),
                 ],
             },
         ];
@@ -1738,6 +1896,7 @@ export default class Building extends WorldElement {
         ];
 
         this.segments.forEach((segment, index) => {
+            const hasGableWalls = segment.roofType === 'gable' || segment.roofType === 'gambrel';
             sections.push({
                 label: `Segment ${index + 1}`,
                 properties: [
@@ -1824,6 +1983,38 @@ export default class Building extends WorldElement {
                             step: 0.05,
                         },
                     ] : []),
+                    ...(segment.roofType === 'flat' ? [
+                        {
+                            type: 'boolean' as const,
+                            label: 'Railing Enabled',
+                            get: () => segment.railingEnabled,
+                            set: (v: boolean) => { segment.railingEnabled = v; self.update(); self.onPropertiesChanged?.(); },
+                        },
+                        ...(segment.railingEnabled ? [
+                            {
+                                type: 'number' as const,
+                                label: 'Railing Height',
+                                get: () => segment.railingHeight,
+                                set: (v: number) => { segment.railingHeight = Math.max(0.1, v); self.update(); },
+                                min: 0.1,
+                                max: 3,
+                                step: 0.05,
+                            },
+                            {
+                                type: 'number' as const,
+                                label: 'Railing Thickness',
+                                get: () => segment.railingThickness,
+                                set: (v: number) => { segment.railingThickness = Math.max(0.02, v); self.update(); },
+                                min: 0.02,
+                                max: 1,
+                                step: 0.01,
+                            },
+                            uvSizeProperty('Railing UV Size', `railing#${index}`),
+                        ] : []),
+                    ] : []),
+                    uvSizeProperty('Wall UV Size', `walls#${index}`),
+                    uvSizeProperty('Roof UV Size', `roof#${index}`),
+                    ...(hasGableWalls ? [uvSizeProperty('Gable Wall UV Size', `gableWalls#${index}`)] : []),
                     ...(self.segments.length > 1 ? [{ type: 'button' as const, label: 'Remove Segment', onClick: () => self.removeSegment(index) }] : []),
                 ],
             });
@@ -1852,6 +2043,7 @@ export default class Building extends WorldElement {
                         step: 0.05,
                     },
                     { type: 'number', label: 'Depth', get: () => opening.depth, set: (v: number) => { opening.depth = Math.max(0.02, v); self.update(); }, min: 0.02, max: 1, step: 0.01 },
+                    uvSizeProperty('Texture UV Size', `${opening.type === 'door' ? 'doors' : 'windows'}#${index}`),
                     { type: 'button', label: 'Remove', onClick: () => self.removeOpening(index) },
                 ],
             });
