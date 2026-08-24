@@ -847,6 +847,57 @@ export default class Building extends WorldElement {
                 );
             }
         }
+
+        for (const roofWindow of this.roofWindows) {
+            const pos = roofWindow.node.mesh.position;
+            const segIndex = this.findGableSegmentIndexForPoint(pos.x, pos.z);
+            if (segIndex < 0) continue;
+            const { clampedX, clampedZ, y, outward, along } = this.computeGableRoofPlacement(this.segments[segIndex], pos.x, pos.z);
+            const frontCenter = new THREE.Vector3(clampedX, y, clampedZ);
+            const halfW = roofWindow.width / 2;
+            const wallTopY = y + roofWindow.wallHeight;
+            const ridgeApexY = wallTopY + roofWindow.ridgeHeight;
+
+            // Width: a vertical line at the wall's own +along edge - same convention the
+            // segment handles above use (line runs perpendicular to its own drag axis).
+            this.addHandleLine(
+                frontCenter.clone().addScaledVector(along, halfW),
+                frontCenter.clone().addScaledVector(along, halfW).setY(wallTopY),
+                along, 0.5, 'Roof Window Width',
+                () => roofWindow.width,
+                (v) => { roofWindow.width = Math.max(0.3, v); this.update(); },
+                0.3,
+            );
+
+            // Depth: a horizontal line along the -along edge, from the front wall back to
+            // where the dormer's own footprint ends.
+            const depthEdgeFront = frontCenter.clone().addScaledVector(along, -halfW);
+            this.addHandleLine(
+                depthEdgeFront, depthEdgeFront.clone().addScaledVector(outward, -roofWindow.depth),
+                outward.clone().negate(), 1, 'Roof Window Depth',
+                () => roofWindow.depth,
+                (v) => { roofWindow.depth = Math.max(0.3, v); this.update(); },
+                0.3,
+            );
+
+            // Wall height / ridge height: stacked vertical lines through the wall's own
+            // centerline, matching the segment handles' "Wall Height"/"Roof Ridge Height"
+            // pair exactly.
+            this.addHandleLine(
+                frontCenter.clone(), frontCenter.clone().setY(wallTopY),
+                AXIS_Y, 1, 'Roof Window Wall Height',
+                () => roofWindow.wallHeight,
+                (v) => { roofWindow.wallHeight = Math.max(0.1, v); this.update(); },
+                0.1,
+            );
+            this.addHandleLine(
+                frontCenter.clone().setY(wallTopY), frontCenter.clone().setY(ridgeApexY),
+                AXIS_Y, 1, 'Roof Window Ridge Height',
+                () => roofWindow.ridgeHeight,
+                (v) => { roofWindow.ridgeHeight = Math.max(0.1, v); this.update(); },
+                0.1,
+            );
+        }
     }
 
     protected override getGeometry(): GeometryGroup[] {
