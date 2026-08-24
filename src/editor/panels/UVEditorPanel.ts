@@ -424,6 +424,41 @@ export default class UVEditorPanel {
                my >= bounds.maxY - s / 2 && my <= bounds.maxY + s / 2;
     }
 
+    // Whether (mx, my) lands on the active group's own UV wireframe (its bounding box is
+    // close enough - the wireframe can be a thin sliver of triangles, and the box is what
+    // drawWireframeBounds already shows as the draggable "this is the element" region).
+    private hitWireframe(mx: number, my: number): boolean {
+        const w = this.canvas.clientWidth;
+        const h = this.canvas.clientHeight;
+        const bounds = this.getWireframeBounds(w, h);
+        if (!bounds) return false;
+        return mx >= bounds.minX && mx <= bounds.maxX && my >= bounds.minY && my <= bounds.maxY;
+    }
+
+    // Right-click, Alt+left, or a plain left-drag starting on empty space (not on the
+    // element's own wireframe/handles) all pan the view instead of moving the UV mapping -
+    // only a drag that actually starts on the element should translate its UV.
+    private beginPan(e: MouseEvent): void {
+        this.dragging = null;
+        this.dragStartX = e.clientX;
+        this.dragStartY = e.clientY;
+        const startOffX = this.viewOffsetX;
+        const startOffY = this.viewOffsetY;
+
+        const onMove = (ev: MouseEvent) => {
+            this.viewOffsetX = startOffX + (ev.clientX - this.dragStartX);
+            this.viewOffsetY = startOffY + (ev.clientY - this.dragStartY);
+            this.draw();
+        };
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        e.preventDefault();
+    }
+
     private onMouseDown = (e: MouseEvent): void => {
         if (!this.element || !this.activeGroup) return;
         const rect = this.canvas.getBoundingClientRect();
@@ -431,29 +466,17 @@ export default class UVEditorPanel {
         const my = e.clientY - rect.top;
 
         if (e.button === 2 || (e.button === 0 && e.altKey)) {
-            // Right-click or Alt+left: pan the view
-            this.dragging = null;
-            this.dragStartX = e.clientX;
-            this.dragStartY = e.clientY;
-            const startOffX = this.viewOffsetX;
-            const startOffY = this.viewOffsetY;
-
-            const onMove = (ev: MouseEvent) => {
-                this.viewOffsetX = startOffX + (ev.clientX - this.dragStartX);
-                this.viewOffsetY = startOffY + (ev.clientY - this.dragStartY);
-                this.draw();
-            };
-            const onUp = () => {
-                window.removeEventListener('mousemove', onMove);
-                window.removeEventListener('mouseup', onUp);
-            };
-            window.addEventListener('mousemove', onMove);
-            window.addEventListener('mouseup', onUp);
-            e.preventDefault();
+            this.beginPan(e);
             return;
         }
 
         if (e.button !== 0) return;
+
+        if (!this.hitScaleHandle(mx, my) && !this.hitWireframe(mx, my)) {
+            // Empty space, not the element itself - pan the view rather than moving the UV.
+            this.beginPan(e);
+            return;
+        }
 
         const transform = this.element.getUVTransform(this.activeGroup);
         this.dragStartTransform = { ...transform };
@@ -490,7 +513,7 @@ export default class UVEditorPanel {
             const rect = this.canvas.getBoundingClientRect();
             const mx = e.clientX - rect.left;
             const my = e.clientY - rect.top;
-            this.canvas.style.cursor = this.hitScaleHandle(mx, my) ? 'nwse-resize' : 'grab';
+            this.canvas.style.cursor = this.hitScaleHandle(mx, my) ? 'nwse-resize' : this.hitWireframe(mx, my) ? 'move' : 'grab';
             return;
         }
 
