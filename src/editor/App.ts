@@ -12,7 +12,6 @@ import HeaderManager from "./HeaderManager";
 import TransformToolbarManager from "./TransformToolbarManager";
 import HistoryManager from './HistoryManager';
 import FoliageManager from './FoliageManager';
-import RoadJunctionManager from './RoadJunctionManager';
 
 @injectable()
 export default class App {
@@ -44,7 +43,6 @@ export default class App {
         @inject(HeaderManager) headerManager: HeaderManager,
         @inject(TransformToolbarManager) transformToolbarManager: TransformToolbarManager,
         @inject(FoliageManager) private readonly foliage: FoliageManager,
-        @inject(RoadJunctionManager) private readonly roadJunctions: RoadJunctionManager,
     ) {
         this.renderer = renderer;
         this.camera = camera;
@@ -108,7 +106,6 @@ export default class App {
         this.lastTime = time;
 
         this.projectSettings.update(delta);
-        this.roadJunctions.refresh();
         this.scene.flushDirty();
         this.foliage.update(delta);
         this.renderer.render(this.scene.instance, this.camera.instance);

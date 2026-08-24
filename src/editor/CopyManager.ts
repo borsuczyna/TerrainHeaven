@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { singleton } from 'tsyringe';
 import Road from '../elements/Road';
+import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
 import Fence from '../elements/Fence';
 import type WorldElement from '../elements/WorldElement';
@@ -22,6 +23,9 @@ export default class CopyManager {
     private roadLength: number | null = null;
     private roadDirection: THREE.Vector3 | null = null;
 
+    // Intersection-specific
+    private intersectionNodeCount: number | null = null;
+
     // Terrain-specific
     private terrainWidth: number | null = null;
     private terrainHeight: number | null = null;
@@ -39,6 +43,13 @@ export default class CopyManager {
             const b = element.nodeB.mesh.position;
             this.roadLength = a.distanceTo(b);
             this.roadDirection = new THREE.Vector3().subVectors(b, a).normalize();
+            this.intersectionNodeCount = null;
+            this.terrainWidth = null;
+            this.terrainHeight = null;
+        } else if (element instanceof Intersection) {
+            this.intersectionNodeCount = element.nodeCount;
+            this.roadLength = null;
+            this.roadDirection = null;
             this.terrainWidth = null;
             this.terrainHeight = null;
         } else if (element instanceof Terrain) {
@@ -46,6 +57,7 @@ export default class CopyManager {
             this.terrainHeight = element.length;
             this.roadLength = null;
             this.roadDirection = null;
+            this.intersectionNodeCount = null;
         }
     }
 
@@ -58,6 +70,7 @@ export default class CopyManager {
         this.snapshotUVTransforms(element);
         this.roadLength = null;
         this.roadDirection = null;
+        this.intersectionNodeCount = null;
         this.terrainWidth = null;
         this.terrainHeight = null;
     }
@@ -114,6 +127,8 @@ export default class CopyManager {
             const posA = spawnCenter.clone().sub(dir.clone().multiplyScalar(half));
             const posB = spawnCenter.clone().add(dir.clone().multiplyScalar(half));
             newEl = this.sourceType === 'Fence' ? new Fence(posA, posB) : new Road(posA, posB);
+        } else if (this.sourceType === 'Intersection' && this.intersectionNodeCount !== null) {
+            newEl = new Intersection(spawnCenter, this.intersectionNodeCount);
         } else if (this.sourceType === 'Terrain' && this.terrainWidth !== null && this.terrainHeight !== null) {
             newEl = new Terrain(spawnCenter, this.terrainWidth, this.terrainHeight);
         }
