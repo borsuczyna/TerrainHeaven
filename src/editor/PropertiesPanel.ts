@@ -16,6 +16,10 @@ export default class PropertiesPanel {
     private customDef: PropertyDefinition | null = null;
     private readonly copyManager: CopyManager;
     private readonly history: HistoryManager;
+    // Custom select dropdowns are rendered into document.body (a "portal") so they aren't
+    // clipped by the panel's own overflow-y:auto - only one can be open at a time, so
+    // closing it just means tearing this down and clearing the reference.
+    private openSelectDropdown: { close: () => void } | null = null;
 
     constructor(
         @inject(CopyManager) copyManager: CopyManager,
@@ -73,6 +77,9 @@ export default class PropertiesPanel {
         const def = this.customDef ?? this.element?.getProperties();
         if (!def) return;
 
+        this.openSelectDropdown?.close();
+        this.openSelectDropdown = null;
+
         let html = `<div class="panel-header"><span class="icon">${def.icon}</span><span class="panel-heading"><span class="panel-eyebrow">Inspector</span><span class="panel-title">${def.title}</span></span><div class="panel-header-actions"><button class="panel-delete-btn" data-tooltip="Delete selection" type="button"><i data-lucide="trash-2"></i></button><button class="panel-menu-btn" data-tooltip="More options" type="button"><i data-lucide="ellipsis"></i></button></div><div class="panel-menu" style="display:none"></div></div>`;
 
         for (const section of def.sections) {
@@ -112,15 +119,15 @@ export default class PropertiesPanel {
                     <div class="prop-fields">
                         <div class="prop-field">
                             <span class="axis-label x">X</span>
-                            <input type="number" step="0.1" value="${v.x.toFixed(3)}" data-axis="x">
+                            <input type="number" step="0.1" value="${v.x.toFixed(3)}" data-axis="x" class="draggable-number">
                         </div>
                         <div class="prop-field">
                             <span class="axis-label y">Y</span>
-                            <input type="number" step="0.1" value="${v.y.toFixed(3)}" data-axis="y">
+                            <input type="number" step="0.1" value="${v.y.toFixed(3)}" data-axis="y" class="draggable-number">
                         </div>
                         <div class="prop-field">
                             <span class="axis-label z">Z</span>
-                            <input type="number" step="0.1" value="${v.z.toFixed(3)}" data-axis="z">
+                            <input type="number" step="0.1" value="${v.z.toFixed(3)}" data-axis="z" class="draggable-number">
                         </div>
                     </div>
                 </div>`;
@@ -136,7 +143,7 @@ export default class PropertiesPanel {
                     <span class="prop-label">${prop.label}</span>
                     <div class="prop-fields">
                         <div class="prop-field-single">
-                            <input type="number" step="${step}" ${min} ${max} value="${v}">
+                            <input type="number" step="${step}" ${min} ${max} value="${v}" class="draggable-number">
                         </div>
                     </div>
                 </div>`;
@@ -157,15 +164,16 @@ export default class PropertiesPanel {
 
         if (prop.type === 'select') {
             const v = prop.get();
-            const optionsHtml = prop.options.map(o =>
-                `<option value="${o.value}"${o.value === v ? ' selected' : ''}>${o.label}</option>`
-            ).join('');
+            const selectedLabel = prop.options.find(o => o.value === v)?.label ?? '';
             return `
                 <div class="prop-row" data-prop-id="${id}" data-prop-type="select">
                     <span class="prop-label">${prop.label}</span>
                     <div class="prop-fields">
                         <div class="prop-field-single">
-                            <select>${optionsHtml}</select>
+                            <button type="button" class="prop-select-btn" data-value="${v}">
+                                <span class="prop-select-value">${selectedLabel}</span>
+                                <i data-lucide="chevron-down"></i>
+                            </button>
                         </div>
                     </div>
                 </div>`;
@@ -266,11 +274,15 @@ export default class PropertiesPanel {
                     const z = parseFloat((inputs[2] as HTMLInputElement).value) || 0;
                     (prop as PropertyVector3).set(new THREE.Vector3(x, y, z));
                 };
-                inputs.forEach(input => {
+                inputs.forEach((input) => {
                     input.addEventListener('focus', () => this.beginHistory(row as HTMLElement, historyLabel));
                     input.addEventListener('change', commit);
                     input.addEventListener('change', () => this.endHistory(row as HTMLElement, historyLabel));
                     input.addEventListener('blur', () => this.endHistory(row as HTMLElement, historyLabel));
+                    this.attachNumberDrag(input as HTMLInputElement, () => parseFloat((input as HTMLInputElement).value) || 0, (next) => {
+                        (input as HTMLInputElement).value = next.toFixed(3);
+                        commit();
+                    });
                 });
             }
 
@@ -308,6 +320,15 @@ export default class PropertiesPanel {
                 input.addEventListener('change', () => this.endHistory(row as HTMLElement, historyLabel));
                 input.addEventListener('blur', () => commitNumber(true));
                 input.addEventListener('blur', () => this.endHistory(row as HTMLElement, historyLabel));
+                this.attachNumberDrag(
+                    input as HTMLInputElement,
+                    () => (prop as PropertyNumber).get(),
+                    (next) => {
+                        (input as HTMLInputElement).value = String(next);
+                        (prop as PropertyNumber).set(next);
+                    },
+                    prop.min, prop.max, prop.step,
+                );
             }
 
             if (prop.type === 'boolean') {
@@ -330,15 +351,144 @@ export default class PropertiesPanel {
             }
 
             if (prop.type === 'select') {
-                const select = row.querySelector('select')!;
-                select.addEventListener('change', () => {
-                    const historyLabel = `Edit ${prop.label}`;
-                    this.history.beginAction(historyLabel);
-                    (prop as PropertySelect).set(select.value);
-                    this.history.endAction(historyLabel);
-                });
+                this.attachSelectDropdown(row as HTMLElement, prop as PropertySelect);
             }
         }
+    }
+
+    // Blender-style click-and-drag scrubbing on a number field: press and hold, then drag
+    // sideways to change the value, instead of having to click in and type. A short distance
+    // threshold before a drag "arms" keeps a plain click-to-type still working normally -
+    // below the threshold nothing here fires and the browser's own focus/click handles it.
+    // Values are written straight into the input's DOM value and applied via applyValue
+    // without dispatching an 'input' event, so this doesn't re-trigger the existing
+    // focus-driven commit/history listeners already wired on the same input - those still
+    // bracket the interaction normally since a real focus event still fires on mousedown.
+    private attachNumberDrag(
+        input: HTMLInputElement,
+        getValue: () => number,
+        applyValue: (next: number) => void,
+        min?: number,
+        max?: number,
+        step?: number,
+    ): void {
+        const DRAG_THRESHOLD_PX = 3;
+        let dragging = false;
+        let startX = 0;
+        let startValue = 0;
+
+        const range = (min !== undefined && max !== undefined) ? (max - min) : undefined;
+        const sensitivity = range !== undefined ? range / 300 : (step && step > 0 ? step : 1) * 2;
+
+        const onMouseMove = (e: MouseEvent): void => {
+            const dx = e.clientX - startX;
+            if (!dragging) {
+                if (Math.abs(dx) < DRAG_THRESHOLD_PX) return;
+                dragging = true;
+                input.classList.add('dragging');
+                document.body.classList.add('dragging-number-field');
+            }
+            e.preventDefault();
+            let next = startValue + dx * sensitivity;
+            if (min !== undefined) next = Math.max(min, next);
+            if (max !== undefined) next = Math.min(max, next);
+            if (step && step > 0) next = Math.round(next / step) * step;
+            next = Number(next.toFixed(6));
+            applyValue(next);
+        };
+        const onMouseUp = (): void => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+            input.classList.remove('dragging');
+            document.body.classList.remove('dragging-number-field');
+            dragging = false;
+        };
+        input.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            startX = e.clientX;
+            startValue = getValue();
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        });
+    }
+
+    // Fully custom dropdown replacing the native <select> - a browser's own <option> list
+    // popup is OS-rendered and can't be restyled from CSS (appearance:none only reaches the
+    // closed control), which read as "still default browser" against the rest of the dark
+    // themed panel. The option list is appended to document.body (not the row itself) and
+    // positioned from the button's own bounding rect, so it isn't clipped by the panel's
+    // overflow-y:auto regardless of scroll position.
+    private attachSelectDropdown(row: HTMLElement, prop: PropertySelect): void {
+        const btn = row.querySelector('.prop-select-btn') as HTMLButtonElement;
+        const valueLabel = btn.querySelector('.prop-select-value') as HTMLElement;
+
+        const close = (): void => {
+            list.remove();
+            document.removeEventListener('mousedown', onOutsideClick, true);
+            document.removeEventListener('keydown', onKeyDown, true);
+            btn.classList.remove('open');
+            if (this.openSelectDropdown?.close === close) this.openSelectDropdown = null;
+        };
+        const onOutsideClick = (e: MouseEvent): void => {
+            if (list.contains(e.target as Node) || btn.contains(e.target as Node)) return;
+            close();
+        };
+        const onKeyDown = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') close();
+        };
+
+        const list = document.createElement('div');
+        list.className = 'prop-select-options';
+
+        btn.addEventListener('click', () => {
+            if (this.openSelectDropdown) {
+                const wasThisOne = this.openSelectDropdown.close === close;
+                this.openSelectDropdown.close();
+                if (wasThisOne) return;
+            }
+
+            const currentValue = btn.dataset.value;
+            list.innerHTML = '';
+            for (const option of prop.options) {
+                const item = document.createElement('div');
+                item.className = 'prop-select-option' + (option.value === currentValue ? ' selected' : '');
+                item.textContent = option.label;
+                item.addEventListener('click', () => {
+                    const historyLabel = `Edit ${prop.label}`;
+                    this.history.beginAction(historyLabel);
+                    prop.set(option.value);
+                    this.history.endAction(historyLabel);
+                    btn.dataset.value = option.value;
+                    valueLabel.textContent = option.label;
+                    close();
+                });
+                list.appendChild(item);
+            }
+
+            const rect = btn.getBoundingClientRect();
+            list.style.left = `${rect.left}px`;
+            list.style.top = `${rect.bottom + 2}px`;
+            list.style.width = `${rect.width}px`;
+            list.style.visibility = 'hidden';
+            document.body.appendChild(list);
+
+            // Flip above the button (and clamp horizontally) if the list would otherwise run
+            // off the bottom/right of the viewport - the button can sit anywhere in the
+            // panel, including right at the bottom edge, and the list is only measurable
+            // once it's actually in the document.
+            const listRect = list.getBoundingClientRect();
+            if (listRect.bottom > window.innerHeight) {
+                list.style.top = `${Math.max(4, rect.top - listRect.height - 2)}px`;
+            }
+            if (listRect.right > window.innerWidth) {
+                list.style.left = `${Math.max(4, window.innerWidth - listRect.width - 4)}px`;
+            }
+            list.style.visibility = 'visible';
+            btn.classList.add('open');
+            document.addEventListener('mousedown', onOutsideClick, true);
+            document.addEventListener('keydown', onKeyDown, true);
+            this.openSelectDropdown = { close };
+        });
     }
 
     private beginHistory(row: HTMLElement, label: string): void {
@@ -387,9 +537,17 @@ export default class PropertiesPanel {
                 }
 
                 if (prop.type === 'select') {
-                    const select = row.querySelector('select')!;
-                    if (select !== document.activeElement) {
-                        (select as HTMLSelectElement).value = (prop as PropertySelect).get();
+                    const btn = row.querySelector('.prop-select-btn') as HTMLButtonElement;
+                    // Skip while this dropdown is the open one - overwriting mid-interaction
+                    // would fight the user's own click.
+                    if (this.openSelectDropdown && btn.classList.contains('open')) continue;
+                    const selectProp = prop as PropertySelect;
+                    const currentValue = selectProp.get();
+                    if (btn.dataset.value !== currentValue) {
+                        btn.dataset.value = currentValue;
+                        const label = selectProp.options.find(o => o.value === currentValue)?.label ?? '';
+                        const valueLabel = btn.querySelector('.prop-select-value');
+                        if (valueLabel) valueLabel.textContent = label;
                     }
                 }
             }

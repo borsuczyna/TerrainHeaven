@@ -9,7 +9,6 @@ import WorldElement, {
 } from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
-import Config from '../utils/Config';
 import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 
 type Point2 = [number, number];
@@ -142,9 +141,14 @@ export default class Building extends WorldElement {
     constructor(anchor: THREE.Vector3, firstSegment: BuildingSegment) {
         super();
         this.mesh.castShadow = true;
-        this.setNode(0, new WorldNode(anchor.clone(), Config.editor.nodeColor));
+        // No separate "anchor" node: segment 0's own node doubles as the building's height
+        // reference (see getAnchor). A dedicated anchor node used to sit here too, but since
+        // every segment and opening already carries its own absolute world-space position,
+        // dragging the anchor's X/Z did nothing visible - only its Y (read by getAnchor)
+        // ever affected anything, which just looked like a second, mostly-inert node
+        // sitting right on top of segment 0's real one.
         const segmentNode = new WorldNode(anchor.clone(), SEGMENT_NODE_COLOR);
-        this.setNode(1, segmentNode);
+        this.setNode(0, segmentNode);
         this.segments = [{
             width: Math.max(MIN_SEGMENT_SIZE, firstSegment.width),
             depth: Math.max(MIN_SEGMENT_SIZE, firstSegment.depth),
@@ -197,7 +201,7 @@ export default class Building extends WorldElement {
     }
 
     private getAnchor(): THREE.Vector3 {
-        return this.nodes[0].mesh.position;
+        return this.segments[0].node.mesh.position;
     }
 
     // Read-only world position, for tools computing a new segment/opening's placement from
@@ -1501,16 +1505,10 @@ export default class Building extends WorldElement {
             step: 0.05,
         });
 
+        // No separate "Transform > Anchor" section - since segment 0's own node doubles as
+        // the anchor (see the class-level note on why), that would just be a second field
+        // editing the exact same position as "Segment 1 > Position" below.
         const sections: { label: string; properties: SectionItem[] }[] = [
-            {
-                label: 'Transform',
-                properties: [{
-                    type: 'vector3',
-                    label: 'Anchor',
-                    get: () => self.getAnchor().clone(),
-                    set: (value: THREE.Vector3) => { self.getAnchor().copy(value); self.update(); },
-                }],
-            },
             {
                 label: 'Structure',
                 properties: [

@@ -58,6 +58,13 @@ export default class TextureBrowser {
         });
 
         this.container.addEventListener('dragover', (event) => {
+            // A texture dragged from this same library grid carries our own marker (see the
+            // item's own dragstart) - the browser also synthesizes a dataTransfer.files entry
+            // for it (the drag source is an <img> backed by a blob: URL), which would
+            // otherwise look exactly like a real external file drop and re-import the asset
+            // as a brand-new duplicate with a hash-derived filename. Ignore drags that carry
+            // that marker; only a genuine external file drop should trigger an import.
+            if (event.dataTransfer?.types.includes('application/x-santown-texture-path')) return;
             if (!event.dataTransfer?.types.includes('Files')) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
@@ -69,6 +76,7 @@ export default class TextureBrowser {
             }
         });
         this.container.addEventListener('drop', (event) => {
+            if (event.dataTransfer?.types.includes('application/x-santown-texture-path')) return;
             if (!event.dataTransfer?.files.length) return;
             event.preventDefault();
             this.container.classList.remove('drag-over');

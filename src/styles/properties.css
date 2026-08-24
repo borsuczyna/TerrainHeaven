@@ -192,6 +192,22 @@
     background: #252525;
 }
 
+#properties-panel .prop-field input.draggable-number,
+#properties-panel .prop-field-single input.draggable-number {
+    cursor: ew-resize;
+}
+
+#properties-panel .prop-field input.draggable-number.dragging,
+#properties-panel .prop-field-single input.draggable-number.dragging {
+    background: #2c3a4d;
+    color: #eee;
+}
+
+body.dragging-number-field {
+    cursor: ew-resize !important;
+    user-select: none;
+}
+
 #properties-panel .prop-field-single {
     flex: 1;
     background: #1a1a1a;
@@ -281,17 +297,88 @@
     background: #4a8ec5;
 }
 
-#properties-panel select {
+/* Custom select - the native <option> popup can't be restyled from CSS on the <select>
+   itself (it's OS-rendered), so the whole control is replaced with a button + a portal-ed
+   option list (see PropertiesPanel.attachSelectDropdown) styled to match the panel. */
+#properties-panel .prop-select-btn {
     width: 100%;
-    background: #1e1e1e;
-    border: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    background-color: #1e1e1e;
+    border: 1px solid #3a3a3a;
     border-radius: 3px;
     color: #ccc;
     font-size: 11px;
-    padding: 3px 4px;
+    font-family: inherit;
+    padding: 4px 6px;
+    box-sizing: border-box;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+#properties-panel .prop-select-btn .prop-select-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#properties-panel .prop-select-btn svg {
+    flex-shrink: 0;
+    width: 12px;
+    height: 12px;
+    color: #999;
+    transition: transform 0.12s ease;
+}
+
+#properties-panel .prop-select-btn:hover {
+    border-color: #5d5d5d;
+    background-color: #232323;
+}
+
+#properties-panel .prop-select-btn.open {
+    background-color: #252525;
+    border-color: #6b92c9;
+    box-shadow: 0 0 0 1px #6b92c9;
+}
+
+#properties-panel .prop-select-btn.open svg {
+    transform: rotate(180deg);
+}
+
+.prop-select-options {
+    position: fixed;
+    z-index: 1000;
+    max-height: 240px;
+    overflow-y: auto;
+    background: #232323;
+    border: 1px solid #444;
+    border-radius: 4px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+    padding: 3px;
     box-sizing: border-box;
 }
 
-#properties-panel select:focus {
-    background: #252525;
+.prop-select-options .prop-select-option {
+    padding: 5px 8px;
+    font-size: 11px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #ccc;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prop-select-options .prop-select-option:hover {
+    background: #3a6ea5;
+    color: #fff;
+}
+
+.prop-select-options .prop-select-option.selected {
+    background: #2d5b8f;
+    color: #fff;
 }

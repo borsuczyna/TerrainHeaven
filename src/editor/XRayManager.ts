@@ -42,6 +42,25 @@ class XRayManager {
         const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         for (const mat of materials) {
             mat.depthTest = !enabled;
+            // renderOrder only sorts objects within whichever render bucket they're already
+            // in - WebGLRenderer always draws every opaque-bucket object before any
+            // transparent-bucket one, regardless of renderOrder across the two buckets. Any
+            // textured element's material has transparent=true (see WorldElement's
+            // configureTextureTransparency), so it's in the transparent bucket and was
+            // drawing after (i.e. on top of) an x-rayed opaque-bucket mesh no matter how high
+            // its renderOrder was set. Forcing transparent=true here too puts the x-rayed
+            // mesh in the same bucket as any textured occluder, where its renderOrder=999
+            // then genuinely wins; the material's real transparent value is restored once
+            // x-ray is turned back off.
+            if (enabled) {
+                if (mat.userData.xrayOriginalTransparent === undefined) {
+                    mat.userData.xrayOriginalTransparent = mat.transparent;
+                }
+                mat.transparent = true;
+            } else if (mat.userData.xrayOriginalTransparent !== undefined) {
+                mat.transparent = mat.userData.xrayOriginalTransparent;
+                delete mat.userData.xrayOriginalTransparent;
+            }
             mat.needsUpdate = true;
         }
     }
