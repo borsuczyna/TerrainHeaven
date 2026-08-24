@@ -34,7 +34,7 @@ export interface OccupiedTriangle {
 }
 
 export interface ElementData {
-    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon' | 'building';
+    type: 'road' | 'roadJunction' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon' | 'building';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
@@ -69,13 +69,6 @@ export interface ElementData {
     bridgeEdgeCapJoined?: boolean;
     // Legacy: migrated to bridgeEdgeCapWidth when loading older project files.
     bridgeEdgeCapOverhang?: number;
-    // Intersection-specific
-    length?: number;
-    nodeCount?: number;
-    roadTexWidth?: number;
-    roadTexHeight?: number;
-    roadTexOffsetX?: number;
-    roadTexOffsetY?: number;
     // Terrain-specific
     terrainWidth?: number;
     terrainLength?: number;

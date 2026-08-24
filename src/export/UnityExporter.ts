@@ -9,7 +9,7 @@ import type WorldElement from '../elements/WorldElement';
 import type { GeometryGroup } from '../elements/WorldElement';
 import Terrain from '../elements/Terrain';
 import Road from '../elements/Road';
-import Intersection from '../elements/Intersection';
+import RoadJunction from '../elements/RoadJunction';
 import RiverSpline from '../elements/RiverSpline';
 import Fence from '../elements/Fence';
 import PolygonTerrain from '../elements/PolygonTerrain';
@@ -39,7 +39,7 @@ export interface UnityExportOptions {
     scale: number;
 }
 
-type ExportKind = 'terrain' | 'road' | 'intersection' | 'river' | 'fence' | 'terrainPolygon' | 'building';
+type ExportKind = 'terrain' | 'road' | 'roadJunction' | 'river' | 'fence' | 'terrainPolygon' | 'building';
 
 interface ManifestLodGroup {
     // Matches one OBJ "g"/"usemtl" submesh, in file order, so the importer can assign
@@ -354,7 +354,7 @@ export default class UnityExporter {
     private getExportKind(element: WorldElement): ExportKind | null {
         if (element instanceof Terrain) return 'terrain';
         if (element instanceof RiverSpline) return 'river';
-        if (element instanceof Intersection) return 'intersection';
+        if (element instanceof RoadJunction) return 'roadJunction';
         if (element instanceof Road) return 'road';
         if (element instanceof Fence) return 'fence';
         if (element instanceof PolygonTerrain) return 'terrainPolygon';
@@ -366,7 +366,7 @@ export default class UnityExporter {
         switch (kind) {
             case 'terrain': return (element as Terrain).getExportGeometry(lodIndex);
             case 'road': return (element as Road).getExportGeometry(lodIndex);
-            case 'intersection': return (element as Intersection).getExportGeometry(lodIndex);
+            case 'roadJunction': return (element as RoadJunction).getExportGeometry(lodIndex);
             case 'river': return (element as RiverSpline).getExportGeometry(lodIndex);
             case 'fence': return (element as Fence).getExportGeometry(lodIndex);
             case 'terrainPolygon': return (element as PolygonTerrain).getExportGeometry(lodIndex);

@@ -91,7 +91,7 @@ export default class PresetPanel {
 
     private iconFor(type: string): string {
         const iconsByType: Record<string, string> = {
-            Road: 'route', Intersection: 'git-fork', Terrain: 'mountain',
+            Road: 'route', Terrain: 'mountain',
             TerrainCutSpline: 'spline', RiverSpline: 'waves', Fence: 'panels-top-left',
         };
         return iconsByType[type] ?? 'box';

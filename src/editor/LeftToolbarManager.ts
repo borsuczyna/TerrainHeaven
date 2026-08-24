@@ -2,7 +2,6 @@ import { singleton, inject } from 'tsyringe';
 import ToolManager from './ToolManager';
 import type { Tool } from './ToolManager';
 import RoadTool from './tools/RoadTool';
-import IntersectionTool from './tools/IntersectionTool';
 import TerrainTool from './tools/TerrainTool';
 import TerrainCutPointTool from './tools/TerrainCutPointTool';
 import TerrainCutSplineTool from './tools/TerrainCutSplineTool';
@@ -28,7 +27,6 @@ export default class LeftToolbarManager {
     constructor(
         @inject(ToolManager) private readonly toolManager: ToolManager,
         @inject(RoadTool) private readonly roadTool: RoadTool,
-        @inject(IntersectionTool) private readonly intersectionTool: IntersectionTool,
         @inject(TerrainTool) private readonly terrainTool: TerrainTool,
         @inject(TerrainCutPointTool) private readonly terrainCutPointTool: TerrainCutPointTool,
         @inject(TerrainCutSplineTool) private readonly terrainCutSplineTool: TerrainCutSplineTool,
@@ -75,7 +73,6 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(texturesTool);
         this.toolManager.registerTool(presetsTool);
         this.toolManager.registerTool(this.roadTool);
-        this.toolManager.registerTool(this.intersectionTool);
         this.toolManager.registerTool(this.terrainTool);
         this.toolManager.registerTool(this.terrainCutPointTool);
         this.toolManager.registerTool(this.terrainCutSplineTool);
@@ -96,11 +93,10 @@ export default class LeftToolbarManager {
         this.toolManager.registerSwitcher(
             'road-switcher',
             document.getElementById('btn-road') as HTMLButtonElement,
-            ['road', 'intersection', 'fence'],
+            ['road', 'fence'],
             'road',
             {
                 road: { label: 'Road Tool', icon: 'route' },
-                intersection: { label: 'Intersection Tool', icon: 'git-fork' },
                 fence: { label: 'Fence Tool', icon: 'panels-top-left' },
             },
             'R',
