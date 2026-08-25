@@ -76,6 +76,10 @@ export interface ElementData {
     roadTexHeight?: number;
     roadTexOffsetX?: number;
     roadTexOffsetY?: number;
+    sidewalkTexWidth?: number;
+    sidewalkTexHeight?: number;
+    sidewalkTexOffsetX?: number;
+    sidewalkTexOffsetY?: number;
     // Terrain-specific
     terrainWidth?: number;
     terrainLength?: number;

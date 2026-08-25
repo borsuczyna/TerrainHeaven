@@ -37,12 +37,26 @@ export default class Intersection extends WorldElement {
     public roadTexHeight: number = 3;
     public roadTexOffsetX: number = 0;
     public roadTexOffsetY: number = 0;
+    // Unlike the road group's flat world-XZ planar projection, the sidewalk group's raw UV
+    // (see getGeometry) is already strip-relative world units - height/width in meters
+    // across, distance-along-the-gap in meters along - matching Road's own sidewalk UV
+    // convention exactly, so a connected road's sidewalk texture continues at the correct
+    // scale and orientation into the intersection's own gap-fill piece instead of the old
+    // flat projection, which stretched and rotated with the gap's own angle. These fields
+    // divide that raw UV down (same "world units per texture repeat" convention roadTexWidth
+    // already uses), defaulting to 1:1 so it matches an unmodified Road's own default scale.
+    public sidewalkTexWidth: number = 1;
+    public sidewalkTexHeight: number = 1;
+    public sidewalkTexOffsetX: number = 0;
+    public sidewalkTexOffsetY: number = 0;
 
     public override getWidth(): number { return this.width; }
     public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
     public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
 
-    public override getUVGroups(): string[] { return ['road']; }
+    public override getUVGroups(): string[] {
+        return this.edgeType === 'sidewalk' ? ['road', 'sidewalk'] : ['road'];
+    }
 
     public override getUVTransform(group: string): UVTransform {
         if (group === 'road') {
@@ -51,6 +65,14 @@ export default class Intersection extends WorldElement {
                 offsetY: this.roadTexOffsetY,
                 scaleX: this.roadTexWidth,
                 scaleY: this.roadTexHeight,
+            };
+        }
+        if (group === 'sidewalk') {
+            return {
+                offsetX: this.sidewalkTexOffsetX,
+                offsetY: this.sidewalkTexOffsetY,
+                scaleX: this.sidewalkTexWidth,
+                scaleY: this.sidewalkTexHeight,
             };
         }
         return super.getUVTransform(group);
@@ -62,6 +84,12 @@ export default class Intersection extends WorldElement {
             this.roadTexOffsetY = t.offsetY;
             this.roadTexWidth = Math.max(0.1, t.scaleX);
             this.roadTexHeight = Math.max(0.1, t.scaleY);
+            this.update();
+        } else if (group === 'sidewalk') {
+            this.sidewalkTexOffsetX = t.offsetX;
+            this.sidewalkTexOffsetY = t.offsetY;
+            this.sidewalkTexWidth = Math.max(0.1, t.scaleX);
+            this.sidewalkTexHeight = Math.max(0.1, t.scaleY);
             this.update();
         }
     }
@@ -177,6 +205,10 @@ export default class Intersection extends WorldElement {
             roadTexHeight: this.roadTexHeight,
             roadTexOffsetX: this.roadTexOffsetX,
             roadTexOffsetY: this.roadTexOffsetY,
+            sidewalkTexWidth: this.sidewalkTexWidth,
+            sidewalkTexHeight: this.sidewalkTexHeight,
+            sidewalkTexOffsetX: this.sidewalkTexOffsetX,
+            sidewalkTexOffsetY: this.sidewalkTexOffsetY,
         };
     }
 
@@ -194,6 +226,10 @@ export default class Intersection extends WorldElement {
         intersection.roadTexHeight = ed.roadTexHeight ?? 3;
         intersection.roadTexOffsetX = ed.roadTexOffsetX ?? 0;
         intersection.roadTexOffsetY = ed.roadTexOffsetY ?? 0;
+        intersection.sidewalkTexWidth = ed.sidewalkTexWidth ?? 1;
+        intersection.sidewalkTexHeight = ed.sidewalkTexHeight ?? 1;
+        intersection.sidewalkTexOffsetX = ed.sidewalkTexOffsetX ?? 0;
+        intersection.sidewalkTexOffsetY = ed.sidewalkTexOffsetY ?? 0;
         for (let i = 0; i < ed.nodes.length; i++) {
             const n = ed.nodes[i];
             intersection.getNode(i).update(new THREE.Vector3(n.x, n.y, n.z));
@@ -353,6 +389,28 @@ export default class Intersection extends WorldElement {
         out.push(tri);
     }
 
+    // Same winding correction as addFlatTriangle, but for triangles whose 3 corners need
+    // independently-chosen UVs rather than one shared planar projection - used by the
+    // sidewalk strip, where the very same 3D vertex plays a different UV role (e.g. "top of
+    // the curb face" vs "inner edge of the top surface") depending on which triangle it
+    // appears in, exactly like Road's own per-segment sidewalk UVs.
+    private addFlatTriangleUV(
+        out: Triangle[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
+        uvA: THREE.Vector2, uvB: THREE.Vector2, uvC: THREE.Vector2,
+        labels?: [string, string, string],
+    ): void {
+        let labelA = labels?.[0], labelB = labels?.[1], labelC = labels?.[2];
+        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+        if (normal.y < 0) {
+            const tmpV = b; b = c; c = tmpV;
+            const tmpUV = uvB; uvB = uvC; uvC = tmpUV;
+            const tmpLabel = labelB; labelB = labelC; labelC = tmpLabel;
+        }
+        const tri = new Triangle(a, b, c, uvA, uvB, uvC);
+        tri.labelA = labelA; tri.labelB = labelB; tri.labelC = labelC;
+        out.push(tri);
+    }
+
     protected getGeometry(): GeometryGroup[] {
         const roadTris: Triangle[] = [];
         const swTris: Triangle[] = [];
@@ -450,15 +508,33 @@ export default class Intersection extends WorldElement {
             const innerAUp = innerA.clone(); innerAUp.y += a.curbHeight;
             const innerBUp = innerB.clone(); innerBUp.y += b.curbHeight;
 
-            // Curb face (vertical) then the sidewalk's own top face.
+            // Curb face (vertical) then the sidewalk's own top face. UVs are strip-relative
+            // world units - across = height/width in meters (curb face, then the top face,
+            // each restarting its own U at the inner edge), along = ground-level distance
+            // from innerA to innerB in meters - the exact same convention Road's own
+            // sidewalk sweep uses (see getGeometryLine), instead of the flat world-XZ
+            // planar projection the "road" group above uses. A flat projection stretches
+            // and rotates with this gap's own angle, which is what left the connected
+            // road's brick/stone texture looking stretched right where it meets the
+            // intersection's own paved corner.
+            const swU = (u: number) => u / this.sidewalkTexWidth + this.sidewalkTexOffsetX;
+            const swV = (v: number) => v / this.sidewalkTexHeight + this.sidewalkTexOffsetY;
+            const alongLen = innerA.distanceTo(innerB);
+            const uv0A = new THREE.Vector2(swU(0), swV(0));
+            const uv0B = new THREE.Vector2(swU(0), swV(alongLen));
+            const uvCurbA = new THREE.Vector2(swU(a.curbHeight), swV(0));
+            const uvCurbB = new THREE.Vector2(swU(b.curbHeight), swV(alongLen));
+            const uvOuterA = new THREE.Vector2(swU(a.sidewalkWidth), swV(0));
+            const uvOuterB = new THREE.Vector2(swU(b.sidewalkWidth), swV(alongLen));
+
             const gapId = `gap[arm${a.i}->arm${b.i}]`;
-            this.addFlatTriangle(swTris, innerA, innerB, innerBUp, uvOf,
+            this.addFlatTriangleUV(swTris, innerA, innerB, innerBUp, uv0A, uv0B, uvCurbB,
                 [`${gapId}.innerA`, `${gapId}.innerB`, `${gapId}.innerBUp`]);
-            this.addFlatTriangle(swTris, innerA, innerBUp, innerAUp, uvOf,
+            this.addFlatTriangleUV(swTris, innerA, innerBUp, innerAUp, uv0A, uvCurbB, uvCurbA,
                 [`${gapId}.innerA`, `${gapId}.innerBUp`, `${gapId}.innerAUp`]);
-            this.addFlatTriangle(swTris, innerAUp, innerBUp, outerB, uvOf,
+            this.addFlatTriangleUV(swTris, innerAUp, innerBUp, outerB, uv0A, uv0B, uvOuterB,
                 [`${gapId}.innerAUp`, `${gapId}.innerBUp`, `${gapId}.outerB`]);
-            this.addFlatTriangle(swTris, innerAUp, outerB, outerA, uvOf,
+            this.addFlatTriangleUV(swTris, innerAUp, outerB, outerA, uv0A, uvOuterB, uvOuterA,
                 [`${gapId}.innerAUp`, `${gapId}.outerB`, `${gapId}.outerA`]);
         }
 
