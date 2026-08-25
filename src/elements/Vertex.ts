@@ -7,6 +7,12 @@ export default class Triangle {
     public uvA: THREE.Vector2;
     public uvB: THREE.Vector2;
     public uvC: THREE.Vector2;
+    // Optional per-corner debug description (e.g. "arm2.rightEdge") - only populated by
+    // elements that opt into the vertex-debug overlay (see WorldElement.getVertexDebugInfo).
+    // Left undefined has zero cost for every element that doesn't set it.
+    public labelA?: string;
+    public labelB?: string;
+    public labelC?: string;
 
     constructor(
         a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,

@@ -142,6 +142,10 @@ export default abstract class WorldElement {
     private groupTexturePaths: Map<string, string> = new Map();
     public textureRotations: Map<string, number> = new Map();
     private isSelected: boolean = false;
+    // Parallel to the position buffer (index i = vertex i) - filled from Triangle.labelA/B/C
+    // in setGeometry for whichever elements choose to set them. Powers the vertex-debug
+    // overlay/console tool; empty string for any vertex an element didn't label.
+    private vertexLabels: string[] = [];
 
     constructor() {
         container.resolve(WireframeManager).register(this.mesh);
@@ -205,6 +209,18 @@ export default abstract class WorldElement {
 
         if (!referencesNode && node.parent === this) {
             affected.add(this);
+        }
+
+        // A second hop: an Intersection's own corner geometry is built from every road
+        // connected to it at once (see Intersection.getGeometry's per-arm outerA/outerB), so
+        // dragging one road's node into/out of an intersection needs every OTHER road on
+        // that same intersection to rebuild too, not just the intersection itself - they'd
+        // otherwise keep showing whatever corner shape they last computed against the
+        // intersection's old geometry.
+        for (const element of [...affected]) {
+            for (const connection of element.connections.values()) {
+                affected.add(connection.element);
+            }
         }
 
         return [...affected];
@@ -489,6 +505,30 @@ export default abstract class WorldElement {
 
     protected abstract getGeometry(): GeometryGroup[];
 
+    // Debug aid: one entry per raw vertex in the (non-indexed) position buffer, with its
+    // world position, which material group it belongs to, and (for elements that label
+    // their triangles, e.g. Intersection) what it actually is. Vertices sharing a corner
+    // across triangles appear as separate entries here with matching positions - that's
+    // deliberate, it's what lets a genuinely mismatched/duplicated corner be told apart
+    // from one that's correctly coincident.
+    public getVertexDebugInfo(): { index: number; label: string; group: string; position: THREE.Vector3 }[] {
+        const geometry = this.mesh.geometry;
+        const posAttr = geometry?.attributes.position as THREE.BufferAttribute | undefined;
+        if (!posAttr) return [];
+        this.mesh.updateWorldMatrix(true, false);
+        const out: { index: number; label: string; group: string; position: THREE.Vector3 }[] = [];
+        for (let i = 0; i < posAttr.count; i++) {
+            const local = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+            out.push({
+                index: i,
+                label: this.vertexLabels[i] ?? '',
+                group: this.getGroupNameAtFace(Math.floor(i / 3)) ?? '',
+                position: local.applyMatrix4(this.mesh.matrixWorld),
+            });
+        }
+        return out;
+    }
+
     public getGroupNameAtFace(faceIndex: number): string | null {
         const geometry = this.mesh.geometry;
         if (!geometry) return null;
@@ -580,10 +620,14 @@ export default abstract class WorldElement {
         const totalVerts = allTriangles.length * 3;
         const positionArray = new Float32Array(totalVerts * 3);
         const uvArray = new Float32Array(totalVerts * 2);
+        this.vertexLabels = new Array(totalVerts).fill('');
 
         allTriangles.forEach((tri, idx) => {
             positionArray.set(tri.toArray(), idx * 9);
             uvArray.set(tri.uvToArray(), idx * 6);
+            this.vertexLabels[idx * 3] = tri.labelA ?? '';
+            this.vertexLabels[idx * 3 + 1] = tri.labelB ?? '';
+            this.vertexLabels[idx * 3 + 2] = tri.labelC ?? '';
         });
 
         geometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));

@@ -101,6 +101,28 @@ export default class PropertiesPanel {
         this.bindMenuEvents();
     }
 
+    // Two hops out, not just one. getResolvedHalfWidth/getResolvedSidewalkWidth/
+    // getResolvedCurbHeight/getResolvedNodeBasis are themselves one-hop-only lookups, so a
+    // property change can only ever change what a DIRECT neighbor's geometry looks like -
+    // but an Intersection's own corner geometry (see Intersection.getGeometry's per-arm
+    // outerA/outerB) is built from EVERY one of its connected roads at once, so editing one
+    // road connected to an intersection needs that intersection to rebuild (hop 1) AND, since
+    // the intersection is a shared hub, every OTHER road connected to that same intersection
+    // to rebuild too (hop 2) - otherwise those other roads keep rendering whatever corner
+    // shape they last computed even though the intersection they're plugged into just
+    // changed shape next to them.
+    private updateConnectedElements(): void {
+        if (!this.element) return;
+        const touched = new Set<WorldElement>();
+        const hopOne = [...this.element.connections.values()].map((c) => c.element);
+        for (const el of hopOne) touched.add(el);
+        for (const el of hopOne) {
+            for (const connection of el.connections.values()) touched.add(connection.element);
+        }
+        touched.delete(this.element);
+        for (const el of touched) el.update();
+    }
+
     private renderProperty(prop: SectionItem, sectionLabel: string): string {
         const id = `${sectionLabel}-${prop.label}`.replace(/\s+/g, '-').toLowerCase();
 
@@ -259,6 +281,26 @@ export default class PropertiesPanel {
 
         // Property inputs
         const allProps = def.sections.flatMap(s => s.properties.map(p => ({ sectionLabel: s.label, prop: p })));
+
+        // Any property edit (Road width, Intersection sidewalk width, edge type, ...) can
+        // change a value getResolvedHalfWidth/getResolvedSidewalkWidth/getResolvedCurbHeight/
+        // getResolvedNodeBasis reads on the OTHER side of a connection - e.g. widening a
+        // Road whose end is merged onto an Intersection changes what the Intersection's own
+        // geometry should look like there too. Unlike moving a node (which already
+        // propagates through WorldElement.translate()'s own getAffectedElementsForNode
+        // walk), a plain property change only ever called update() on the element being
+        // edited, leaving anything connected to it visually stale until something else (like
+        // dragging a node) forced a fuller rebuild. Wrapping every property's own set() here
+        // once covers every property on every element type without each individual setter
+        // needing to remember to do this itself.
+        for (const { prop } of allProps) {
+            if (prop.type === 'button') continue;
+            const original = (prop as { set: (value: unknown) => void }).set.bind(prop);
+            (prop as { set: (value: unknown) => void }).set = (value: unknown) => {
+                original(value);
+                this.updateConnectedElements();
+            };
+        }
 
         for (const { sectionLabel, prop } of allProps) {
             const id = `${sectionLabel}-${prop.label}`.replace(/\s+/g, '-').toLowerCase();

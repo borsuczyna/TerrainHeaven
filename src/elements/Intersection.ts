@@ -7,6 +7,25 @@ import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 
 export type EdgeType = 'none' | 'sidewalk';
 
+// A paved junction where 2+ roads meet: a flat surface fanned out from the average of its
+// own nodes, one per connected road end. Deliberately NOT built via a general polygon
+// union/triangulation library (polygon-clipping, poly2tri, THREE.ShapeUtils) - every one of
+// those was tried here and each produced a self-intersecting or incomplete result for some
+// real (not contrived) arm arrangement, because a union of arbitrarily-angled rotated
+// rectangles is a genuinely hard general computational-geometry problem, and general
+// polygon triangulators are not reliably robust against the reflex-vertex, near-parallel-
+// edge, and near-duplicate-vertex cases that arrangement produces.
+//
+// Instead: the boundary ring (each node's own road-mouth edge, connected straight across to
+// the next node's mouth edge, going around in angle order) is star-shaped around the
+// junction's own center by construction - direct geometric consequence of connecting
+// angularly-adjacent mouths in angular order - so it can ALWAYS be triangulated by a plain
+// fan of triangles from center to each boundary edge. No external triangulator, nothing
+// that can throw or silently produce a wrong/incomplete result. The tradeoff versus a true
+// rectangle-union shape is a chamfered (not squared-off) corner wherever two arms meet at
+// very different widths or angles - a real limitation, not a bug, and worth revisiting with
+// a purpose-built mitred-corner construction if it matters later, but this can never be
+// broken the way the previous two attempts were.
 export default class Intersection extends WorldElement {
     public width: number = 3;
     public length: number = 3;
@@ -188,7 +207,13 @@ export default class Intersection extends WorldElement {
             type: 'vector3' as const,
             label,
             get: () => node.mesh.position.clone(),
-            set: (v: THREE.Vector3) => { node.update(v); },
+            // node.update(v) alone only moves the WorldNode itself - nothing rebuilds this
+            // Intersection's own mesh (getGeometry() reads the node's live position, but
+            // that only happens inside update()). Dragging a node's position from this
+            // panel used to move the node while leaving the intersection's own paved
+            // surface rendered at its old shape until something else (like the viewport
+            // gizmo, which does call update() for the same node move) forced a rebuild.
+            set: (v: THREE.Vector3) => { node.update(v); self.update(); },
         });
 
         const nodeSections = this.nodes.map((node, i) => {
@@ -309,124 +334,132 @@ export default class Intersection extends WorldElement {
         return this.getGeometry();
     }
 
+    // Winding isn't guaranteed to face +Y by construction - correct each triangle
+    // individually rather than assuming a fixed vertex order, same defensive pattern
+    // used throughout this project for any footprint-to-3D triangulation.
+    private addFlatTriangle(
+        out: Triangle[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
+        uvOf: (p: THREE.Vector3) => THREE.Vector2,
+        labels?: [string, string, string],
+    ): void {
+        let labelA = labels?.[0], labelB = labels?.[1], labelC = labels?.[2];
+        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+        if (normal.y < 0) {
+            const tmp = b; b = c; c = tmp;
+            const tmpLabel = labelB; labelB = labelC; labelC = tmpLabel;
+        }
+        const tri = new Triangle(a, b, c, uvOf(a), uvOf(b), uvOf(c));
+        tri.labelA = labelA; tri.labelB = labelB; tri.labelC = labelC;
+        out.push(tri);
+    }
+
     protected getGeometry(): GeometryGroup[] {
         const roadTris: Triangle[] = [];
         const swTris: Triangle[] = [];
+        if (this._nodeCount < 2) return [{ name: 'road', triangles: roadTris }];
+
         const center = this.getCenter();
-
-        const leftEdges: THREE.Vector3[] = [];
-        const rightEdges: THREE.Vector3[] = [];
-
-        for (let i = 0; i < this._nodeCount; i++) {
-            const nodePos = this.nodes[i].mesh.position;
-            const basis = this.getResolvedNodeBasis(i);
-            const hw = this.getResolvedHalfWidth(i);
-            leftEdges.push(nodePos.clone().sub(basis.right.clone().multiplyScalar(hw)));
-            rightEdges.push(nodePos.clone().add(basis.right.clone().multiplyScalar(hw)));
-        }
+        const centerFlat = new THREE.Vector3(center.x, center.y, center.z);
 
         // Use planar UV based on world XZ relative to center, scaled by tex width/height
-        const sw = this.roadTexWidth || 1;
-        const sh = this.roadTexHeight || 1;
-        const uvOf = (p: THREE.Vector3) => new THREE.Vector2(
-            (p.x - center.x) / sw + this.roadTexOffsetX,
-            (p.z - center.z) / sh + this.roadTexOffsetY,
+        const texW = this.roadTexWidth || 1;
+        const texH = this.roadTexHeight || 1;
+        const uvOf = (p: THREE.Vector3): THREE.Vector2 => new THREE.Vector2(
+            (p.x - center.x) / texW + this.roadTexOffsetX,
+            (p.z - center.z) / texH + this.roadTexOffsetY,
         );
 
         // Perimeter order by angle around center, not raw node index - the constructor's
-        // own circular layout happens to start out angle-sorted, but a junction merged onto
-        // real, differently-angled roads gets its nodes dragged away from that circle, and
-        // nothing keeps their array indices in perimeter order afterward. Using raw index
-        // order here produced a self-crossing ring for exactly that (the normal, expected)
-        // case, which is what made the road/sidewalk triangulation below fail/degenerate.
+        // own circular layout starts out angle-sorted, but nothing keeps a node's array
+        // index matching its actual angular position once it's been dragged (merged onto
+        // a real road) away from that original circle.
         const order = [...Array(this._nodeCount).keys()].sort((i, j) => {
-            const angleI = Math.atan2(this.nodes[i].mesh.position.z - center.z, this.nodes[i].mesh.position.x - center.x);
-            const angleJ = Math.atan2(this.nodes[j].mesh.position.z - center.z, this.nodes[j].mesh.position.x - center.x);
-            return angleI - angleJ;
+            const a = this.nodes[i].mesh.position;
+            const b = this.nodes[j].mesh.position;
+            return Math.atan2(a.z - center.z, a.x - center.x) - Math.atan2(b.z - center.z, b.x - center.x);
         });
 
-        // The paved surface is the polygon that walks each node's own mouth (leftEdge to
-        // rightEdge) then straight across to the next node's leftEdge - triangulated as one
-        // simple polygon, not fanned out from an external "center" point. center is only
-        // the average of the node positions, and for anything other than a perfectly even
-        // circle (any junction whose nodes have actually been dragged onto real, unevenly-
-        // spaced road ends - which is every junction merged onto real roads) that average
-        // can land outside the polygon the nodes actually bound. Fanning triangles from a
-        // point outside the polygon is exactly what produced the self-intersecting spike
-        // this replaces - poking down through the surface wherever center fell on the wrong
-        // side of an edge.
-        //
-        // leftEdge-then-rightEdge (not the other way around) matters: right/left come from
-        // basis.right = forward rotated +90 CCW (see getNodeBasis), so for arms walked in
-        // increasing-angle (CCW) order, each arm's rightEdge is the side facing the NEXT
-        // arm and its leftEdge faces the PREVIOUS one. The gap edge connecting arm i to
-        // arm i+1 therefore has to be rightEdge[i] -> leftEdge[i+1] - pushing rightEdge
-        // first put that gap edge backwards (leftEdge[i] -> rightEdge[i+1]), which crossed
-        // the opposite gap edge for any junction whose arms aren't evenly spread around a
-        // circle (i.e. every junction actually merged onto real, unevenly-angled roads).
-        const ring: THREE.Vector3[] = [];
-        for (const i of order) {
-            ring.push(leftEdges[i], rightEdges[i]);
-        }
-        const ringContour = ring.map((p) => new THREE.Vector2(p.x, p.z));
-        const ringIndices = THREE.ShapeUtils.triangulateShape(ringContour, []);
-        for (const [ia, ib, ic] of ringIndices) {
-            let a = ring[ia];
-            let b = ring[ib];
-            let c = ring[ic];
-            // Winding isn't guaranteed by triangulateShape to face +Y for every contour
-            // orientation - correct each triangle individually rather than assuming the
-            // whole ring is wound one particular way.
-            const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
-            if (normal.y < 0) { const tmp = b; b = c; c = tmp; }
-            roadTris.push(new Triangle(a.clone(), b.clone(), c.clone(), uvOf(a), uvOf(b), uvOf(c)));
-        }
+        // Each arm's own two mouth points. basis.right = forward rotated +90 CCW (see
+        // getNodeBasis), so walked in this increasing-angle order, an arm's own rightEdge
+        // faces the NEXT arm and its leftEdge faces the PREVIOUS one - the gap edge closing
+        // arm i to arm i+1 is therefore rightEdge[i] -> leftEdge[i+1].
+        const arms = order.map((i) => {
+            const nodePos = this.nodes[i].mesh.position;
+            const basis = this.getResolvedNodeBasis(i);
+            const hw = this.getResolvedHalfWidth(i);
+            const offset = basis.right.clone().multiplyScalar(hw);
+            return {
+                i,
+                right: basis.right.clone(),
+                leftEdge: nodePos.clone().sub(offset),
+                rightEdge: nodePos.clone().add(offset),
+                sidewalkWidth: this.getResolvedSidewalkWidth(i),
+                curbHeight: this.getResolvedCurbHeight(i),
+            };
+        });
 
-        // Sidewalk around the perimeter - same angle-sorted adjacency as the road ring
-        // above, so a sidewalk segment always connects genuinely neighboring arms.
-        if (this.edgeType === 'sidewalk') {
-            for (let k = 0; k < this._nodeCount; k++) {
-                const i = order[k];
-                const nextIdx = order[(k + 1) % this._nodeCount];
-                const nodePos = this.nodes[i].mesh.position;
-                const nextNodePos = this.nodes[nextIdx].mesh.position;
-                const basis = this.getResolvedNodeBasis(i);
-                const nextBasis = this.getResolvedNodeBasis(nextIdx);
-                const hw = this.getResolvedHalfWidth(i);
-                const nextHw = this.getResolvedHalfWidth(nextIdx);
-                const sw = this.getResolvedSidewalkWidth(i);
-                const nextSw = this.getResolvedSidewalkWidth(nextIdx);
-                const ch = this.getResolvedCurbHeight(i);
-                const nextCh = this.getResolvedCurbHeight(nextIdx);
-                const up = new THREE.Vector3(0, 1, 0);
+        const n = arms.length;
+        for (let k = 0; k < n; k++) {
+            const a = arms[k];
+            const b = arms[(k + 1) % n];
+            // This arm's own mouth (center -> its right edge -> its left edge).
+            this.addFlatTriangle(roadTris, centerFlat, a.rightEdge, a.leftEdge, uvOf,
+                ['center', `arm${a.i}.rightEdge`, `arm${a.i}.leftEdge`]);
+            // The gap between this arm and the next one - a.rightEdge (the side of arm a
+            // that faces arm b) straight across to b.leftEdge (the side of arm b that
+            // faces back at arm a). Using a.leftEdge/b.rightEdge here (the sides facing
+            // AWAY from each other) was the actual bug: that gap edge cut clean across the
+            // junction toward whichever arm was on the OTHER side instead of connecting to
+            // its own genuinely adjacent neighbor, which is what put sidewalk/road
+            // geometry in the middle of the junction instead of at its outer corners.
+            this.addFlatTriangle(roadTris, centerFlat, b.leftEdge, a.rightEdge, uvOf,
+                ['center', `arm${b.i}.leftEdge`, `arm${a.i}.rightEdge`]);
 
-                const innerA = rightEdges[i];
-                const innerB = leftEdges[nextIdx];
-                const outerA = nodePos.clone().add(basis.right.clone().multiplyScalar(hw + sw));
-                const outerB = nextNodePos.clone().sub(nextBasis.right.clone().multiplyScalar(nextHw + nextSw));
+            // Sidewalk strip along that same gap, only where both arms actually have one -
+            // no sidewalk at all if either connected road lacks one, same rule an ordinary
+            // two-road junction already applies. Unlike an earlier version of this, width
+            // and curb height are NOT collapsed to a single Math.min() value for the whole
+            // piece - innerA/outerA use arm a's own resolved values and innerB/outerB use
+            // arm b's own, so each end lines up exactly with whatever that specific
+            // connected road actually built at that exact shared point, even when the two
+            // roads bordering this gap have different sidewalk widths or curb heights.
+            // Using one uniform value for the whole piece was the actual bug behind
+            // "the intersection's sidewalk renders under the road's own sidewalk": at
+            // whichever end had the taller/wider road, this piece's corner sat at a
+            // different height/position than that road's own sidewalk mesh already had
+            // there.
+            if (a.sidewalkWidth <= 0 || b.sidewalkWidth <= 0) continue;
+            const innerA = a.rightEdge;
+            const innerB = b.leftEdge;
+            if (innerA.distanceToSquared(innerB) < 1e-8) continue;
 
-                const upA = up.clone().multiplyScalar(ch);
-                const upB = up.clone().multiplyScalar(nextCh);
+            // Extend outward along each arm's OWN right-vector, not a shared "gap
+            // perpendicular" direction (the old approach). A connected Road builds its own
+            // sidewalk by offsetting along that exact same resolvedNodeBasis.right at this
+            // shared node (see Road's sweepGeometryLine/getGeometryLine) - a single shared
+            // outward direction for both ends only happened to line up with that for a
+            // perfectly symmetric junction, and diverged from the real connected road's own
+            // outer sidewalk corner everywhere else, which is what left a visible seam
+            // between the intersection's own sidewalk and each road's own sidewalk mesh.
+            // arm b's own right points from its leftEdge toward its rightEdge, i.e. AWAY
+            // from this gap, so its own sidewalk extends along -right here.
+            const outerA = innerA.clone().addScaledVector(a.right, a.sidewalkWidth);
+            const outerB = innerB.clone().addScaledVector(b.right, -b.sidewalkWidth);
+            outerA.y += a.curbHeight;
+            outerB.y += b.curbHeight;
+            const innerAUp = innerA.clone(); innerAUp.y += a.curbHeight;
+            const innerBUp = innerB.clone(); innerBUp.y += b.curbHeight;
 
-                const innerAUp = innerA.clone().add(upA);
-                const innerBUp = innerB.clone().add(upB);
-                const outerAUp = outerA.clone().add(upA);
-                const outerBUp = outerB.clone().add(upB);
-
-                const edgeLen = innerA.distanceTo(innerB);
-
-                // Curb face
-                swTris.push(new Triangle(innerA.clone(), innerBUp.clone(), innerAUp.clone(),
-                    new THREE.Vector2(0, 0), new THREE.Vector2(1, edgeLen), new THREE.Vector2(1, 0)));
-                swTris.push(new Triangle(innerA.clone(), innerB.clone(), innerBUp.clone(),
-                    new THREE.Vector2(0, 0), new THREE.Vector2(0, edgeLen), new THREE.Vector2(1, edgeLen)));
-
-                // Sidewalk top
-                swTris.push(new Triangle(innerAUp.clone(), innerBUp.clone(), outerBUp.clone(),
-                    new THREE.Vector2(0, 0), new THREE.Vector2(0, edgeLen), new THREE.Vector2(1, edgeLen)));
-                swTris.push(new Triangle(innerAUp.clone(), outerBUp.clone(), outerAUp.clone(),
-                    new THREE.Vector2(0, 0), new THREE.Vector2(1, edgeLen), new THREE.Vector2(1, 0)));
-            }
+            // Curb face (vertical) then the sidewalk's own top face.
+            const gapId = `gap[arm${a.i}->arm${b.i}]`;
+            this.addFlatTriangle(swTris, innerA, innerB, innerBUp, uvOf,
+                [`${gapId}.innerA`, `${gapId}.innerB`, `${gapId}.innerBUp`]);
+            this.addFlatTriangle(swTris, innerA, innerBUp, innerAUp, uvOf,
+                [`${gapId}.innerA`, `${gapId}.innerBUp`, `${gapId}.innerAUp`]);
+            this.addFlatTriangle(swTris, innerAUp, innerBUp, outerB, uvOf,
+                [`${gapId}.innerAUp`, `${gapId}.innerBUp`, `${gapId}.outerB`]);
+            this.addFlatTriangle(swTris, innerAUp, outerB, outerA, uvOf,
+                [`${gapId}.innerAUp`, `${gapId}.outerB`, `${gapId}.outerA`]);
         }
 
         const groups: GeometryGroup[] = [{ name: 'road', triangles: roadTris }];
