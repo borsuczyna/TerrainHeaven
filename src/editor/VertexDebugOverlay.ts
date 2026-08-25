@@ -23,6 +23,10 @@ interface VertexDebugRow {
 export default class VertexDebugOverlay {
     private readonly container: HTMLDivElement;
     private readonly labelPool: HTMLDivElement[] = [];
+    // Off by default - the on-screen ID labels are only useful while actively hunting a
+    // geometry bug and are visual noise the rest of the time. getVertices() itself (the
+    // console table) stays available regardless, since it only runs when called.
+    private enabled = false;
 
     constructor(
         @inject(Camera) private readonly camera: Camera,
@@ -33,10 +37,25 @@ export default class VertexDebugOverlay {
         this.container.style.pointerEvents = 'none';
         document.body.appendChild(this.container);
 
-        (window as unknown as { getVertices: () => VertexDebugRow[] }).getVertices = () => this.describeSelectedVertices();
+        const w = window as unknown as {
+            getVertices: () => VertexDebugRow[];
+            enableVertexDebug: () => void;
+            disableVertexDebug: () => void;
+        };
+        w.getVertices = () => this.describeSelectedVertices();
+        w.enableVertexDebug = () => {
+            this.enabled = true;
+            console.log('[vertexDebug] On-screen vertex ID labels enabled for the selected element. Call disableVertexDebug() to turn them off.');
+        };
+        w.disableVertexDebug = () => {
+            this.enabled = false;
+            for (const div of this.labelPool) div.style.display = 'none';
+            console.log('[vertexDebug] On-screen vertex ID labels disabled.');
+        };
     }
 
     public update(): void {
+        if (!this.enabled) return;
         const element = this.selection.getSelectedElement();
         const info = element?.getVertexDebugInfo() ?? [];
         if (info.length === 0) {
