@@ -411,6 +411,25 @@ export default class Intersection extends WorldElement {
         out.push(tri);
     }
 
+    // Intersects two lines in the XZ plane (roads are flat) - aPoint+t*aDir and
+    // bPoint+s*bDir - to find a true mitred (sharp) corner between two adjacent arms' own
+    // edge lines, instead of the flat chamfer between their two raw mouth points. Returns
+    // null when the lines are too close to parallel to have a well-defined intersection -
+    // this also naturally covers a fully collinear straight through-road, which doesn't
+    // need a mitred corner at all. A non-null result still isn't blindly trusted by the
+    // caller - see getGeometry's own validation of where it lands.
+    private mitreCorner(
+        aPoint: THREE.Vector3, aDir: THREE.Vector3,
+        bPoint: THREE.Vector3, bDir: THREE.Vector3,
+    ): THREE.Vector3 | null {
+        const denom = aDir.x * bDir.z - aDir.z * bDir.x;
+        if (Math.abs(denom) < 1e-4) return null;
+        const dx = bPoint.x - aPoint.x;
+        const dz = bPoint.z - aPoint.z;
+        const t = (dx * bDir.z - dz * bDir.x) / denom;
+        return new THREE.Vector3(aPoint.x + t * aDir.x, aPoint.y, aPoint.z + t * aDir.z);
+    }
+
     protected getGeometry(): GeometryGroup[] {
         const roadTris: Triangle[] = [];
         const swTris: Triangle[] = [];
@@ -448,7 +467,9 @@ export default class Intersection extends WorldElement {
             const offset = basis.right.clone().multiplyScalar(hw);
             return {
                 i,
+                nodePos: nodePos.clone(),
                 right: basis.right.clone(),
+                forward: basis.forward.clone(),
                 leftEdge: nodePos.clone().sub(offset),
                 rightEdge: nodePos.clone().add(offset),
                 sidewalkWidth: this.getResolvedSidewalkWidth(i),
@@ -457,21 +478,64 @@ export default class Intersection extends WorldElement {
         });
 
         const n = arms.length;
+
+        // For each gap, try a true mitred corner - where arm a's own right-edge LINE
+        // (extended) crosses arm b's own left-edge line - instead of always drawing a flat
+        // chamfer between their two raw mouth points. A flat chamfer is simple and always
+        // safe, but visibly cuts the corner off wherever two arms don't meet at a very wide
+        // angle, which reads as a diamond/rhombus instead of a square-ish junction. Mitring
+        // gives a sharp corner there instead. Each candidate is validated before use and
+        // falls back to the original flat chamfer whenever it isn't well-defined (near-
+        // parallel edges - this is also what a straight, fully collinear through-road
+        // naturally hits, where a chamfer is already exactly correct) or would land outside
+        // the angular sweep from a to b around center, which would tear the star-shaped
+        // boundary the rest of this method's fan triangulation depends on to never self-
+        // intersect.
+        type GapCorner = { mitred: true; point: THREE.Vector3 } | { mitred: false };
+        const gaps: GapCorner[] = arms.map((a, k) => {
+            const b = arms[(k + 1) % n];
+            const mitre = this.mitreCorner(a.rightEdge, a.forward, b.leftEdge, b.forward);
+            if (!mitre) return { mitred: false };
+
+            const refDist = (a.rightEdge.distanceTo(centerFlat) + b.leftEdge.distanceTo(centerFlat)) / 2;
+            const mitreDist = mitre.distanceTo(centerFlat);
+            if (mitreDist > refDist * 3 || mitreDist < 1e-4) return { mitred: false };
+
+            const dirA = new THREE.Vector2(a.nodePos.x - center.x, a.nodePos.z - center.z);
+            const dirB = new THREE.Vector2(b.nodePos.x - center.x, b.nodePos.z - center.z);
+            const dirM = new THREE.Vector2(mitre.x - center.x, mitre.z - center.z);
+            const crossAM = dirA.x * dirM.y - dirA.y * dirM.x;
+            const crossMB = dirM.x * dirB.y - dirM.y * dirB.x;
+            if (crossAM < -1e-6 || crossMB < -1e-6) return { mitred: false };
+
+            return { mitred: true, point: mitre };
+        });
+
         for (let k = 0; k < n; k++) {
             const a = arms[k];
             const b = arms[(k + 1) % n];
-            // This arm's own mouth (center -> its right edge -> its left edge).
-            this.addFlatTriangle(roadTris, centerFlat, a.rightEdge, a.leftEdge, uvOf,
-                ['center', `arm${a.i}.rightEdge`, `arm${a.i}.leftEdge`]);
-            // The gap between this arm and the next one - a.rightEdge (the side of arm a
-            // that faces arm b) straight across to b.leftEdge (the side of arm b that
-            // faces back at arm a). Using a.leftEdge/b.rightEdge here (the sides facing
-            // AWAY from each other) was the actual bug: that gap edge cut clean across the
-            // junction toward whichever arm was on the OTHER side instead of connecting to
-            // its own genuinely adjacent neighbor, which is what put sidewalk/road
-            // geometry in the middle of the junction instead of at its outer corners.
-            this.addFlatTriangle(roadTris, centerFlat, b.leftEdge, a.rightEdge, uvOf,
-                ['center', `arm${b.i}.leftEdge`, `arm${a.i}.rightEdge`]);
+            const gap = gaps[k];
+            const prevGap = gaps[(k - 1 + n) % n];
+
+            // This arm's own mouth, using the mitred corner shared with each neighbor where
+            // one was found, otherwise its own raw edge point.
+            const rightCorner = gap.mitred ? gap.point : a.rightEdge;
+            const leftCorner = prevGap.mitred ? prevGap.point : a.leftEdge;
+            this.addFlatTriangle(roadTris, centerFlat, rightCorner, leftCorner, uvOf,
+                ['center', `arm${a.i}.rightCorner`, `arm${a.i}.leftCorner`]);
+
+            // The gap between this arm and the next one is only its own separate triangle
+            // when NOT mitred - a.rightEdge (the side of arm a that faces arm b) straight
+            // across to b.leftEdge (the side of arm b that faces back at arm a). Using
+            // a.leftEdge/b.rightEdge here (the sides facing AWAY from each other) was an
+            // earlier bug: that gap edge cut clean across the junction toward whichever arm
+            // was on the OTHER side instead of connecting to its own genuinely adjacent
+            // neighbor. When mitred, rightCorner and leftCorner above already coincide at
+            // the shared mitre point, so there is no gap left to fill.
+            if (!gap.mitred) {
+                this.addFlatTriangle(roadTris, centerFlat, b.leftEdge, a.rightEdge, uvOf,
+                    ['center', `arm${b.i}.leftEdge`, `arm${a.i}.rightEdge`]);
+            }
 
             // Sidewalk strip along that same gap, only where both arms actually have one -
             // no sidewalk at all if either connected road lacks one, same rule an ordinary
@@ -487,9 +551,8 @@ export default class Intersection extends WorldElement {
             // different height/position than that road's own sidewalk mesh already had
             // there.
             if (a.sidewalkWidth <= 0 || b.sidewalkWidth <= 0) continue;
-            const innerA = a.rightEdge;
-            const innerB = b.leftEdge;
-            if (innerA.distanceToSquared(innerB) < 1e-8) continue;
+            const innerA = gap.mitred ? gap.point : a.rightEdge;
+            const innerB = gap.mitred ? gap.point : b.leftEdge;
 
             // Extend outward along each arm's OWN right-vector, not a shared "gap
             // perpendicular" direction (the old approach). A connected Road builds its own
@@ -528,8 +591,14 @@ export default class Intersection extends WorldElement {
             const uvOuterB = new THREE.Vector2(swU(b.sidewalkWidth), swV(alongLen));
 
             const gapId = `gap[arm${a.i}->arm${b.i}]`;
-            this.addFlatTriangleUV(swTris, innerA, innerB, innerBUp, uv0A, uv0B, uvCurbB,
-                [`${gapId}.innerA`, `${gapId}.innerB`, `${gapId}.innerBUp`]);
+            // When mitred, innerA and innerB are the exact same point (by construction, see
+            // above) - this first triangle would be degenerate (two identical corners), so
+            // skip it; the other three still matter whenever curb height or sidewalk width
+            // differs between the two arms even though their inner corner now coincides.
+            if (innerA.distanceToSquared(innerB) >= 1e-8) {
+                this.addFlatTriangleUV(swTris, innerA, innerB, innerBUp, uv0A, uv0B, uvCurbB,
+                    [`${gapId}.innerA`, `${gapId}.innerB`, `${gapId}.innerBUp`]);
+            }
             this.addFlatTriangleUV(swTris, innerA, innerBUp, innerAUp, uv0A, uvCurbB, uvCurbA,
                 [`${gapId}.innerA`, `${gapId}.innerBUp`, `${gapId}.innerAUp`]);
             this.addFlatTriangleUV(swTris, innerAUp, innerBUp, outerB, uv0A, uv0B, uvOuterB,
