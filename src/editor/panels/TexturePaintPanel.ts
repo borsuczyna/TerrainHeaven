@@ -19,6 +19,8 @@ export default class TexturePaintPanel {
     public onLayerTextureChanged: ((layer: number, path: string) => void) | null = null;
     public onLayerTilingChanged: ((layer: number, tiling: number) => void) | null = null;
     public onClear: (() => void) | null = null;
+    public onCopyLayers: (() => void) | null = null;
+    public onPasteLayers: (() => void) | null = null;
     private readonly container: HTMLElement;
     private readonly fileInput: HTMLInputElement;
     private visible = false;
@@ -70,7 +72,11 @@ export default class TexturePaintPanel {
                 </div>
                 <div class="texture-paint-tab-view" data-view="layers">
                     <section class="texture-paint-section texture-layers-section">
-                        <h3>Terrain Layers <span>RGBA channels</span></h3>
+                        <h3>Terrain Layers <span data-role="terrain-context">Click a terrain</span></h3>
+                        <div class="texture-layer-preset-actions">
+                            <button type="button" data-action="copy-layers" disabled><i data-lucide="copy"></i> Copy Preset</button>
+                            <button type="button" data-action="paste-layers" disabled><i data-lucide="clipboard-paste"></i> Paste Preset</button>
+                        </div>
                         <div class="texture-paint-layers"></div>
                     </section>
                     <button type="button" class="texture-paint-clear" data-action="clear"><i data-lucide="rotate-ccw"></i> Reset control map</button>
@@ -95,12 +101,23 @@ export default class TexturePaintPanel {
     }
 
     public get isVisible(): boolean { return this.visible; }
+    public get canPaint(): boolean { return this.activeTab === 'paint'; }
     public show(): void { this.visible = true; this.container.classList.add('visible'); this.renderLayers(); }
     public hide(): void { this.closePicker(); this.visible = false; this.container.classList.remove('visible'); window.dispatchEvent(new CustomEvent('texture-paint-panel-closed')); }
 
     public syncTerrain(layers: readonly { texturePath: string; tiling: number }[]): void {
         this.displayedLayers = Array.from({ length: 4 }, (_, index) => ({ texturePath: layers[index]?.texturePath ?? '', tiling: layers[index]?.tiling ?? 8 }));
         this.renderLayers();
+    }
+
+    public setTerrainContext(hasTerrain: boolean, canPaste: boolean): void {
+        const context = this.container.querySelector<HTMLElement>('[data-role="terrain-context"]');
+        if (context) context.textContent = hasTerrain ? 'Last clicked terrain' : 'Click a terrain';
+        const copy = this.container.querySelector<HTMLButtonElement>('[data-action="copy-layers"]');
+        const paste = this.container.querySelector<HTMLButtonElement>('[data-action="paste-layers"]');
+        if (copy) copy.disabled = !hasTerrain;
+        if (paste) paste.disabled = !hasTerrain || !canPaste;
+        this.container.classList.toggle('has-terrain-context', hasTerrain);
     }
 
     private brushButton(shape: TextureBrushShape, label: string): string {
@@ -128,6 +145,8 @@ export default class TexturePaintPanel {
     private bind(): void {
         this.container.querySelector('[data-action="close"]')?.addEventListener('click', () => this.hide());
         this.container.querySelector('[data-action="clear"]')?.addEventListener('click', () => this.onClear?.());
+        this.container.querySelector('[data-action="copy-layers"]')?.addEventListener('click', () => this.onCopyLayers?.());
+        this.container.querySelector('[data-action="paste-layers"]')?.addEventListener('click', () => this.onPasteLayers?.());
         this.container.querySelectorAll<HTMLButtonElement>('[data-shape]').forEach((button) => button.addEventListener('click', () => {
             this.settings.shape = button.dataset.shape as TextureBrushShape;
             this.container.querySelectorAll('[data-shape]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));

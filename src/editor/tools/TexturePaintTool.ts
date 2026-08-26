@@ -16,7 +16,8 @@ export default class TexturePaintTool implements Tool {
     private readonly mouse = new THREE.Vector2();
     private readonly preview: THREE.Mesh;
     private painting = false;
-    private activeTerrain: Terrain | null = null;
+    private lastClickedTerrain: Terrain | null = null;
+    private copiedLayers: { texturePath: string; tiling: number }[] | null = null;
     private readonly lastDab = new THREE.Vector3();
     private strokeSeed = 0;
 
@@ -81,15 +82,22 @@ export default class TexturePaintTool implements Tool {
         this.scene.instance.add(this.preview);
         this.panel.onClear = () => this.clear();
         this.panel.onLayerTextureChanged = (index, path) => void this.setLayer(index, path);
-        this.panel.onLayerTilingChanged = (index, tiling) => {
-            for (const terrain of this.getTerrains()) terrain.setTextureLayerTiling(index, tiling);
-        };
+        this.panel.onLayerTilingChanged = (index, tiling) => this.setLayerTiling(index, tiling);
+        this.panel.onCopyLayers = () => this.copyLayers();
+        this.panel.onPasteLayers = () => void this.pasteLayers();
         window.addEventListener('texture-paint-panel-closed', () => { this.preview.visible = false; });
+        window.addEventListener('history-restored', () => {
+            this.lastClickedTerrain = null;
+            this.painting = false;
+            this.preview.visible = false;
+            this.panel.setTerrainContext(false, this.copiedLayers !== null);
+        });
     }
 
     public activate(): void {
-        this.activeTerrain ??= this.getTerrains()[0] ?? null;
-        if (this.activeTerrain) this.panel.syncTerrain(this.activeTerrain.textureLayers);
+        if (this.lastClickedTerrain && !this.getTerrains().includes(this.lastClickedTerrain)) this.lastClickedTerrain = null;
+        if (this.lastClickedTerrain) this.panel.syncTerrain(this.lastClickedTerrain.textureLayers);
+        this.panel.setTerrainContext(this.lastClickedTerrain !== null, this.copiedLayers !== null);
         this.panel.show();
         window.addEventListener('mousemove', this.onMouseMove);
         window.addEventListener('mouseup', this.onMouseUp);
@@ -103,8 +111,11 @@ export default class TexturePaintTool implements Tool {
         if (event.button !== 0 || (event.target as HTMLElement).tagName !== 'CANVAS') return false;
         const result = this.getHit(event.clientX, event.clientY);
         if (!result) return true;
-        this.painting = true; this.activeTerrain = result.terrain; this.lastDab.copy(result.hit.point); this.strokeSeed++;
+        this.lastClickedTerrain = result.terrain;
         this.panel.syncTerrain(result.terrain.textureLayers);
+        this.panel.setTerrainContext(true, this.copiedLayers !== null);
+        if (!this.panel.canPaint) { event.preventDefault(); return true; }
+        this.painting = true; this.lastDab.copy(result.hit.point); this.strokeSeed++;
         this.history.beginAction(`Paint Terrain Texture ${this.panel.settings.layer + 1}`);
         this.paint(result.terrain, result.hit.point);
         event.preventDefault(); return true;
@@ -114,32 +125,21 @@ export default class TexturePaintTool implements Tool {
         if ((event.target as HTMLElement).tagName !== 'CANVAS') { if (!this.painting) this.preview.visible = false; return; }
         const result = this.getHit(event.clientX, event.clientY);
         if (!result) { this.preview.visible = false; return; }
-        if (this.activeTerrain !== result.terrain) this.panel.syncTerrain(result.terrain.textureLayers);
-        this.activeTerrain = result.terrain;
+        if (!this.panel.canPaint) { this.preview.visible = false; return; }
         this.updatePreview(result.hit);
-        if (!this.painting || !(event.buttons & 1)) return;
+        if (!this.painting || !(event.buttons & 1) || !this.lastClickedTerrain) return;
         const spacing = Math.max(0.05, this.panel.settings.radius * this.panel.settings.spacing);
         const delta = result.hit.point.clone().sub(this.lastDab); delta.y = 0;
         let distance = delta.length(); if (distance < spacing) return;
         const direction = delta.normalize();
-        while (distance >= spacing) { this.lastDab.addScaledVector(direction, spacing); this.paint(result.terrain, this.lastDab); distance -= spacing; }
+        while (distance >= spacing) { this.lastDab.addScaledVector(direction, spacing); this.paint(this.lastClickedTerrain, this.lastDab); distance -= spacing; }
     };
     private paint(terrain: Terrain, point: THREE.Vector3): void {
         const s = this.panel.settings;
-        const affected = this.scene.getElements()
-            .filter((element): element is Terrain => element instanceof Terrain)
-            .filter((candidate) => candidate.intersectsPaintBrush(point, s.radius));
-        for (const candidate of affected) {
-            // A stroke crossing a tile seam must resolve the same channel to the same
-            // texture on both sides. Copy only the active slot, keeping other tile-local
-            // layer choices intact.
-            if (candidate !== terrain) {
-                const sourceLayer = terrain.textureLayers[s.layer];
-                candidate.setTexturePaintLayer(s.layer, sourceLayer.texturePath, sourceLayer.texture);
-                candidate.setTextureLayerTiling(s.layer, sourceLayer.tiling);
-            }
-            candidate.paintTexture(point, s.radius, s.layer, s.opacity, s.hardness, s.shape, THREE.MathUtils.degToRad(s.rotation), this.strokeSeed);
-        }
+        // Empty secondary slots use the white shader fallback. Ignoring them avoids
+        // accidentally painting a white layer before the requested texture is loaded.
+        if (s.layer > 0 && !terrain.textureLayers[s.layer]?.texture) return;
+        terrain.paintTexture(point, s.radius, s.layer, s.opacity, s.hardness, s.shape, THREE.MathUtils.degToRad(s.rotation), this.strokeSeed);
     }
     private getHit(x: number, y: number): { terrain: Terrain; hit: THREE.Intersection } | null {
         this.mouse.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1); this.raycaster.setFromCamera(this.mouse, this.camera.instance);
@@ -163,10 +163,40 @@ export default class TexturePaintTool implements Tool {
         material.uniforms.brushSeed.value = this.strokeSeed;
     }
     private async setLayer(index: number, path: string): Promise<void> {
+        const target = this.lastClickedTerrain;
+        if (!target) return;
         const texture = path ? await this.library.loadTexture(path) : null;
-        for (const terrain of this.getTerrains()) terrain.setTexturePaintLayer(index, path, texture);
+        if (!this.getTerrains().includes(target)) return;
+        this.history.beginAction('Change Terrain Texture Layer');
+        target.setTexturePaintLayer(index, path, texture);
+        this.history.endAction();
     }
-    private clear(): void { if (!this.activeTerrain) return; this.history.beginAction('Clear Terrain Texture Paint'); this.activeTerrain.clearTexturePaint(); this.history.endAction(); }
+    private setLayerTiling(index: number, tiling: number): void {
+        if (!this.lastClickedTerrain) return;
+        this.history.beginAction('Change Terrain Texture Tiling');
+        this.lastClickedTerrain.setTextureLayerTiling(index, tiling);
+        this.history.endAction();
+    }
+    private copyLayers(): void {
+        if (!this.lastClickedTerrain) return;
+        this.copiedLayers = this.lastClickedTerrain.textureLayers.map(({ texturePath, tiling }) => ({ texturePath, tiling }));
+        this.panel.setTerrainContext(true, true);
+    }
+    private async pasteLayers(): Promise<void> {
+        const target = this.lastClickedTerrain;
+        if (!target || !this.copiedLayers) return;
+        const layers = this.copiedLayers.map((layer) => ({ ...layer }));
+        const textures = await Promise.all(layers.map((layer) => layer.texturePath ? this.library.loadTexture(layer.texturePath) : null));
+        if (!this.getTerrains().includes(target)) return;
+        this.history.beginAction('Paste Terrain Layer Preset');
+        layers.forEach((layer, index) => {
+            target.setTexturePaintLayer(index, layer.texturePath, textures[index]);
+            target.setTextureLayerTiling(index, layer.tiling);
+        });
+        this.history.endAction();
+        if (this.lastClickedTerrain === target) this.panel.syncTerrain(target.textureLayers);
+    }
+    private clear(): void { if (!this.lastClickedTerrain) return; this.history.beginAction('Clear Terrain Texture Paint'); this.lastClickedTerrain.clearTexturePaint(); this.history.endAction(); }
     private getTerrains(): Terrain[] {
         return this.scene.getElements().filter((element): element is Terrain => element instanceof Terrain);
     }

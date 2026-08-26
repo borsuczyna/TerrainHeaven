@@ -54,11 +54,19 @@ body:has(#texture-paint-panel.visible) #transform-toolbar { right: 390px; }
 .texture-paint-footer p { display: flex; gap: 9px; margin: 14px 0 0; padding: 10px; border-radius: 9px; color: #8f99a7; background: rgba(0,0,0,.17); font-size: 10px; }.texture-paint-footer p svg{flex:0 0 auto;width:16px;color:#62b0f5}.texture-paint-footer p b{color:#cbd3dd}
 
 .texture-paint-layers { display: flex; flex-direction: column; gap: 6px; }
+.texture-layer-preset-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 9px; }
+.texture-layer-preset-actions button { min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(87,170,255,.28); border-radius: 7px; color: #a8d4ff; background: rgba(87,170,255,.12); cursor: pointer; font-weight: 650; }
+.texture-layer-preset-actions button:hover:not(:disabled) { color: white; background: rgba(87,170,255,.2); }
+.texture-layer-preset-actions button:disabled { opacity: .35; cursor: default; }
+.texture-layer-preset-actions svg { width: 14px; }
 .texture-layer-card { display: grid; grid-template-columns: 1fr 84px; overflow: hidden; border: 1px solid transparent; border-radius: 9px; background: rgba(255,255,255,.035); }
 .texture-layer-card:hover { background: rgba(255,255,255,.07); }.texture-layer-card.active{border-color:rgba(87,170,255,.4);background:rgba(87,170,255,.1)}
 .texture-layer-main { min-width: 0; display: grid; grid-template-columns: 44px 1fr; gap: 8px; align-items: center; padding: 7px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }.texture-layer-main .texture-layer-preview{width:42px;height:42px}
 .texture-layer-controls { display: grid; grid-template-columns: 1fr 28px; border-left: 1px solid rgba(255,255,255,.07); }.texture-layer-controls label{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:5px}.texture-layer-controls label span{color:#747e8b;font-size:8px}.texture-layer-choose{display:grid;place-items:center;border:0;border-left:1px solid rgba(255,255,255,.07);color:#818a96;background:transparent;cursor:pointer}.texture-layer-choose:hover{color:white;background:rgba(255,255,255,.06)}.texture-layer-choose svg{width:14px}
 .texture-paint-clear { width: 100%; min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 12px; border: 1px solid rgba(87,170,255,.28); border-radius: 7px; color: #a8d4ff; background: rgba(87,170,255,.12); cursor: pointer; font-weight: 650; }.texture-paint-clear:hover{color:white;background:rgba(87,170,255,.2)}.texture-paint-clear svg{width:14px}
+#texture-paint-panel:not(.has-terrain-context) .texture-layer-card,
+#texture-paint-panel:not(.has-terrain-context) .texture-paint-clear,
+#texture-paint-panel:not(.has-terrain-context) .texture-active-layer { opacity: .38; pointer-events: none; }
 
 .texture-asset-picker { position:absolute;inset:0;z-index:4;display:none;flex-direction:column;background:#191b1f }.texture-asset-picker.visible{display:flex}
 .texture-picker-header{min-height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:linear-gradient(180deg,#292c32,#23262b);border-bottom:1px solid rgba(255,255,255,.08)}.texture-picker-header>div{display:grid;grid-template-columns:auto 1fr;gap:9px;align-items:baseline}.texture-picker-header small{color:#78baff;font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase}.texture-picker-header strong{color:#f2f5f8;font-size:15px}
