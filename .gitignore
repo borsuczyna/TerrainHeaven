@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+mcp-server/dist
 dist-ssr
 *.local
 
