@@ -16,7 +16,7 @@ const SECTIONS: ShortcutSection[] = [
         title: 'Tools',
         entries: [
             { keys: ['V'], label: 'Select tool' },
-            { keys: ['R'], label: 'Road tool (press again for Intersection / Fence)' },
+            { keys: ['R'], label: 'Road tools (press again for Intersection / Stairs / Fence)' },
             { keys: ['T'], label: 'Terrain tool (press again to cycle Cut Point / Cut Spline / River)' },
             { keys: ['U'], label: 'UV Mapper tool' },
             { keys: ['Drag preset'], label: 'Apply it to a matching element' },

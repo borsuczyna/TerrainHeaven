@@ -40,7 +40,7 @@ export interface ConnectionProfile {
 }
 
 export interface ElementData {
-    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon' | 'building';
+    type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'stairs' | 'terrainPolygon' | 'building';
     id: number;
     nodes: { x: number; y: number; z: number }[];
     textures: Record<string, string>;
@@ -122,6 +122,16 @@ export interface ElementData {
     fencePostShape?: string;
     fencePostSides?: number;
     fenceMaxAngleStep?: number;
+    // Stairs-specific
+    stairsWidth?: number;
+    stairsStepCount?: number;
+    stairsFoundationDepth?: number;
+    stairsRailingSide?: string;
+    stairsRailingHeight?: number;
+    stairsRailingThickness?: number;
+    stairsRailingPostSpacing?: number;
+    stairsMidRail?: boolean;
+    stairsCutTerrain?: boolean;
     // Building-specific
     buildingSegments?: {
         x: number; y: number; z: number; width: number; depth: number;

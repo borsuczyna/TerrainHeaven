@@ -4,6 +4,7 @@ import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import Terrain from '../elements/Terrain.ts';
 import Fence from '../elements/Fence';
+import Stairs from '../elements/Stairs';
 import type WorldElement from '../elements/WorldElement';
 import type { UVTransform } from '../elements/WorldElement';
 import type SceneManager from './SceneManager';
@@ -22,6 +23,7 @@ export default class CopyManager {
     // Road-specific
     private roadLength: number | null = null;
     private roadDirection: THREE.Vector3 | null = null;
+    private stairsRise: number | null = null;
 
     // Intersection-specific
     private intersectionNodeCount: number | null = null;
@@ -38,7 +40,16 @@ export default class CopyManager {
         this.snapshotTextures(element);
         this.snapshotUVTransforms(element);
 
-        if (element instanceof Road || element instanceof Fence) {
+        if (element instanceof Stairs) {
+            const a = element.nodeA.mesh.position;
+            const b = element.nodeB.mesh.position;
+            this.roadLength = Math.hypot(b.x - a.x, b.z - a.z);
+            this.roadDirection = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
+            this.stairsRise = b.y - a.y;
+            this.intersectionNodeCount = null;
+            this.terrainWidth = null;
+            this.terrainHeight = null;
+        } else if (element instanceof Road || element instanceof Fence) {
             const a = element.nodeA.mesh.position;
             const b = element.nodeB.mesh.position;
             this.roadLength = a.distanceTo(b);
@@ -46,18 +57,21 @@ export default class CopyManager {
             this.intersectionNodeCount = null;
             this.terrainWidth = null;
             this.terrainHeight = null;
+            this.stairsRise = null;
         } else if (element instanceof Intersection) {
             this.intersectionNodeCount = element.nodeCount;
             this.roadLength = null;
             this.roadDirection = null;
             this.terrainWidth = null;
             this.terrainHeight = null;
+            this.stairsRise = null;
         } else if (element instanceof Terrain) {
             this.terrainWidth = element.width;
             this.terrainHeight = element.length;
             this.roadLength = null;
             this.roadDirection = null;
             this.intersectionNodeCount = null;
+            this.stairsRise = null;
         }
     }
 
@@ -73,6 +87,7 @@ export default class CopyManager {
         this.intersectionNodeCount = null;
         this.terrainWidth = null;
         this.terrainHeight = null;
+        this.stairsRise = null;
     }
 
     public get hasCopy(): boolean {
@@ -118,7 +133,7 @@ export default class CopyManager {
 
         let newEl: WorldElement | null = null;
 
-        if ((this.sourceType === 'Road' || this.sourceType === 'Fence') && this.roadDirection !== null && this.roadLength !== null) {
+        if ((this.sourceType === 'Road' || this.sourceType === 'Fence' || this.sourceType === 'Stairs') && this.roadDirection !== null && this.roadLength !== null) {
             const dir = this.roadDirection.clone();
             dir.y = 0;
             if (dir.lengthSq() < 0.001) dir.set(1, 0, 0);
@@ -126,7 +141,9 @@ export default class CopyManager {
             const half = this.roadLength / 2;
             const posA = spawnCenter.clone().sub(dir.clone().multiplyScalar(half));
             const posB = spawnCenter.clone().add(dir.clone().multiplyScalar(half));
-            newEl = this.sourceType === 'Fence' ? new Fence(posA, posB) : new Road(posA, posB);
+            if (this.sourceType === 'Fence') newEl = new Fence(posA, posB);
+            else if (this.sourceType === 'Stairs') newEl = new Stairs(posA, posB.clone().add(new THREE.Vector3(0, this.stairsRise ?? 3, 0)));
+            else newEl = new Road(posA, posB);
         } else if (this.sourceType === 'Intersection' && this.intersectionNodeCount !== null) {
             newEl = new Intersection(spawnCenter, this.intersectionNodeCount);
         } else if (this.sourceType === 'Terrain' && this.terrainWidth !== null && this.terrainHeight !== null) {

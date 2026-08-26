@@ -16,6 +16,7 @@ import FoliageTool from './tools/FoliageTool';
 import HeightPaintTool from './tools/HeightPaintTool';
 import TexturePaintTool from './tools/TexturePaintTool';
 import FenceTool from './tools/FenceTool';
+import StairsTool from './tools/StairsTool';
 import MeshTool from './tools/MeshTool';
 import MeasureTool from './tools/MeasureTool';
 import BuildingTool from './tools/BuildingTool';
@@ -43,6 +44,7 @@ export default class LeftToolbarManager {
         @inject(HeightPaintTool) private readonly heightPaintTool: HeightPaintTool,
         @inject(TexturePaintTool) private readonly texturePaintTool: TexturePaintTool,
         @inject(FenceTool) private readonly fenceTool: FenceTool,
+        @inject(StairsTool) private readonly stairsTool: StairsTool,
         @inject(MeshTool) private readonly meshTool: MeshTool,
         @inject(MeasureTool) private readonly measureTool: MeasureTool,
         @inject(BuildingTool) private readonly buildingTool: BuildingTool,
@@ -88,6 +90,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.heightPaintTool);
         this.toolManager.registerTool(this.texturePaintTool);
         this.toolManager.registerTool(this.fenceTool);
+        this.toolManager.registerTool(this.stairsTool);
         this.toolManager.registerTool(this.meshTool);
         this.toolManager.registerTool(this.measureTool);
         this.toolManager.registerTool(this.buildingTool);
@@ -99,11 +102,12 @@ export default class LeftToolbarManager {
         this.toolManager.registerSwitcher(
             'road-switcher',
             document.getElementById('btn-road') as HTMLButtonElement,
-            ['road', 'intersection', 'fence'],
+            ['road', 'intersection', 'stairs', 'fence'],
             'road',
             {
                 road: { label: 'Road Tool', icon: 'route' },
                 intersection: { label: 'Intersection Tool', icon: 'git-fork' },
+                stairs: { label: 'Stairs Tool', icon: 'chart-no-axes-column-increasing' },
                 fence: { label: 'Fence Tool', icon: 'panels-top-left' },
             },
             'R',

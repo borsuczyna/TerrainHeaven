@@ -12,6 +12,7 @@ import Road from '../elements/Road';
 import Intersection from '../elements/Intersection';
 import RiverSpline from '../elements/RiverSpline';
 import Fence from '../elements/Fence';
+import Stairs from '../elements/Stairs';
 import PolygonTerrain from '../elements/PolygonTerrain';
 import Building from '../elements/Building';
 import { MAX_LOD_INDEX } from './LODLevels';
@@ -39,7 +40,7 @@ export interface UnityExportOptions {
     scale: number;
 }
 
-type ExportKind = 'terrain' | 'road' | 'intersection' | 'river' | 'fence' | 'terrainPolygon' | 'building';
+type ExportKind = 'terrain' | 'road' | 'intersection' | 'river' | 'fence' | 'stairs' | 'terrainPolygon' | 'building';
 
 interface ManifestLodGroup {
     // Matches one OBJ "g"/"usemtl" submesh, in file order, so the importer can assign
@@ -379,6 +380,7 @@ export default class UnityExporter {
         if (element instanceof Intersection) return 'intersection';
         if (element instanceof Road) return 'road';
         if (element instanceof Fence) return 'fence';
+        if (element instanceof Stairs) return 'stairs';
         if (element instanceof PolygonTerrain) return 'terrainPolygon';
         if (element instanceof Building) return 'building';
         return null;
@@ -391,6 +393,7 @@ export default class UnityExporter {
             case 'intersection': return (element as Intersection).getExportGeometry(lodIndex);
             case 'river': return (element as RiverSpline).getExportGeometry(lodIndex);
             case 'fence': return (element as Fence).getExportGeometry(lodIndex);
+            case 'stairs': return (element as Stairs).getExportGeometry(lodIndex);
             case 'terrainPolygon': return (element as PolygonTerrain).getExportGeometry(lodIndex);
             case 'building': return (element as Building).getExportGeometry(lodIndex);
             default: return [];

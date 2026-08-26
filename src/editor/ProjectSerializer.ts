@@ -8,6 +8,7 @@ import Terrain from '../elements/Terrain.ts';
 import TerrainCutSpline from '../elements/TerrainCutSpline';
 import RiverSpline from '../elements/RiverSpline';
 import Fence from '../elements/Fence';
+import Stairs from '../elements/Stairs';
 import PolygonTerrain from '../elements/PolygonTerrain';
 import Building from '../elements/Building';
 import type WorldElement from '../elements/WorldElement';
@@ -149,6 +150,8 @@ export default class ProjectSerializer {
                 el = RiverSpline.deserialize(ed);
             } else if (ed.type === 'fence') {
                 el = Fence.deserialize(ed);
+            } else if (ed.type === 'stairs') {
+                el = Stairs.deserialize(ed);
             } else if (ed.type === 'terrainPolygon') {
                 el = PolygonTerrain.deserialize(ed);
             } else if (ed.type === 'building') {

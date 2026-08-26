@@ -2,7 +2,7 @@ export type Vec3 = { x: number; y: number; z: number };
 
 export type ElementType =
     | 'road' | 'intersection' | 'terrain' | 'terrainCutSpline'
-    | 'river' | 'fence' | 'terrainPolygon' | 'building';
+    | 'river' | 'fence' | 'stairs' | 'terrainPolygon' | 'building';
 
 export type ElementData = {
     type: ElementType;

@@ -59,7 +59,7 @@ server.registerTool('query_elements', {
     title: 'Query scene elements',
     description: 'Read full serialized TerrainHeaven elements, optionally filtered by native type and/or 2D world bounds. Returns editable properties, nodes, textures and geometry settings.',
     inputSchema: z.object({
-        type: z.enum(['road', 'intersection', 'terrain', 'terrainCutSpline', 'river', 'fence', 'terrainPolygon', 'building']).optional(),
+        type: z.enum(['road', 'intersection', 'terrain', 'terrainCutSpline', 'river', 'fence', 'stairs', 'terrainPolygon', 'building']).optional(),
         bounds: bounds.optional(),
     }),
     annotations: { readOnlyHint: true },
@@ -155,7 +155,7 @@ server.registerTool('create_polish_village', {
 
 server.registerTool('update_element', {
     title: 'Modify scene element',
-    description: 'Patch serialized properties or nodes of an existing element. Read the element first; type and id cannot be changed. Useful for precise follow-up edits to roads, terrain, rivers, fences and buildings.',
+    description: 'Patch serialized properties or nodes of an existing element. Read the element first; type and id cannot be changed. Useful for precise follow-up edits to roads, stairs, terrain, rivers, fences and buildings.',
     inputSchema: z.object({ id: z.number().int().nonnegative(), patch: z.record(z.string(), z.unknown()) }),
 }, async ({ id, patch }) => result(await mutate('MCP: update element', (document) => document.updateElement(id, patch))));
 

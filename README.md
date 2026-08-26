@@ -8,6 +8,8 @@ intersections, sculpt adaptive terrain around them, and dress the scene with a d
 - **Roads & intersections** — bezier-curved road segments with adjustable width, lane count,
   sidewalks/curbs, and connectable endpoints. Roads can become bridges with box or circular
   pillars that follow sloped terrain automatically.
+- **Stairs** — draggable low-poly stair runs with editable width, rise, step count, terrain
+  cutting, separate step/railing materials and optional one- or two-sided handrails.
 - **Adaptive terrain** — a single terrain surface remeshes around roads, cuts, and slopes,
   balancing a triangle budget against configurable smoothing/max-slope settings.
 - **Terrain cut point / cut spline tools** — sculpt terrain height at a point or along a
