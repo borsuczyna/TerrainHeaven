@@ -33,6 +33,12 @@ export interface OccupiedTriangle {
     bankSlopeDegrees?: number;
 }
 
+export interface ConnectionProfile {
+    halfWidth: number;
+    sidewalkWidth: number;
+    curbHeight: number;
+}
+
 export interface ElementData {
     type: 'road' | 'intersection' | 'terrain' | 'terrainCutSpline' | 'river' | 'fence' | 'terrainPolygon' | 'building';
     id: number;
@@ -71,7 +77,10 @@ export interface ElementData {
     bridgeEdgeCapOverhang?: number;
     // Intersection-specific
     length?: number;
+    rotation?: number;
     nodeCount?: number;
+    outletWidth?: number;
+    outletLength?: number;
     roadTexWidth?: number;
     roadTexHeight?: number;
     roadTexOffsetX?: number;
@@ -215,18 +224,6 @@ export default abstract class WorldElement {
             affected.add(this);
         }
 
-        // A second hop: an Intersection's own corner geometry is built from every road
-        // connected to it at once (see Intersection.getGeometry's per-arm outerA/outerB), so
-        // dragging one road's node into/out of an intersection needs every OTHER road on
-        // that same intersection to rebuild too, not just the intersection itself - they'd
-        // otherwise keep showing whatever corner shape they last computed against the
-        // intersection's old geometry.
-        for (const element of [...affected]) {
-            for (const connection of element.connections.values()) {
-                affected.add(connection.element);
-            }
-        }
-
         return [...affected];
     }
 
@@ -325,6 +322,8 @@ export default abstract class WorldElement {
     public getWidth(): number { return 0; }
     public getSidewalkWidth(): number { return 0; }
     public getCurbHeight(): number { return 0; }
+    /** A fixed endpoint profile wins over width blending on both sides of a connection. */
+    public getFixedConnectionProfile(_index: number): ConnectionProfile | null { return null; }
     public isTerrainSurface(): boolean { return false; }
     public cutsTerrainSurface(): boolean { return true; }
     public dependsOnTerrainSurface(): boolean { return false; }
@@ -332,12 +331,18 @@ export default abstract class WorldElement {
     public getResolvedHalfWidth(index: number): number {
         const conn = this.connections.get(index);
         if (!conn) return this.getWidth() / 2;
+        const fixed = this.getFixedConnectionProfile(index)
+            ?? conn.element.getFixedConnectionProfile(conn.nodeIndex);
+        if (fixed) return fixed.halfWidth;
         return (this.getWidth() + conn.element.getWidth()) / 2 / 2;
     }
 
     public getResolvedSidewalkWidth(index: number): number {
         const conn = this.connections.get(index);
         if (!conn) return this.getSidewalkWidth();
+        const fixed = this.getFixedConnectionProfile(index)
+            ?? conn.element.getFixedConnectionProfile(conn.nodeIndex);
+        if (fixed) return fixed.sidewalkWidth;
         const ownWidth = this.getSidewalkWidth();
         const otherWidth = conn.element.getSidewalkWidth();
         if (ownWidth <= 0 || otherWidth <= 0) return 0;
@@ -347,6 +352,9 @@ export default abstract class WorldElement {
     public getResolvedCurbHeight(index: number): number {
         const conn = this.connections.get(index);
         if (!conn) return this.getCurbHeight();
+        const fixed = this.getFixedConnectionProfile(index)
+            ?? conn.element.getFixedConnectionProfile(conn.nodeIndex);
+        if (fixed) return fixed.curbHeight;
         if (this.getSidewalkWidth() <= 0 || conn.element.getSidewalkWidth() <= 0) return 0;
         return (this.getCurbHeight() + conn.element.getCurbHeight()) / 2;
     }

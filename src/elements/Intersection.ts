@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import WorldElement, { type NodeBasis, type GeometryGroup, type UVTransform, type ElementData, type OccupiedTriangle } from './WorldElement';
+import WorldElement, {
+    type ConnectionProfile, type ElementData, type GeometryGroup, type NodeBasis,
+    type OccupiedTriangle, type UVTransform,
+} from './WorldElement';
 import WorldNode from './WorldNode';
 import Triangle from './Vertex';
 import Config from '../utils/Config';
@@ -7,608 +10,517 @@ import type { PropertyDefinition, SectionItem } from '../editor/Properties';
 
 export type EdgeType = 'none' | 'sidewalk';
 
-// A paved junction where 2+ roads meet: a flat surface fanned out from the average of its
-// own nodes, one per connected road end. Deliberately NOT built via a general polygon
-// union/triangulation library (polygon-clipping, poly2tri, THREE.ShapeUtils) - every one of
-// those was tried here and each produced a self-intersecting or incomplete result for some
-// real (not contrived) arm arrangement, because a union of arbitrarily-angled rotated
-// rectangles is a genuinely hard general computational-geometry problem, and general
-// polygon triangulators are not reliably robust against the reflex-vertex, near-parallel-
-// edge, and near-duplicate-vertex cases that arrangement produces.
-//
-// Instead: the boundary ring (each node's own road-mouth edge, connected straight across to
-// the next node's mouth edge, going around in angle order) is star-shaped around the
-// junction's own center by construction - direct geometric consequence of connecting
-// angularly-adjacent mouths in angular order - so it can ALWAYS be triangulated by a plain
-// fan of triangles from center to each boundary edge. No external triangulator, nothing
-// that can throw or silently produce a wrong/incomplete result. The tradeoff versus a true
-// rectangle-union shape is a chamfered (not squared-off) corner wherever two arms meet at
-// very different widths or angles - a real limitation, not a bug, and worth revisiting with
-// a purpose-built mitred-corner construction if it matters later, but this can never be
-// broken the way the previous two attempts were.
+type Point2 = { x: number; z: number };
+type Rect2 = { minX: number; maxX: number; minZ: number; maxZ: number };
+type BoundaryEdge = { start: Point2; end: Point2; outward: Point2; mouth: boolean };
+
+const UP = new THREE.Vector3(0, 1, 0);
+const EPS = 1e-7;
+
+/** Fixed-footprint T/cross junction. Connections never affect its geometry. */
 export default class Intersection extends WorldElement {
-    public width: number = 3;
-    public length: number = 3;
-    private _nodeCount: number = 4;
+    private center: THREE.Vector3;
+    private _nodeCount: 3 | 4;
+
+    public width = 8;
+    public length = 8;
+    public outletWidth = 4;
+    public outletLength = 2;
+    public rotation = 0;
     public edgeType: EdgeType = 'none';
-    public sidewalkWidth: number = 1;
-    public curbHeight: number = 0.15;
-    public roadTexWidth: number = 3;
-    public roadTexHeight: number = 3;
-    public roadTexOffsetX: number = 0;
-    public roadTexOffsetY: number = 0;
-    // Unlike the road group's flat world-XZ planar projection, the sidewalk group's raw UV
-    // (see getGeometry) is already strip-relative world units - height/width in meters
-    // across, distance-along-the-gap in meters along - matching Road's own sidewalk UV
-    // convention exactly, so a connected road's sidewalk texture continues at the correct
-    // scale and orientation into the intersection's own gap-fill piece instead of the old
-    // flat projection, which stretched and rotated with the gap's own angle. These fields
-    // divide that raw UV down (same "world units per texture repeat" convention roadTexWidth
-    // already uses), defaulting to 1:1 so it matches an unmodified Road's own default scale.
-    public sidewalkTexWidth: number = 1;
-    public sidewalkTexHeight: number = 1;
-    public sidewalkTexOffsetX: number = 0;
-    public sidewalkTexOffsetY: number = 0;
+    public sidewalkWidth = 1;
+    public curbHeight = 0.15;
+    public roadTexWidth = 3;
+    public roadTexHeight = 3;
+    public roadTexOffsetX = 0;
+    public roadTexOffsetY = 0;
+    public sidewalkTexWidth = 1;
+    public sidewalkTexHeight = 1;
+    public sidewalkTexOffsetX = 0;
+    public sidewalkTexOffsetY = 0;
 
-    public override getWidth(): number { return this.width; }
-    public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
-    public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
+    // 3-way = west/east/north. Rotation selects which direction has no outlet.
+    private static readonly NORMALS: readonly Point2[] = [
+        { x: -1, z: 0 }, { x: 1, z: 0 }, { x: 0, z: -1 }, { x: 0, z: 1 },
+    ];
+    private static readonly LABELS = ['West', 'East', 'North', 'South'] as const;
 
-    public override getUVGroups(): string[] {
-        return this.edgeType === 'sidewalk' ? ['road', 'sidewalk'] : ['road'];
-    }
-
-    public override getUVTransform(group: string): UVTransform {
-        if (group === 'road') {
-            return {
-                offsetX: this.roadTexOffsetX,
-                offsetY: this.roadTexOffsetY,
-                scaleX: this.roadTexWidth,
-                scaleY: this.roadTexHeight,
-            };
-        }
-        if (group === 'sidewalk') {
-            return {
-                offsetX: this.sidewalkTexOffsetX,
-                offsetY: this.sidewalkTexOffsetY,
-                scaleX: this.sidewalkTexWidth,
-                scaleY: this.sidewalkTexHeight,
-            };
-        }
-        return super.getUVTransform(group);
-    }
-
-    public override setUVTransform(group: string, t: UVTransform): void {
-        if (group === 'road') {
-            this.roadTexOffsetX = t.offsetX;
-            this.roadTexOffsetY = t.offsetY;
-            this.roadTexWidth = Math.max(0.1, t.scaleX);
-            this.roadTexHeight = Math.max(0.1, t.scaleY);
-            this.update();
-        } else if (group === 'sidewalk') {
-            this.sidewalkTexOffsetX = t.offsetX;
-            this.sidewalkTexOffsetY = t.offsetY;
-            this.sidewalkTexWidth = Math.max(0.1, t.scaleX);
-            this.sidewalkTexHeight = Math.max(0.1, t.scaleY);
-            this.update();
-        }
-    }
-
-    constructor(position: THREE.Vector3, nodeCount: number = 4) {
+    constructor(position: THREE.Vector3, nodeCount = 4) {
         super();
-        this._nodeCount = nodeCount;
-        this.rebuildNodes(position);
+        this.center = position.clone();
+        this._nodeCount = this.clampNodeCount(nodeCount);
+        this.rebuildNodes();
+    }
+
+    private clampNodeCount(value: number): 3 | 4 { return Math.round(value) <= 3 ? 3 : 4; }
+    private get effectiveOutletWidth(): number {
+        return THREE.MathUtils.clamp(this.outletWidth, 0.2, Math.min(this.width, this.length));
     }
 
     public get nodeCount(): number { return this._nodeCount; }
     public set nodeCount(value: number) {
-        if (value < 2) value = 2;
-        if (value === this._nodeCount) return;
-        const center = this.getCenter();
-        this._nodeCount = value;
-        this.rebuildNodes(center);
-        this.update();
+        const next = this.clampNodeCount(value);
+        if (next === this._nodeCount) return;
+        this._nodeCount = next;
+        this.rebuildNodes();
+        this.refreshLayout();
     }
 
-    private getCenter(): THREE.Vector3 {
-        if (this.nodes.length === 0) return new THREE.Vector3();
-        const center = new THREE.Vector3();
-        for (const node of this.nodes) {
-            center.add(node.mesh.position);
-        }
-        return center.divideScalar(this.nodes.length);
+    public override getWidth(): number { return this.effectiveOutletWidth; }
+    public override getSidewalkWidth(): number { return this.edgeType === 'sidewalk' ? this.sidewalkWidth : 0; }
+    public override getCurbHeight(): number { return this.edgeType === 'sidewalk' ? this.curbHeight : 0; }
+    public override getFixedConnectionProfile(_index: number): ConnectionProfile {
+        return {
+            halfWidth: this.effectiveOutletWidth / 2,
+            sidewalkWidth: this.getSidewalkWidth(),
+            curbHeight: this.getCurbHeight(),
+        };
     }
 
-    private rebuildNodes(center: THREE.Vector3): void {
-        // Disconnect from all connected elements (both sides)
+    public override getUVGroups(): string[] {
+        return this.edgeType === 'sidewalk' ? ['road', 'sidewalk'] : ['road'];
+    }
+    public override getUVTransform(group: string): UVTransform {
+        if (group === 'road') return {
+            offsetX: this.roadTexOffsetX, offsetY: this.roadTexOffsetY,
+            scaleX: this.roadTexWidth, scaleY: this.roadTexHeight,
+        };
+        if (group === 'sidewalk') return {
+            offsetX: this.sidewalkTexOffsetX, offsetY: this.sidewalkTexOffsetY,
+            scaleX: this.sidewalkTexWidth, scaleY: this.sidewalkTexHeight,
+        };
+        return super.getUVTransform(group);
+    }
+    public override setUVTransform(group: string, transform: UVTransform): void {
+        if (group === 'road') {
+            this.roadTexOffsetX = transform.offsetX;
+            this.roadTexOffsetY = transform.offsetY;
+            this.roadTexWidth = Math.max(0.1, transform.scaleX);
+            this.roadTexHeight = Math.max(0.1, transform.scaleY);
+        } else if (group === 'sidewalk') {
+            this.sidewalkTexOffsetX = transform.offsetX;
+            this.sidewalkTexOffsetY = transform.offsetY;
+            this.sidewalkTexWidth = Math.max(0.1, transform.scaleX);
+            this.sidewalkTexHeight = Math.max(0.1, transform.scaleY);
+        } else return;
+        super.update();
+    }
+
+    private localToWorld(point: Point2, height = 0): THREE.Vector3 {
+        return new THREE.Vector3(point.x, height, point.z)
+            .applyAxisAngle(UP, THREE.MathUtils.degToRad(this.rotation)).add(this.center);
+    }
+    private outletLocal(index: number): Point2 {
+        const hx = this.width / 2;
+        const hz = this.length / 2;
+        if (index === 0) return { x: -hx - this.outletLength, z: 0 };
+        if (index === 1) return { x: hx + this.outletLength, z: 0 };
+        if (index === 2) return { x: 0, z: -hz - this.outletLength };
+        return { x: 0, z: hz + this.outletLength };
+    }
+    private outletWorld(index: number): THREE.Vector3 { return this.localToWorld(this.outletLocal(index)); }
+
+    private rebuildNodes(): void {
         this.disconnectAll();
-
         for (const node of this.nodes) {
             this.mesh.remove(node.mesh);
-            if (node.parent === this) node.parent = null;
+            node.dispose();
         }
         this.nodes = [];
-
-        // Create nodes evenly spaced around center
-        for (let i = 0; i < this._nodeCount; i++) {
-            const angle = (i / this._nodeCount) * Math.PI * 2;
-            const radius = this.width * 1;
-            const offset = new THREE.Vector3(
-                Math.cos(angle) * radius,
-                0,
-                Math.sin(angle) * radius,
-            );
-            const pos = center.clone().add(offset);
-            this.setNode(i, new WorldNode(pos, Config.editor.nodeColor));
+        for (let index = 0; index < this._nodeCount; index++) {
+            this.setNode(index, new WorldNode(this.outletWorld(index), Config.editor.nodeColor));
         }
+    }
+
+    private syncNodes(): boolean {
+        let changed = false;
+        for (let index = 0; index < this._nodeCount; index++) {
+            const target = this.outletWorld(index);
+            if (this.nodes[index].mesh.position.distanceToSquared(target) <= EPS * EPS) continue;
+            this.nodes[index].mesh.position.copy(target);
+            changed = true;
+        }
+        return changed;
+    }
+    private refreshLayout(): void {
+        this.syncNodes();
+        super.update();
+        for (const connection of this.connections.values()) connection.element.update();
+    }
+
+    /** Accept a rigid whole-element gizmo transform, but reject deformation of one outlet. */
+    public override update(): void {
+        const expected = this.nodes.map((_node, index) => this.outletWorld(index));
+        const actual = this.nodes.map((node) => node.mesh.position.clone());
+        if (expected.some((point, index) => point.distanceToSquared(actual[index]) > EPS * EPS)) {
+            const expectedMean = expected.reduce((sum, point) => sum.add(point), new THREE.Vector3())
+                .divideScalar(expected.length);
+            const actualMean = actual.reduce((sum, point) => sum.add(point), new THREE.Vector3())
+                .divideScalar(actual.length);
+            let dot = 0;
+            let cross = 0;
+            for (let index = 0; index < expected.length; index++) {
+                const ex = expected[index].x - expectedMean.x;
+                const ez = expected[index].z - expectedMean.z;
+                const ax = actual[index].x - actualMean.x;
+                const az = actual[index].z - actualMean.z;
+                dot += ex * ax + ez * az;
+                cross += ex * az - ez * ax;
+            }
+            const deltaAngle = Math.atan2(-cross, dot);
+            const oldCenter = this.center.clone();
+            const oldRotation = this.rotation;
+            const meanOffset = expectedMean.clone().sub(this.center).applyAxisAngle(UP, deltaAngle);
+            this.center.copy(actualMean).sub(meanOffset);
+            this.rotation += THREE.MathUtils.radToDeg(deltaAngle);
+            const rigid = actual.every((point, index) =>
+                point.distanceToSquared(this.outletWorld(index)) < 1e-8);
+            if (!rigid) {
+                this.center.copy(oldCenter);
+                this.rotation = oldRotation;
+            }
+        }
+        const corrected = this.syncNodes();
+        super.update();
+        if (corrected) for (const connection of this.connections.values()) connection.element.update();
     }
 
     public getNodeBasis(index: number): NodeBasis {
-        const center = this.getCenter();
-        const nodePos = this.nodes[index].mesh.position;
-        const up = new THREE.Vector3(0, 1, 0);
-
-        // Forward points outward from center
-        const forward = new THREE.Vector3().subVectors(nodePos, center).normalize();
-        if (forward.lengthSq() < 0.001) {
-            forward.set(1, 0, 0);
-        }
-
-        const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-        return { forward, right, up };
+        const normal = Intersection.NORMALS[index];
+        const forward = new THREE.Vector3(normal.x, 0, normal.z)
+            .applyAxisAngle(UP, THREE.MathUtils.degToRad(this.rotation));
+        return { forward, right: new THREE.Vector3().crossVectors(forward, UP).normalize(), up: UP.clone() };
     }
-
     public connectWith(thisNodeIndex: number, other: WorldElement, otherNodeIndex: number): void {
         this.connect(thisNodeIndex, other, otherNodeIndex);
-        this.update();
-        other.update();
     }
 
     public override getOccupiedArea(): OccupiedTriangle[] {
-        const projected: OccupiedTriangle[] = [];
-        const groups = this.getGeometry();
-
-        const triArea2D = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): number => {
-            return Math.abs((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x)) * 0.5;
-        };
-
-        for (const group of groups) {
-            for (const tri of group.triangles) {
-                if (triArea2D(tri.a, tri.b, tri.c) < 1e-8) continue;
-                projected.push({
-                    a: tri.a.clone(),
-                    b: tri.b.clone(),
-                    c: tri.c.clone(),
-                });
-            }
-        }
-
-        return projected;
+        return this.getGeometry().flatMap((group) => group.triangles).filter((triangle) => Math.abs(
+            (triangle.b.x - triangle.a.x) * (triangle.c.z - triangle.a.z)
+            - (triangle.b.z - triangle.a.z) * (triangle.c.x - triangle.a.x),
+        ) > 1e-8).map((triangle) => ({
+            a: triangle.a.clone(), b: triangle.b.clone(), c: triangle.c.clone(),
+        }));
     }
 
     public override serialize(id: number): ElementData {
         const { textures, textureRotations } = this.collectTextureMaps();
-        const nodes = [];
-        for (let i = 0; i < this.nodeCount; i++) {
-            const p = this.getNode(i).mesh.position;
-            nodes.push({ x: p.x, y: p.y, z: p.z });
-        }
         return {
-            type: 'intersection', id, nodes, textures, textureRotations,
-            width: this.width,
-            length: this.length,
-            nodeCount: this.nodeCount,
-            edgeType: this.edgeType,
-            sidewalkWidth: this.sidewalkWidth,
-            curbHeight: this.curbHeight,
-            roadTexWidth: this.roadTexWidth,
-            roadTexHeight: this.roadTexHeight,
-            roadTexOffsetX: this.roadTexOffsetX,
-            roadTexOffsetY: this.roadTexOffsetY,
-            sidewalkTexWidth: this.sidewalkTexWidth,
-            sidewalkTexHeight: this.sidewalkTexHeight,
-            sidewalkTexOffsetX: this.sidewalkTexOffsetX,
-            sidewalkTexOffsetY: this.sidewalkTexOffsetY,
+            type: 'intersection', id,
+            nodes: [{ x: this.center.x, y: this.center.y, z: this.center.z }],
+            textures, textureRotations,
+            width: this.width, length: this.length, rotation: this.rotation,
+            nodeCount: this.nodeCount, outletWidth: this.outletWidth, outletLength: this.outletLength,
+            edgeType: this.edgeType, sidewalkWidth: this.sidewalkWidth, curbHeight: this.curbHeight,
+            roadTexWidth: this.roadTexWidth, roadTexHeight: this.roadTexHeight,
+            roadTexOffsetX: this.roadTexOffsetX, roadTexOffsetY: this.roadTexOffsetY,
+            sidewalkTexWidth: this.sidewalkTexWidth, sidewalkTexHeight: this.sidewalkTexHeight,
+            sidewalkTexOffsetX: this.sidewalkTexOffsetX, sidewalkTexOffsetY: this.sidewalkTexOffsetY,
         };
     }
-
-    public static deserialize(ed: ElementData): Intersection {
-        const center = new THREE.Vector3();
-        for (const n of ed.nodes) center.add(new THREE.Vector3(n.x, n.y, n.z));
-        center.divideScalar(ed.nodes.length);
-        const intersection = new Intersection(center, ed.nodeCount ?? 4);
-        intersection.width = ed.width ?? 3;
-        intersection.length = ed.length ?? 3;
-        intersection.edgeType = (ed.edgeType as 'none' | 'sidewalk') ?? 'none';
-        intersection.sidewalkWidth = ed.sidewalkWidth ?? 1;
-        intersection.curbHeight = ed.curbHeight ?? 0.15;
-        intersection.roadTexWidth = ed.roadTexWidth ?? 3;
-        intersection.roadTexHeight = ed.roadTexHeight ?? 3;
-        intersection.roadTexOffsetX = ed.roadTexOffsetX ?? 0;
-        intersection.roadTexOffsetY = ed.roadTexOffsetY ?? 0;
-        intersection.sidewalkTexWidth = ed.sidewalkTexWidth ?? 1;
-        intersection.sidewalkTexHeight = ed.sidewalkTexHeight ?? 1;
-        intersection.sidewalkTexOffsetX = ed.sidewalkTexOffsetX ?? 0;
-        intersection.sidewalkTexOffsetY = ed.sidewalkTexOffsetY ?? 0;
-        for (let i = 0; i < ed.nodes.length; i++) {
-            const n = ed.nodes[i];
-            intersection.getNode(i).update(new THREE.Vector3(n.x, n.y, n.z));
-        }
-        return intersection;
+    public static deserialize(data: ElementData): Intersection {
+        const center = data.nodes.reduce<THREE.Vector3>((sum, node) =>
+            sum.add(new THREE.Vector3(node.x, node.y, node.z)), new THREE.Vector3())
+            .divideScalar(Math.max(1, data.nodes.length));
+        const value = new Intersection(center, data.nodeCount ?? 4);
+        value.width = data.width ?? 8;
+        value.length = data.length ?? 8;
+        value.rotation = data.rotation ?? 0;
+        value.outletWidth = data.outletWidth ?? Math.min(value.width, value.length, 4);
+        value.outletLength = data.outletLength ?? 2;
+        value.edgeType = (data.edgeType as EdgeType) ?? 'none';
+        value.sidewalkWidth = data.sidewalkWidth ?? 1;
+        value.curbHeight = data.curbHeight ?? 0.15;
+        value.roadTexWidth = data.roadTexWidth ?? 3;
+        value.roadTexHeight = data.roadTexHeight ?? 3;
+        value.roadTexOffsetX = data.roadTexOffsetX ?? 0;
+        value.roadTexOffsetY = data.roadTexOffsetY ?? 0;
+        value.sidewalkTexWidth = data.sidewalkTexWidth ?? 1;
+        value.sidewalkTexHeight = data.sidewalkTexHeight ?? 1;
+        value.sidewalkTexOffsetX = data.sidewalkTexOffsetX ?? 0;
+        value.sidewalkTexOffsetY = data.sidewalkTexOffsetY ?? 0;
+        value.refreshLayout();
+        return value;
     }
 
     public getProperties(): PropertyDefinition {
-        const self = this;
-        const makeNodeVec3 = (label: string, node: WorldNode) => ({
-            type: 'vector3' as const,
-            label,
-            get: () => node.mesh.position.clone(),
-            // node.update(v) alone only moves the WorldNode itself - nothing rebuilds this
-            // Intersection's own mesh (getGeometry() reads the node's live position, but
-            // that only happens inside update()). Dragging a node's position from this
-            // panel used to move the node while leaving the intersection's own paved
-            // surface rendered at its old shape until something else (like the viewport
-            // gizmo, which does call update() for the same node move) forced a rebuild.
-            set: (v: THREE.Vector3) => { node.update(v); self.update(); },
-        });
-
-        const nodeSections = this.nodes.map((node, i) => {
-            const props: SectionItem[] = [makeNodeVec3('Position', node)];
-            if (this.isConnected(i)) {
-                props.push({
-                    type: 'button' as const,
-                    label: 'Disconnect',
-                    onClick: () => { self.disconnect(i); self.onPropertiesChanged?.(); },
-                });
-            }
-            return { label: `Node ${i}`, properties: props };
-        });
-
+        const numberProperty = (
+            label: string, get: () => number, set: (value: number) => void, min: number, step = 0.1,
+        ): SectionItem => ({ type: 'number', label, get, set, min, step });
+        const outletSections = this.nodes.map((_node, index) => ({
+            label: `Outlet ${Intersection.LABELS[index]}`,
+            properties: [{
+                type: 'button' as const,
+                label: this.isConnected(index) ? 'Disconnect' : 'Not connected',
+                onClick: () => {
+                    if (this.isConnected(index)) this.disconnect(index);
+                    this.onPropertiesChanged?.();
+                },
+            }],
+        }));
         return {
-            title: 'Intersection',
-            icon: '&#11021;',
-            sections: [
-                {
-                    label: 'Intersection',
-                    properties: [
-                        {
-                            type: 'number' as const,
-                            label: 'Width',
-                            get: () => self.width,
-                            set: (v: number) => { self.width = Math.max(0.1, v); self.update(); },
-                            min: 0.1,
-                            step: 0.1,
-                        },
-                        {
-                            type: 'number' as const,
-                            label: 'Length',
-                            get: () => self.length,
-                            set: (v: number) => { self.length = Math.max(0.1, v); self.update(); },
-                            min: 0.1,
-                            step: 0.1,
-                        },
-                        {
-                            type: 'number' as const,
-                            label: 'Nodes',
-                            get: () => self.nodeCount,
-                            set: (v: number) => { self.nodeCount = Math.max(2, Math.round(v)); self.onPropertiesChanged?.(); },
-                            min: 2,
-                            step: 1,
-                        },
-                    ],
-                },
-                {
-                    label: 'Edges',
-                    properties: [
-                        {
-                            type: 'select' as const,
-                            label: 'Type',
-                            options: [
-                                { label: 'None', value: 'none' },
-                                { label: 'Sidewalk', value: 'sidewalk' },
-                            ],
-                            get: () => self.edgeType,
-                            set: (v: string) => { self.edgeType = v as EdgeType; self.update(); self.onPropertiesChanged?.(); },
-                        },
-                        ...(self.edgeType === 'sidewalk' ? [
-                            {
-                                type: 'number' as const,
-                                label: 'Sidewalk Width',
-                                get: () => self.sidewalkWidth,
-                                set: (v: number) => { self.sidewalkWidth = Math.max(0.1, v); self.update(); },
-                                min: 0.1,
-                                step: 0.1,
-                            },
-                            {
-                                type: 'number' as const,
-                                label: 'Curb Height',
-                                get: () => self.curbHeight,
-                                set: (v: number) => { self.curbHeight = Math.max(0, v); self.update(); },
-                                min: 0,
-                                step: 0.05,
-                            },
-                        ] : []),
-                    ],
-                },
-                {
-                    label: 'Textures',
-                    properties: [
-                        {
-                            type: 'select' as const,
-                            label: 'Road Rot.',
-                            options: [
-                                { label: '0°', value: '0' },
-                                { label: '90°', value: '90' },
-                                { label: '180°', value: '180' },
-                                { label: '270°', value: '270' },
-                            ],
-                            get: () => String(self.textureRotations.get('road') ?? 0),
-                            set: (v: string) => { self.setTextureRotation('road', Number(v)); },
-                        },
-                        {
-                            type: 'select' as const,
-                            label: 'Sidewalk Rot.',
-                            options: [
-                                { label: '0°', value: '0' },
-                                { label: '90°', value: '90' },
-                                { label: '180°', value: '180' },
-                                { label: '270°', value: '270' },
-                            ],
-                            get: () => String(self.textureRotations.get('sidewalk') ?? 0),
-                            set: (v: string) => { self.setTextureRotation('sidewalk', Number(v)); },
-                        },
-                    ],
-                },
-                ...nodeSections,
+            title: 'Intersection', icon: '&#11021;', sections: [
+                { label: 'Intersection', properties: [
+                    { type: 'vector3', label: 'Position', get: () => this.center.clone(),
+                        set: (value: THREE.Vector3) => { this.center.copy(value); this.refreshLayout(); } },
+                    { type: 'select', label: 'Outlets', options: [
+                        { label: '3 (T junction)', value: '3' },
+                        { label: '4 (crossroads)', value: '4' },
+                    ], get: () => String(this.nodeCount), set: (value: string) => {
+                        this.nodeCount = Number(value); this.onPropertiesChanged?.();
+                    } },
+                    numberProperty('Center Width', () => this.width, (value) => {
+                        this.width = Math.max(0.5, value); this.refreshLayout();
+                    }, 0.5),
+                    numberProperty('Center Length', () => this.length, (value) => {
+                        this.length = Math.max(0.5, value); this.refreshLayout();
+                    }, 0.5),
+                    numberProperty('Outlet Width', () => this.outletWidth, (value) => {
+                        this.outletWidth = Math.max(0.2, value); this.refreshLayout();
+                    }, 0.2),
+                    numberProperty('Outlet Length', () => this.outletLength, (value) => {
+                        this.outletLength = Math.max(0.1, value); this.refreshLayout();
+                    }, 0.1),
+                    numberProperty('Rotation', () => this.rotation, (value) => {
+                        this.rotation = value; this.refreshLayout();
+                    }, -360, 1),
+                ] },
+                { label: 'Edges', properties: [
+                    { type: 'select', label: 'Type', options: [
+                        { label: 'None', value: 'none' }, { label: 'Sidewalk', value: 'sidewalk' },
+                    ], get: () => this.edgeType, set: (value: string) => {
+                        this.edgeType = value as EdgeType; this.refreshLayout(); this.onPropertiesChanged?.();
+                    } },
+                    ...(this.edgeType === 'sidewalk' ? [
+                        numberProperty('Sidewalk Width', () => this.sidewalkWidth, (value) => {
+                            this.sidewalkWidth = Math.max(0.1, value); this.refreshLayout();
+                        }, 0.1),
+                        numberProperty('Curb Height', () => this.curbHeight, (value) => {
+                            this.curbHeight = Math.max(0, value); this.refreshLayout();
+                        }, 0, 0.05),
+                    ] : []),
+                ] },
+                { label: 'Textures', properties: [
+                    this.rotationProperty('Road Rot.', 'road'), this.rotationProperty('Sidewalk Rot.', 'sidewalk'),
+                ] },
+                ...outletSections,
             ],
         };
     }
-
-    // Intersections have no density knob to coarsen, so every LOD level is identical -
-    // the exporter still calls this for consistency with Terrain/Road/RiverSpline.
-    public getExportGeometry(_lodIndex: number): GeometryGroup[] {
-        return this.getGeometry();
+    private rotationProperty(label: string, group: string): SectionItem {
+        return { type: 'select', label, options: [0, 90, 180, 270].map((value) => ({
+            label: `${value}°`, value: String(value),
+        })), get: () => String(this.textureRotations.get(group) ?? 0),
+        set: (value: string) => { this.setTextureRotation(group, Number(value)); } };
     }
 
-    // Winding isn't guaranteed to face +Y by construction - correct each triangle
-    // individually rather than assuming a fixed vertex order, same defensive pattern
-    // used throughout this project for any footprint-to-3D triangulation.
-    private addFlatTriangle(
-        out: Triangle[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
-        uvOf: (p: THREE.Vector3) => THREE.Vector2,
-        labels?: [string, string, string],
-    ): void {
-        let labelA = labels?.[0], labelB = labels?.[1], labelC = labels?.[2];
-        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
-        if (normal.y < 0) {
-            const tmp = b; b = c; c = tmp;
-            const tmpLabel = labelB; labelB = labelC; labelC = tmpLabel;
+    public getExportGeometry(_lodIndex: number): GeometryGroup[] { return this.getGeometry(); }
+
+    private footprintRects(): Rect2[] {
+        const hx = this.width / 2;
+        const hz = this.length / 2;
+        const outletHalf = this.effectiveOutletWidth / 2;
+        const tipX = hx + this.outletLength;
+        const tipZ = hz + this.outletLength;
+
+        // The asphalt follows the same clean inner edges as the sidewalk corners: one
+        // horizontal road corridor and one vertical corridor. A large centre rectangle
+        // used here previously protruded into every outer corner beyond the L-shaped
+        // sidewalks, leaving four visible asphalt squares.
+        const rects: Rect2[] = [{
+            minX: -tipX,
+            maxX: tipX,
+            minZ: -outletHalf,
+            maxZ: outletHalf,
+        }];
+        rects.push({
+            minX: -outletHalf,
+            maxX: outletHalf,
+            minZ: -tipZ,
+            maxZ: this._nodeCount === 4 ? tipZ : outletHalf,
+        });
+        return rects;
+    }
+    private pointKey(point: Point2): string { return `${point.x.toFixed(8)},${point.z.toFixed(8)}`; }
+    private isMouth(start: Point2, end: Point2): boolean {
+        const tipX = this.width / 2 + this.outletLength;
+        const tipZ = this.length / 2 + this.outletLength;
+        const vertical = Math.abs(start.x - end.x) < EPS;
+        const horizontal = Math.abs(start.z - end.z) < EPS;
+        if (vertical && Math.abs(Math.abs(start.x) - tipX) < EPS) return true;
+        if (horizontal && Math.abs(start.z + tipZ) < EPS) return true;
+        return this._nodeCount === 4 && horizontal && Math.abs(start.z - tipZ) < EPS;
+    }
+
+    /** Split the rectangle union on a tiny coordinate grid, yielding a deterministic mesh and outline. */
+    private cellsAndBoundary(): { cells: Rect2[]; boundary: BoundaryEdge[] } {
+        const rects = this.footprintRects();
+        const xs = [...new Set(rects.flatMap((rect) => [rect.minX, rect.maxX]))].sort((a, b) => a - b);
+        const zs = [...new Set(rects.flatMap((rect) => [rect.minZ, rect.maxZ]))].sort((a, b) => a - b);
+        const cells: Rect2[] = [];
+        const edges = new Map<string, BoundaryEdge>();
+        const addEdge = (start: Point2, end: Point2, outward: Point2): void => {
+            const key = `${this.pointKey(start)}>${this.pointKey(end)}`;
+            const reverse = `${this.pointKey(end)}>${this.pointKey(start)}`;
+            if (edges.has(reverse)) edges.delete(reverse);
+            else edges.set(key, { start, end, outward, mouth: this.isMouth(start, end) });
+        };
+        for (let x = 0; x < xs.length - 1; x++) for (let z = 0; z < zs.length - 1; z++) {
+            const cell = { minX: xs[x], maxX: xs[x + 1], minZ: zs[z], maxZ: zs[z + 1] };
+            const mx = (cell.minX + cell.maxX) / 2;
+            const mz = (cell.minZ + cell.maxZ) / 2;
+            if (!rects.some((rect) => mx > rect.minX - EPS && mx < rect.maxX + EPS
+                && mz > rect.minZ - EPS && mz < rect.maxZ + EPS)) continue;
+            cells.push(cell);
+            addEdge({ x: cell.minX, z: cell.minZ }, { x: cell.maxX, z: cell.minZ }, { x: 0, z: -1 });
+            addEdge({ x: cell.maxX, z: cell.minZ }, { x: cell.maxX, z: cell.maxZ }, { x: 1, z: 0 });
+            addEdge({ x: cell.maxX, z: cell.maxZ }, { x: cell.minX, z: cell.maxZ }, { x: 0, z: 1 });
+            addEdge({ x: cell.minX, z: cell.maxZ }, { x: cell.minX, z: cell.minZ }, { x: -1, z: 0 });
         }
-        const tri = new Triangle(a, b, c, uvOf(a), uvOf(b), uvOf(c));
-        tri.labelA = labelA; tri.labelB = labelB; tri.labelC = labelC;
-        out.push(tri);
-    }
-
-    // Same winding correction as addFlatTriangle, but for triangles whose 3 corners need
-    // independently-chosen UVs rather than one shared planar projection - used by the
-    // sidewalk strip, where the very same 3D vertex plays a different UV role (e.g. "top of
-    // the curb face" vs "inner edge of the top surface") depending on which triangle it
-    // appears in, exactly like Road's own per-segment sidewalk UVs.
-    private addFlatTriangleUV(
-        out: Triangle[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
-        uvA: THREE.Vector2, uvB: THREE.Vector2, uvC: THREE.Vector2,
-        labels?: [string, string, string],
-    ): void {
-        let labelA = labels?.[0], labelB = labels?.[1], labelC = labels?.[2];
-        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
-        if (normal.y < 0) {
-            const tmpV = b; b = c; c = tmpV;
-            const tmpUV = uvB; uvB = uvC; uvC = tmpUV;
-            const tmpLabel = labelB; labelB = labelC; labelC = tmpLabel;
+        const remaining = [...edges.values()];
+        if (remaining.length === 0) return { cells, boundary: [] };
+        const nextByStart = new Map(remaining.map((edge) => [this.pointKey(edge.start), edge]));
+        const boundary: BoundaryEdge[] = [];
+        let edge: BoundaryEdge | undefined = remaining[0];
+        while (edge && boundary.length < remaining.length) {
+            boundary.push(edge);
+            edge = nextByStart.get(this.pointKey(edge.end));
         }
-        const tri = new Triangle(a, b, c, uvA, uvB, uvC);
-        tri.labelA = labelA; tri.labelB = labelB; tri.labelC = labelC;
-        out.push(tri);
+        return { cells, boundary };
     }
 
-    // Intersects two lines in the XZ plane (roads are flat) - aPoint+t*aDir and
-    // bPoint+s*bDir - to find a true mitred (sharp) corner between two adjacent arms' own
-    // edge lines, instead of the flat chamfer between their two raw mouth points. Returns
-    // null when the lines are too close to parallel to have a well-defined intersection -
-    // this also naturally covers a fully collinear straight through-road, which doesn't
-    // need a mitred corner at all. A non-null result still isn't blindly trusted by the
-    // caller - see getGeometry's own validation of where it lands.
-    private mitreCorner(
-        aPoint: THREE.Vector3, aDir: THREE.Vector3,
-        bPoint: THREE.Vector3, bDir: THREE.Vector3,
-    ): THREE.Vector3 | null {
-        const denom = aDir.x * bDir.z - aDir.z * bDir.x;
-        if (Math.abs(denom) < 1e-4) return null;
-        const dx = bPoint.x - aPoint.x;
-        const dz = bPoint.z - aPoint.z;
-        const t = (dx * bDir.z - dz * bDir.x) / denom;
-        return new THREE.Vector3(aPoint.x + t * aDir.x, aPoint.y, aPoint.z + t * aDir.z);
+    private addTriangle(output: Triangle[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3,
+        uvA: THREE.Vector2, uvB: THREE.Vector2, uvC: THREE.Vector2): void {
+        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+        output.push(normal.y < -EPS ? new Triangle(a, c, b, uvA, uvC, uvB) : new Triangle(a, b, c, uvA, uvB, uvC));
+    }
+    private addSidewalkStrip(
+        output: Triangle[], innerA2: Point2, innerB2: Point2, outerA2: Point2, outerB2: Point2,
+    ): void {
+        const innerLength = Math.hypot(innerB2.x - innerA2.x, innerB2.z - innerA2.z);
+        const outerLength = Math.hypot(outerB2.x - outerA2.x, outerB2.z - outerA2.z);
+        if (innerLength < EPS || outerLength < EPS) return;
+        const u0 = this.sidewalkTexOffsetX;
+        const curbU = u0 + this.curbHeight / this.sidewalkTexWidth;
+        const outerU = u0 + this.sidewalkWidth / this.sidewalkTexWidth;
+        const v0 = this.sidewalkTexOffsetY;
+        const v1 = v0 + innerLength / this.sidewalkTexHeight;
+        const innerA = this.localToWorld(innerA2);
+        const innerB = this.localToWorld(innerB2);
+        const innerAUp = this.localToWorld(innerA2, this.curbHeight);
+        const innerBUp = this.localToWorld(innerB2, this.curbHeight);
+        const outerA = this.localToWorld(outerA2, this.curbHeight);
+        const outerB = this.localToWorld(outerB2, this.curbHeight);
+
+        const tangent = innerB.clone().sub(innerA);
+        const outward = outerA.clone().sub(innerAUp);
+        const currentNormal = tangent.clone().cross(UP);
+        if (currentNormal.dot(outward) <= 0) {
+            this.addTriangle(output, innerA, innerB, innerBUp,
+                new THREE.Vector2(u0, v0), new THREE.Vector2(u0, v1), new THREE.Vector2(curbU, v1));
+            this.addTriangle(output, innerA, innerBUp, innerAUp,
+                new THREE.Vector2(u0, v0), new THREE.Vector2(curbU, v1), new THREE.Vector2(curbU, v0));
+        } else {
+            this.addTriangle(output, innerB, innerA, innerAUp,
+                new THREE.Vector2(u0, v1), new THREE.Vector2(u0, v0), new THREE.Vector2(curbU, v0));
+            this.addTriangle(output, innerB, innerAUp, innerBUp,
+                new THREE.Vector2(u0, v1), new THREE.Vector2(curbU, v0), new THREE.Vector2(curbU, v1));
+        }
+        if (innerLength > outerLength + EPS) {
+            // A mitred elbow has a longer inner edge than outer edge. Split the long
+            // trapezoid into a rectangular strip plus one small 45-degree corner triangle;
+            // mapping the entire trapezoid as two triangles sheared the texture over the
+            // full arm length and produced the visibly stretched bricks at the bend.
+            const ratio = outerLength / innerLength;
+            const tangent2 = {
+                x: innerA2.x + (innerB2.x - innerA2.x) * ratio,
+                z: innerA2.z + (innerB2.z - innerA2.z) * ratio,
+            };
+            const tangentUp = this.localToWorld(tangent2, this.curbHeight);
+            const tangentV = v0 + outerLength / this.sidewalkTexHeight;
+            this.addTriangle(output, innerAUp, tangentUp, outerB,
+                new THREE.Vector2(u0, v0), new THREE.Vector2(u0, tangentV), new THREE.Vector2(outerU, tangentV));
+            this.addTriangle(output, innerAUp, outerB, outerA,
+                new THREE.Vector2(u0, v0), new THREE.Vector2(outerU, tangentV), new THREE.Vector2(outerU, v0));
+            this.addTriangle(output, tangentUp, innerBUp, outerB,
+                new THREE.Vector2(u0, tangentV), new THREE.Vector2(u0, v1), new THREE.Vector2(outerU, tangentV));
+        } else {
+            this.addTriangle(output, innerAUp, innerBUp, outerB,
+                new THREE.Vector2(u0, v0), new THREE.Vector2(u0, v1), new THREE.Vector2(outerU, v1));
+            this.addTriangle(output, innerAUp, outerB, outerA,
+                new THREE.Vector2(u0, v0), new THREE.Vector2(outerU, v1), new THREE.Vector2(outerU, v0));
+        }
+    }
+
+    // Join two perpendicular road sidewalks with one clean L-shaped corner. Extending the
+    // two road-edge lines to their shared mitre avoids the stepped pieces produced by
+    // following the central rectangle + outlet-stub outline.
+    private addSidewalkCorner(output: Triangle[], sideA: number, sideB: number): void {
+        const normalA = Intersection.NORMALS[sideA];
+        const normalB = Intersection.NORMALS[sideB];
+        const nodeA = this.outletLocal(sideA);
+        const nodeB = this.outletLocal(sideB);
+        const halfWidth = this.effectiveOutletWidth / 2;
+        const outerDistance = halfWidth + this.sidewalkWidth;
+        const innerA = { x: nodeA.x + normalB.x * halfWidth, z: nodeA.z + normalB.z * halfWidth };
+        const innerB = { x: nodeB.x + normalA.x * halfWidth, z: nodeB.z + normalA.z * halfWidth };
+        const innerMitre = {
+            x: (normalA.x + normalB.x) * halfWidth,
+            z: (normalA.z + normalB.z) * halfWidth,
+        };
+        const outerA = { x: nodeA.x + normalB.x * outerDistance, z: nodeA.z + normalB.z * outerDistance };
+        const outerB = { x: nodeB.x + normalA.x * outerDistance, z: nodeB.z + normalA.z * outerDistance };
+        const outerMitre = {
+            x: (normalA.x + normalB.x) * outerDistance,
+            z: (normalA.z + normalB.z) * outerDistance,
+        };
+        this.addSidewalkStrip(output, innerA, innerMitre, outerA, outerMitre);
+        // Start both strips at their road mouths, so the rectangular UV section always
+        // ends at the elbow and only the final one-width triangle receives the mitre UVs.
+        this.addSidewalkStrip(output, innerB, innerMitre, outerB, outerMitre);
+    }
+
+    private addThreeWayClosedSidewalk(output: Triangle[]): void {
+        const south = Intersection.NORMALS[3];
+        const west = this.outletLocal(0);
+        const east = this.outletLocal(1);
+        const halfWidth = this.effectiveOutletWidth / 2;
+        const outerDistance = halfWidth + this.sidewalkWidth;
+        this.addSidewalkStrip(output,
+            { x: west.x + south.x * halfWidth, z: west.z + south.z * halfWidth },
+            { x: east.x + south.x * halfWidth, z: east.z + south.z * halfWidth },
+            { x: west.x + south.x * outerDistance, z: west.z + south.z * outerDistance },
+            { x: east.x + south.x * outerDistance, z: east.z + south.z * outerDistance });
     }
 
     protected getGeometry(): GeometryGroup[] {
-        const roadTris: Triangle[] = [];
-        const swTris: Triangle[] = [];
-        if (this._nodeCount < 2) return [{ name: 'road', triangles: roadTris }];
-
-        const center = this.getCenter();
-        const centerFlat = new THREE.Vector3(center.x, center.y, center.z);
-
-        // Use planar UV based on world XZ relative to center, scaled by tex width/height
-        const texW = this.roadTexWidth || 1;
-        const texH = this.roadTexHeight || 1;
-        const uvOf = (p: THREE.Vector3): THREE.Vector2 => new THREE.Vector2(
-            (p.x - center.x) / texW + this.roadTexOffsetX,
-            (p.z - center.z) / texH + this.roadTexOffsetY,
-        );
-
-        // Perimeter order by angle around center, not raw node index - the constructor's
-        // own circular layout starts out angle-sorted, but nothing keeps a node's array
-        // index matching its actual angular position once it's been dragged (merged onto
-        // a real road) away from that original circle.
-        const order = [...Array(this._nodeCount).keys()].sort((i, j) => {
-            const a = this.nodes[i].mesh.position;
-            const b = this.nodes[j].mesh.position;
-            return Math.atan2(a.z - center.z, a.x - center.x) - Math.atan2(b.z - center.z, b.x - center.x);
-        });
-
-        // Each arm's own two mouth points. basis.right = forward rotated +90 CCW (see
-        // getNodeBasis), so walked in this increasing-angle order, an arm's own rightEdge
-        // faces the NEXT arm and its leftEdge faces the PREVIOUS one - the gap edge closing
-        // arm i to arm i+1 is therefore rightEdge[i] -> leftEdge[i+1].
-        const arms = order.map((i) => {
-            const nodePos = this.nodes[i].mesh.position;
-            const basis = this.getResolvedNodeBasis(i);
-            const hw = this.getResolvedHalfWidth(i);
-            const offset = basis.right.clone().multiplyScalar(hw);
-            return {
-                i,
-                nodePos: nodePos.clone(),
-                right: basis.right.clone(),
-                forward: basis.forward.clone(),
-                leftEdge: nodePos.clone().sub(offset),
-                rightEdge: nodePos.clone().add(offset),
-                sidewalkWidth: this.getResolvedSidewalkWidth(i),
-                curbHeight: this.getResolvedCurbHeight(i),
-            };
-        });
-
-        const n = arms.length;
-
-        // For each gap, try a true mitred corner - where arm a's own right-edge LINE
-        // (extended) crosses arm b's own left-edge line - instead of always drawing a flat
-        // chamfer between their two raw mouth points. A flat chamfer is simple and always
-        // safe, but visibly cuts the corner off wherever two arms don't meet at a very wide
-        // angle, which reads as a diamond/rhombus instead of a square-ish junction. Mitring
-        // gives a sharp corner there instead. Each candidate is validated before use and
-        // falls back to the original flat chamfer whenever it isn't well-defined (near-
-        // parallel edges - this is also what a straight, fully collinear through-road
-        // naturally hits, where a chamfer is already exactly correct) or would land outside
-        // the angular sweep from a to b around center, which would tear the star-shaped
-        // boundary the rest of this method's fan triangulation depends on to never self-
-        // intersect.
-        type GapCorner = { mitred: true; point: THREE.Vector3 } | { mitred: false };
-        const gaps: GapCorner[] = arms.map((a, k) => {
-            const b = arms[(k + 1) % n];
-            const mitre = this.mitreCorner(a.rightEdge, a.forward, b.leftEdge, b.forward);
-            if (!mitre) return { mitred: false };
-
-            const refDist = (a.rightEdge.distanceTo(centerFlat) + b.leftEdge.distanceTo(centerFlat)) / 2;
-            const mitreDist = mitre.distanceTo(centerFlat);
-            if (mitreDist > refDist * 3 || mitreDist < 1e-4) return { mitred: false };
-
-            const dirA = new THREE.Vector2(a.nodePos.x - center.x, a.nodePos.z - center.z);
-            const dirB = new THREE.Vector2(b.nodePos.x - center.x, b.nodePos.z - center.z);
-            const dirM = new THREE.Vector2(mitre.x - center.x, mitre.z - center.z);
-            const crossAM = dirA.x * dirM.y - dirA.y * dirM.x;
-            const crossMB = dirM.x * dirB.y - dirM.y * dirB.x;
-            if (crossAM < -1e-6 || crossMB < -1e-6) return { mitred: false };
-
-            return { mitred: true, point: mitre };
-        });
-
-        for (let k = 0; k < n; k++) {
-            const a = arms[k];
-            const b = arms[(k + 1) % n];
-            const gap = gaps[k];
-            const prevGap = gaps[(k - 1 + n) % n];
-
-            // This arm's own mouth, using the mitred corner shared with each neighbor where
-            // one was found, otherwise its own raw edge point.
-            const rightCorner = gap.mitred ? gap.point : a.rightEdge;
-            const leftCorner = prevGap.mitred ? prevGap.point : a.leftEdge;
-            this.addFlatTriangle(roadTris, centerFlat, rightCorner, leftCorner, uvOf,
-                ['center', `arm${a.i}.rightCorner`, `arm${a.i}.leftCorner`]);
-
-            // The gap between this arm and the next one is only its own separate triangle
-            // when NOT mitred - a.rightEdge (the side of arm a that faces arm b) straight
-            // across to b.leftEdge (the side of arm b that faces back at arm a). Using
-            // a.leftEdge/b.rightEdge here (the sides facing AWAY from each other) was an
-            // earlier bug: that gap edge cut clean across the junction toward whichever arm
-            // was on the OTHER side instead of connecting to its own genuinely adjacent
-            // neighbor. When mitred, rightCorner and leftCorner above already coincide at
-            // the shared mitre point, so there is no gap left to fill.
-            if (!gap.mitred) {
-                this.addFlatTriangle(roadTris, centerFlat, b.leftEdge, a.rightEdge, uvOf,
-                    ['center', `arm${b.i}.leftEdge`, `arm${a.i}.rightEdge`]);
-            }
-
-            // Sidewalk strip along that same gap, only where both arms actually have one -
-            // no sidewalk at all if either connected road lacks one, same rule an ordinary
-            // two-road junction already applies. Unlike an earlier version of this, width
-            // and curb height are NOT collapsed to a single Math.min() value for the whole
-            // piece - innerA/outerA use arm a's own resolved values and innerB/outerB use
-            // arm b's own, so each end lines up exactly with whatever that specific
-            // connected road actually built at that exact shared point, even when the two
-            // roads bordering this gap have different sidewalk widths or curb heights.
-            // Using one uniform value for the whole piece was the actual bug behind
-            // "the intersection's sidewalk renders under the road's own sidewalk": at
-            // whichever end had the taller/wider road, this piece's corner sat at a
-            // different height/position than that road's own sidewalk mesh already had
-            // there.
-            if (a.sidewalkWidth <= 0 || b.sidewalkWidth <= 0) continue;
-            const innerA = gap.mitred ? gap.point : a.rightEdge;
-            const innerB = gap.mitred ? gap.point : b.leftEdge;
-
-            // Extend outward along each arm's OWN right-vector, not a shared "gap
-            // perpendicular" direction (the old approach). A connected Road builds its own
-            // sidewalk by offsetting along that exact same resolvedNodeBasis.right at this
-            // shared node (see Road's sweepGeometryLine/getGeometryLine) - a single shared
-            // outward direction for both ends only happened to line up with that for a
-            // perfectly symmetric junction, and diverged from the real connected road's own
-            // outer sidewalk corner everywhere else, which is what left a visible seam
-            // between the intersection's own sidewalk and each road's own sidewalk mesh.
-            // arm b's own right points from its leftEdge toward its rightEdge, i.e. AWAY
-            // from this gap, so its own sidewalk extends along -right here.
-            const outerA = innerA.clone().addScaledVector(a.right, a.sidewalkWidth);
-            const outerB = innerB.clone().addScaledVector(b.right, -b.sidewalkWidth);
-            outerA.y += a.curbHeight;
-            outerB.y += b.curbHeight;
-            const innerAUp = innerA.clone(); innerAUp.y += a.curbHeight;
-            const innerBUp = innerB.clone(); innerBUp.y += b.curbHeight;
-
-            // Curb face (vertical) then the sidewalk's own top face. UVs are strip-relative
-            // world units - across = height/width in meters (curb face, then the top face,
-            // each restarting its own U at the inner edge), along = ground-level distance
-            // from innerA to innerB in meters - the exact same convention Road's own
-            // sidewalk sweep uses (see getGeometryLine), instead of the flat world-XZ
-            // planar projection the "road" group above uses. A flat projection stretches
-            // and rotates with this gap's own angle, which is what left the connected
-            // road's brick/stone texture looking stretched right where it meets the
-            // intersection's own paved corner.
-            const swU = (u: number) => u / this.sidewalkTexWidth + this.sidewalkTexOffsetX;
-            const swV = (v: number) => v / this.sidewalkTexHeight + this.sidewalkTexOffsetY;
-            const alongLen = innerA.distanceTo(innerB);
-            const uv0A = new THREE.Vector2(swU(0), swV(0));
-            const uv0B = new THREE.Vector2(swU(0), swV(alongLen));
-            const uvCurbA = new THREE.Vector2(swU(a.curbHeight), swV(0));
-            const uvCurbB = new THREE.Vector2(swU(b.curbHeight), swV(alongLen));
-            const uvOuterA = new THREE.Vector2(swU(a.sidewalkWidth), swV(0));
-            const uvOuterB = new THREE.Vector2(swU(b.sidewalkWidth), swV(alongLen));
-
-            const gapId = `gap[arm${a.i}->arm${b.i}]`;
-            // When mitred, innerA and innerB are the exact same point (by construction, see
-            // above) - this first triangle would be degenerate (two identical corners), so
-            // skip it; the other three still matter whenever curb height or sidewalk width
-            // differs between the two arms even though their inner corner now coincides.
-            if (innerA.distanceToSquared(innerB) >= 1e-8) {
-                this.addFlatTriangleUV(swTris, innerA, innerB, innerBUp, uv0A, uv0B, uvCurbB,
-                    [`${gapId}.innerA`, `${gapId}.innerB`, `${gapId}.innerBUp`]);
-            }
-            this.addFlatTriangleUV(swTris, innerA, innerBUp, innerAUp, uv0A, uvCurbB, uvCurbA,
-                [`${gapId}.innerA`, `${gapId}.innerBUp`, `${gapId}.innerAUp`]);
-            this.addFlatTriangleUV(swTris, innerAUp, innerBUp, outerB, uv0A, uv0B, uvOuterB,
-                [`${gapId}.innerAUp`, `${gapId}.innerBUp`, `${gapId}.outerB`]);
-            this.addFlatTriangleUV(swTris, innerAUp, outerB, outerA, uv0A, uvOuterB, uvOuterA,
-                [`${gapId}.innerAUp`, `${gapId}.outerB`, `${gapId}.outerA`]);
+        const { cells } = this.cellsAndBoundary();
+        const road: Triangle[] = [];
+        const sidewalk: Triangle[] = [];
+        const roadUV = (point: THREE.Vector3) => new THREE.Vector2(
+            (point.x - this.center.x) / this.roadTexWidth + this.roadTexOffsetX,
+            (point.z - this.center.z) / this.roadTexHeight + this.roadTexOffsetY);
+        for (const cell of cells) {
+            const nw = this.localToWorld({ x: cell.minX, z: cell.minZ });
+            const ne = this.localToWorld({ x: cell.maxX, z: cell.minZ });
+            const se = this.localToWorld({ x: cell.maxX, z: cell.maxZ });
+            const sw = this.localToWorld({ x: cell.minX, z: cell.maxZ });
+            this.addTriangle(road, nw, ne, se, roadUV(nw), roadUV(ne), roadUV(se));
+            this.addTriangle(road, nw, se, sw, roadUV(nw), roadUV(se), roadUV(sw));
         }
-
-        const groups: GeometryGroup[] = [{ name: 'road', triangles: roadTris }];
-        if (swTris.length > 0) groups.push({ name: 'sidewalk', triangles: swTris });
+        if (this.edgeType === 'sidewalk') {
+            this.addSidewalkCorner(sidewalk, 0, 2); // north-west
+            this.addSidewalkCorner(sidewalk, 2, 1); // north-east
+            if (this._nodeCount === 4) {
+                this.addSidewalkCorner(sidewalk, 1, 3); // south-east
+                this.addSidewalkCorner(sidewalk, 3, 0); // south-west
+            } else {
+                this.addThreeWayClosedSidewalk(sidewalk);
+            }
+        }
+        const groups: GeometryGroup[] = [{ name: 'road', triangles: road }];
+        if (sidewalk.length > 0) groups.push({ name: 'sidewalk', triangles: sidewalk });
         return groups;
     }
 }
