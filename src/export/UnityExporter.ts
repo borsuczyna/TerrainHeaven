@@ -61,6 +61,11 @@ interface ManifestObject {
     type: ExportKind;
     name: string;
     lods: ManifestLod[];
+    terrainPaint?: {
+        controlMap: string;
+        resolution: number;
+        layers: { texture: string | null; tiling: number }[];
+    };
 }
 
 // One entry per mesh-prop asset actually placed at least once - never one per placed
@@ -153,8 +158,9 @@ export default class UnityExporter {
 
         const meshesDir = await root.getDirectoryHandle('Meshes', { create: true });
         const texturesDir = await root.getDirectoryHandle('Textures', { create: true });
+        const controlMapsDir = await root.getDirectoryHandle('ControlMaps', { create: true });
 
-        const objects = await this.writeObjects(meshesDir, exportable, lodLevels, scale, texturePaths, (message) => {
+        const objects = await this.writeObjects(meshesDir, controlMapsDir, exportable, lodLevels, scale, texturePaths, (message) => {
             report(message);
             step++;
         });
@@ -297,6 +303,7 @@ export default class UnityExporter {
 
     private async writeObjects(
         meshesDir: DirectoryHandleLike,
+        controlMapsDir: DirectoryHandleLike,
         exportable: { element: WorldElement; kind: ExportKind }[],
         lodLevels: number,
         scale: number,
@@ -342,7 +349,22 @@ export default class UnityExporter {
                 lods.push({ objFile, mtlFile, groups: manifestGroups });
             }
 
-            objects.push({ type: kind, name, lods });
+            const manifestObject: ManifestObject = { type: kind, name, lods };
+            if (element instanceof Terrain) {
+                const paint = element.getTexturePaintExportData();
+                const controlMapName = `${name}_control.png`;
+                await this.writeControlMap(controlMapsDir, controlMapName, paint.resolution, paint.rgba);
+                for (const layer of paint.layers) if (layer.texturePath) texturePaths.add(layer.texturePath);
+                manifestObject.terrainPaint = {
+                    controlMap: `ControlMaps/${controlMapName}`,
+                    resolution: paint.resolution,
+                    layers: paint.layers.map((layer) => ({
+                        texture: layer.texturePath ? textureFileName(layer.texturePath) : null,
+                        tiling: layer.tiling,
+                    })),
+                };
+            }
+            objects.push(manifestObject);
         }
 
         return objects;
@@ -414,6 +436,28 @@ export default class UnityExporter {
             }
         }
         return names;
+    }
+
+    private async writeControlMap(dir: DirectoryHandleLike, name: string, resolution: number, rgba: Uint8Array): Promise<void> {
+        const canvas = document.createElement('canvas');
+        canvas.width = resolution;
+        canvas.height = resolution;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas 2D is unavailable; cannot encode terrain control map.');
+        // PNG rows start at the visual top while Unity control-map UVs use bottom-left.
+        // Flip once during export so importers can sample the image with ordinary UVs.
+        const pngRgba = new Uint8ClampedArray(rgba.length);
+        for (let y = 0; y < resolution; y++) {
+            const source = y * resolution * 4;
+            const destination = (resolution - 1 - y) * resolution * 4;
+            pngRgba.set(rgba.subarray(source, source + resolution * 4), destination);
+        }
+        context.putImageData(new ImageData(pngRgba, resolution, resolution), 0, 0);
+        const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+            (value) => value ? resolve(value) : reject(new Error('Failed to encode terrain control map.')),
+            'image/png',
+        ));
+        await this.writeFile(dir, name, new Uint8Array(await blob.arrayBuffer()));
     }
 
     private async writeFile(dir: DirectoryHandleLike, name: string, data: string | Uint8Array): Promise<void> {

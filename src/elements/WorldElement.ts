@@ -102,6 +102,9 @@ export interface ElementData {
     terrainHeightPaint?: { gridX: number; gridZ: number; height: number }[];
     // 'local' is the legacy centre-relative paint lattice; 'world' is the shared one.
     terrainHeightPaintSpace?: 'local' | 'world';
+    terrainTextureLayers?: { texturePath: string; tiling: number }[];
+    terrainTextureControlResolution?: number;
+    terrainTextureControlRle?: string;
     // Terrain cut spline-specific
     terrainCutDistance?: number;
     // River-specific

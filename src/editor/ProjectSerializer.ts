@@ -101,6 +101,7 @@ export default class ProjectSerializer {
             terrainCutPoints: this.terrainCutPoints.serialize(),
             texturePaths: [...new Set([
                 ...elementDataList.flatMap((element) => Object.values(element.textures)),
+                ...elementDataList.flatMap((element) => (element.terrainTextureLayers ?? []).map((layer) => layer.texturePath)),
                 ...foliage.Types.map((type) => type.TexturePath),
             ].filter(Boolean))],
             foliage,
@@ -123,6 +124,9 @@ export default class ProjectSerializer {
         const texturePaths = [
             ...data.elements.flatMap((element) =>
                 Object.values(element.textures ?? {}).map((path) => this.normalizeProjectTexturePath(path)),
+            ),
+            ...data.elements.flatMap((element) =>
+                (element.terrainTextureLayers ?? []).map((layer) => this.normalizeProjectTexturePath(layer.texturePath)),
             ),
             ...(data.foliage?.Types ?? []).map((type) => this.normalizeProjectTexturePath(type.TexturePath)),
         ];
@@ -155,6 +159,7 @@ export default class ProjectSerializer {
                 Object.entries(ed.textures ?? {}).map(([groupName, path]) => [groupName, this.normalizeProjectTexturePath(path)]),
             );
             this.loadTextures(el, textureReferences, ed.textureRotations);
+            if (el instanceof Terrain) this.loadTerrainTextureLayers(el);
             this.scene.add(el, false);
             elements.push(el);
         }
@@ -188,12 +193,27 @@ export default class ProjectSerializer {
         }
     }
 
+    private loadTerrainTextureLayers(terrain: Terrain): void {
+        terrain.textureLayers.forEach((layer, index) => {
+            if (!layer.texturePath) return;
+            const path = this.normalizeProjectTexturePath(layer.texturePath);
+            layer.texturePath = path;
+            void this.textureLibrary.loadTexture(path).then((texture) => terrain.setTexturePaintLayer(index, path, texture));
+        });
+    }
+
     private reloadTexturePath(path: string): void {
         for (const element of this.scene.getElements()) {
             for (const [groupName, sourcePath] of element.getGroupTextureReferences()) {
                 if (sourcePath !== path) continue;
                 void this.textureLibrary.loadTexture(path).then((texture) => {
                     if (texture) element.setGroupTexture(groupName, texture, path);
+                });
+            }
+            if (element instanceof Terrain) {
+                element.textureLayers.forEach((layer, index) => {
+                    if (layer.texturePath !== path) return;
+                    void this.textureLibrary.loadTexture(path).then((texture) => element.setTexturePaintLayer(index, path, texture));
                 });
             }
         }

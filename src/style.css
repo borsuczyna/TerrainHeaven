@@ -11,6 +11,7 @@
 @import './styles/mesh-panel.css';
 @import './styles/mesh-calibration.css';
 @import './styles/height-paint.css';
+@import './styles/texture-paint.css';
 @import './styles/terrain-polygon.css';
 @import './styles/measure.css';
 @import './styles/building.css';

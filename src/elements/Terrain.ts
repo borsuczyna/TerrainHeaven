@@ -7,6 +7,13 @@ import TerrainGroupMesher from '../terrain/TerrainGroupMesher';
 import type { TerrainPaintHeightInput, TerrainRect } from '../terrain/TerrainMesher';
 import type RiverSpline from './RiverSpline';
 import LODPreviewManager from '../editor/LODPreviewManager';
+import TerrainTexturePaint, { DEFAULT_TERRAIN_CONTROL_RESOLUTION } from '../terrain/TerrainTexturePaint';
+
+export interface TerrainTextureLayer {
+    texturePath: string;
+    tiling: number;
+    texture: THREE.Texture | null;
+}
 
 export default class Terrain extends WorldElement {
     public static readonly PAINT_CELL_SIZE = 1;
@@ -28,6 +35,12 @@ export default class Terrain extends WorldElement {
     public maxSlopeDegrees: number = 35;
     private terrainUV: UVTransform = { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
     private readonly paintedHeights = new Map<string, TerrainPaintHeightInput>();
+    public texturePaint = new TerrainTexturePaint(DEFAULT_TERRAIN_CONTROL_RESOLUTION);
+    public readonly textureLayers: TerrainTextureLayer[] = Array.from({ length: 4 }, () => ({
+        texturePath: '', tiling: 8, texture: null,
+    }));
+    private controlTexture: THREE.DataTexture | null = null;
+    private static fallbackTexture: THREE.DataTexture | null = null;
 
     constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
         super();
@@ -47,6 +60,128 @@ export default class Terrain extends WorldElement {
             material.side = THREE.DoubleSide;
             material.needsUpdate = true;
         }
+        this.applyTexturePaintMaterial();
+    }
+
+    public setTexturePaintLayer(index: number, texturePath: string, texture: THREE.Texture | null): void {
+        const layer = this.textureLayers[index];
+        if (!layer) return;
+        if (layer.texturePath === texturePath && layer.texture === texture) return;
+        layer.texturePath = texturePath;
+        layer.texture = texture;
+        if (texture) {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+        }
+        this.applyTexturePaintMaterial();
+    }
+
+    public setTextureLayerTiling(index: number, tiling: number): void {
+        const layer = this.textureLayers[index];
+        if (!layer) return;
+        const next = THREE.MathUtils.clamp(tiling, 0.1, 100);
+        if (Math.abs(layer.tiling - next) <= 1e-6) return;
+        layer.tiling = next;
+        this.applyTexturePaintMaterial();
+    }
+
+    public paintTexture(worldPosition: THREE.Vector3, radius: number, layer: number, opacity: number,
+        hardness: number, shape: import('../terrain/TerrainTexturePaint').TextureBrushShape, rotation: number, seed = 0): boolean {
+        const bounds = this.getBounds();
+        const u = (worldPosition.x - bounds.minX) / Math.max(0.0001, this.width);
+        const v = (worldPosition.z - bounds.minZ) / Math.max(0.0001, this.length);
+        const changed = this.texturePaint.paint({
+            u, v,
+            radiusU: radius / Math.max(0.0001, this.width),
+            radiusV: radius / Math.max(0.0001, this.length),
+            layer, opacity, hardness, shape, rotation, seed,
+        });
+        if (changed) this.updateControlTexture();
+        return changed;
+    }
+
+    public clearTexturePaint(): void {
+        this.texturePaint.clear(0);
+        this.updateControlTexture();
+    }
+
+    public getTexturePaintExportData(): { resolution: number; rgba: Uint8Array; layers: { texturePath: string; tiling: number }[] } {
+        return {
+            resolution: this.texturePaint.resolution,
+            rgba: new Uint8Array(this.texturePaint.data),
+            layers: this.textureLayers.map(({ texturePath, tiling }, index) => ({
+                texturePath: texturePath || (index === 0 ? this.getGroupTextureReferences().get('terrain') ?? '' : ''),
+                tiling,
+            })),
+        };
+    }
+
+    private applyTexturePaintMaterial(): void {
+        const materials = Array.isArray(this.mesh.material) ? this.mesh.material : [this.mesh.material];
+        const material = materials[this.getGroupNames().indexOf('terrain')] as THREE.MeshStandardMaterial | undefined;
+        if (!material) return;
+        const fallback = Terrain.getFallbackTexture();
+        const control = this.getControlTexture();
+        const layers = this.textureLayers.map((layer, index) => layer.texture
+            ?? (index === 0 ? this.getGroupTexture('terrain') : null)
+            ?? fallback);
+        material.map = fallback; // Enables UV defines; the custom shader performs the actual blend.
+        material.onBeforeCompile = (shader) => {
+            shader.uniforms.terrainControl = { value: control };
+            for (let index = 0; index < 4; index++) {
+                shader.uniforms[`terrainLayer${index}`] = { value: layers[index] };
+                shader.uniforms[`terrainTiling${index}`] = { value: this.textureLayers[index].tiling };
+            }
+            shader.uniforms.terrainBounds = { value: new THREE.Vector4(
+                this.center.x - this.width / 2, this.center.z - this.length / 2, this.width, this.length,
+            ) };
+            shader.vertexShader = shader.vertexShader
+                .replace('#include <common>', '#include <common>\nvarying vec2 vTerrainControlUv;')
+                .replace('#include <begin_vertex>', `#include <begin_vertex>\n                vTerrainControlUv = vec2((position.x - terrainBounds.x) / terrainBounds.z, (position.z - terrainBounds.y) / terrainBounds.w);`)
+                .replace('#include <uv_pars_vertex>', '#include <uv_pars_vertex>\nuniform vec4 terrainBounds;');
+            shader.fragmentShader = shader.fragmentShader
+                .replace('#include <common>', `#include <common>\n                varying vec2 vTerrainControlUv;\n                uniform sampler2D terrainControl;\n                uniform sampler2D terrainLayer0; uniform sampler2D terrainLayer1;\n                uniform sampler2D terrainLayer2; uniform sampler2D terrainLayer3;\n                uniform float terrainTiling0; uniform float terrainTiling1;\n                uniform float terrainTiling2; uniform float terrainTiling3;`)
+                .replace('#include <map_fragment>', `
+                vec4 terrainWeights = texture2D(terrainControl, clamp(vTerrainControlUv, 0.0, 1.0));
+                float terrainWeightSum = max(dot(terrainWeights, vec4(1.0)), 0.0001);
+                terrainWeights /= terrainWeightSum;
+                vec3 terrainColor = texture2D(terrainLayer0, vMapUv * terrainTiling0).rgb * terrainWeights.r
+                    + texture2D(terrainLayer1, vMapUv * terrainTiling1).rgb * terrainWeights.g
+                    + texture2D(terrainLayer2, vMapUv * terrainTiling2).rgb * terrainWeights.b
+                    + texture2D(terrainLayer3, vMapUv * terrainTiling3).rgb * terrainWeights.a;
+                diffuseColor.rgb *= terrainColor;
+                `);
+        };
+        material.customProgramCacheKey = () => 'terrain-texture-paint-v1';
+        material.needsUpdate = true;
+    }
+
+    private getControlTexture(): THREE.DataTexture {
+        if (!this.controlTexture) {
+            this.controlTexture = new THREE.DataTexture(
+                this.texturePaint.data, this.texturePaint.resolution, this.texturePaint.resolution, THREE.RGBAFormat,
+            );
+            this.controlTexture.flipY = false;
+            this.controlTexture.minFilter = THREE.LinearFilter;
+            this.controlTexture.magFilter = THREE.LinearFilter;
+            this.controlTexture.wrapS = THREE.ClampToEdgeWrapping;
+            this.controlTexture.wrapT = THREE.ClampToEdgeWrapping;
+            this.controlTexture.needsUpdate = true;
+        }
+        return this.controlTexture;
+    }
+
+    private updateControlTexture(): void {
+        if (this.controlTexture) this.controlTexture.needsUpdate = true;
+    }
+
+    private static getFallbackTexture(): THREE.DataTexture {
+        if (!Terrain.fallbackTexture) {
+            Terrain.fallbackTexture = new THREE.DataTexture(new Uint8Array([210, 210, 210, 255]), 1, 1, THREE.RGBAFormat);
+            Terrain.fallbackTexture.colorSpace = THREE.SRGBColorSpace;
+            Terrain.fallbackTexture.needsUpdate = true;
+        }
+        return Terrain.fallbackTexture;
     }
 
     public override translate(delta: THREE.Vector3): void {
@@ -347,6 +482,9 @@ export default class Terrain extends WorldElement {
             terrainHeightPaint: [...this.paintedHeights.values()]
                 .sort((a, b) => a.gridZ - b.gridZ || a.gridX - b.gridX)
                 .map((sample) => ({ ...sample })),
+            terrainTextureLayers: this.textureLayers.map(({ texturePath, tiling }) => ({ texturePath, tiling })),
+            terrainTextureControlResolution: this.texturePaint.resolution,
+            terrainTextureControlRle: this.texturePaint.encodeRle(),
         };
     }
 
@@ -374,6 +512,21 @@ export default class Terrain extends WorldElement {
             const gridZ = Math.round(sample.gridZ) + legacyShiftZ;
             const height = THREE.MathUtils.clamp(sample.height, -100, 100);
             if (Math.abs(height) > 1e-5) terrain.paintedHeights.set(`${gridX},${gridZ}`, { gridX, gridZ, height });
+        }
+        for (let index = 0; index < Math.min(4, data.terrainTextureLayers?.length ?? 0); index++) {
+            const saved = data.terrainTextureLayers![index];
+            terrain.textureLayers[index].texturePath = saved.texturePath ?? '';
+            terrain.textureLayers[index].tiling = THREE.MathUtils.clamp(saved.tiling ?? 8, 0.1, 100);
+        }
+        if (data.terrainTextureControlRle) {
+            try {
+                terrain.texturePaint = TerrainTexturePaint.decodeRle(
+                    data.terrainTextureControlResolution ?? DEFAULT_TERRAIN_CONTROL_RESOLUTION,
+                    data.terrainTextureControlRle,
+                );
+            } catch (error) {
+                console.warn('Ignoring invalid terrain texture control map.', error);
+            }
         }
         const uv = data.uvTransforms?.terrain;
         if (uv) terrain.terrainUV = { ...uv };

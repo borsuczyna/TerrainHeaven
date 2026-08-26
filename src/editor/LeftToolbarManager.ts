@@ -14,6 +14,7 @@ import WireframeManager from './WireframeManager';
 import XRayManager from './XRayManager';
 import FoliageTool from './tools/FoliageTool';
 import HeightPaintTool from './tools/HeightPaintTool';
+import TexturePaintTool from './tools/TexturePaintTool';
 import FenceTool from './tools/FenceTool';
 import MeshTool from './tools/MeshTool';
 import MeasureTool from './tools/MeasureTool';
@@ -40,6 +41,7 @@ export default class LeftToolbarManager {
         @inject(XRayManager) private readonly xrayManager: XRayManager,
         @inject(FoliageTool) private readonly foliageTool: FoliageTool,
         @inject(HeightPaintTool) private readonly heightPaintTool: HeightPaintTool,
+        @inject(TexturePaintTool) private readonly texturePaintTool: TexturePaintTool,
         @inject(FenceTool) private readonly fenceTool: FenceTool,
         @inject(MeshTool) private readonly meshTool: MeshTool,
         @inject(MeasureTool) private readonly measureTool: MeasureTool,
@@ -84,6 +86,7 @@ export default class LeftToolbarManager {
         this.toolManager.registerTool(this.uvTool);
         this.toolManager.registerTool(this.foliageTool);
         this.toolManager.registerTool(this.heightPaintTool);
+        this.toolManager.registerTool(this.texturePaintTool);
         this.toolManager.registerTool(this.fenceTool);
         this.toolManager.registerTool(this.meshTool);
         this.toolManager.registerTool(this.measureTool);
@@ -108,11 +111,12 @@ export default class LeftToolbarManager {
         this.toolManager.registerSwitcher(
             'terrain-switcher',
             document.getElementById('btn-terrain') as HTMLButtonElement,
-            ['terrain', 'terrain-height-paint', 'terrain-cut-point', 'terrain-cut-spline', 'terrain-polygon', 'river'],
+            ['terrain', 'terrain-height-paint', 'terrain-texture-paint', 'terrain-cut-point', 'terrain-cut-spline', 'terrain-polygon', 'river'],
             'terrain',
             {
                 terrain: { label: 'Terrain Tool', icon: 'mountain' },
                 'terrain-height-paint': { label: 'Height Map Painter', icon: 'paintbrush' },
+                'terrain-texture-paint': { label: 'Texture Painter', icon: 'palette' },
                 'terrain-cut-point': { label: 'Terrain Cut Point Tool', icon: 'plus' },
                 'terrain-cut-spline': { label: 'Terrain Cut Spline Tool', icon: 'spline' },
                 'terrain-polygon': { label: 'Polygon Terrain Tool', icon: 'hexagon' },
