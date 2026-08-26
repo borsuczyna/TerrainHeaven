@@ -4,6 +4,7 @@ import { createIcons, icons } from 'lucide';
 import { container } from 'tsyringe';
 import App from './editor/App';
 import { loadDemoScene } from './DemoScene';
+import EditorBridge from './mcp/EditorBridge';
 
 const nonTextFocusTarget = 'button, a[href], [role="button"], [tabindex]';
 
@@ -33,5 +34,6 @@ document.addEventListener('focusin', (event) => {
 const app = container.resolve(App);
 loadDemoScene(app);
 app.history.reset('Demo Scene');
+container.resolve(EditorBridge).start();
 
 createIcons({ icons });

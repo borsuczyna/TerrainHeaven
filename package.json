@@ -6,21 +6,29 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:mcp": "tsc -p mcp-server/tsconfig.json",
+    "mcp": "npm run build:mcp --silent && node mcp-server/dist/server.js",
+    "test:mcp": "npm run build:mcp --silent && node mcp-server/smoke-test.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^26.3.0",
     "@types/three": "^0.184.0",
+    "@types/ws": "^8.18.1",
     "typescript": "~6.0.2",
     "vite": "^8.0.4",
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "lucide": "^1.8.0",
     "poly2tri": "^1.5.0",
     "polygon-clipping": "^0.15.7",
     "reflect-metadata": "^0.2.2",
     "three": "^0.184.0",
-    "tsyringe": "^4.10.0"
+    "tsyringe": "^4.10.0",
+    "ws": "^8.21.3",
+    "zod": "^4.4.3"
   }
 }
