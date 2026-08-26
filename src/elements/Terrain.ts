@@ -40,6 +40,8 @@ export default class Terrain extends WorldElement {
         texturePath: '', tiling: 8, texture: null,
     }));
     private controlTexture: THREE.DataTexture | null = null;
+    private texturePaintMaterial: THREE.MeshStandardMaterial | null = null;
+    private texturePaintShader: { uniforms: Record<string, { value: unknown }> } | null = null;
     private static fallbackTexture: THREE.DataTexture | null = null;
 
     constructor(center: THREE.Vector3, width: number = 20, length: number = 20) {
@@ -126,7 +128,18 @@ export default class Terrain extends WorldElement {
             ?? (index === 0 ? this.getGroupTexture('terrain') : null)
             ?? fallback);
         material.map = fallback; // Enables UV defines; the custom shader performs the actual blend.
+        if (this.texturePaintMaterial === material && this.texturePaintShader) {
+            this.texturePaintShader.uniforms.terrainControl.value = control;
+            for (let index = 0; index < 4; index++) {
+                this.texturePaintShader.uniforms[`terrainLayer${index}`].value = layers[index];
+                this.texturePaintShader.uniforms[`terrainTiling${index}`].value = this.textureLayers[index].tiling;
+            }
+            return;
+        }
+        this.texturePaintMaterial = material;
+        this.texturePaintShader = null;
         material.onBeforeCompile = (shader) => {
+            this.texturePaintShader = shader;
             shader.uniforms.terrainControl = { value: control };
             for (let index = 0; index < 4; index++) {
                 shader.uniforms[`terrainLayer${index}`] = { value: layers[index] };
@@ -152,7 +165,7 @@ export default class Terrain extends WorldElement {
                 diffuseColor.rgb *= terrainColor;
                 `);
         };
-        material.customProgramCacheKey = () => 'terrain-texture-paint-v1';
+        material.customProgramCacheKey = () => 'terrain-texture-paint-v2';
         material.needsUpdate = true;
     }
 

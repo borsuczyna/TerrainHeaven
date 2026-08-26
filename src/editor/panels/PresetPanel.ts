@@ -16,7 +16,7 @@ export default class PresetPanel {
         this.container.id = 'preset-panel';
         this.container.innerHTML = `
             <div class="preset-header">
-                <div><span class="preset-eyebrow">Library</span><strong>Element Presets</strong></div>
+                <div><span class="preset-eyebrow">Library</span><strong>Element Presets</strong><small>Reusable element configurations</small></div>
                 <button type="button" class="preset-close" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
             <div class="preset-toolbar">

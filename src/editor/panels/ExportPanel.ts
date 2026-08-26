@@ -36,7 +36,7 @@ export default class ExportPanel {
     private build(): void {
         this.container.innerHTML = `
             <div class="ep-header">
-                <div class="ep-heading"><span class="ep-eyebrow">Unity</span><span class="ep-title">Export Map</span></div>
+                <div class="ep-heading"><span class="ep-eyebrow">Unity</span><span class="ep-title">Export Map</span><small>Meshes, textures and scene data</small></div>
                 <button class="ep-close" type="button" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
             <div class="ep-body">

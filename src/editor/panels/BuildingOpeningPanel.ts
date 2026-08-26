@@ -19,7 +19,7 @@ export default class BuildingOpeningPanel {
         this.container.id = 'building-opening-panel';
         this.container.innerHTML = `
             <div class="building-opening-header">
-                <div><span>Building Tool</span><strong>Windows &amp; Doors</strong></div>
+                <div><span>Building</span><strong>Windows &amp; Doors</strong><small>Place openings on walls</small></div>
                 <button type="button" data-action="close" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
             <div class="building-opening-body">

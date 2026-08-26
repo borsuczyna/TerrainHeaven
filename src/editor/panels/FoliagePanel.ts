@@ -44,7 +44,7 @@ export default class FoliagePanel {
         this.container.id = 'foliage-panel';
         this.container.innerHTML = `
             <div class="foliage-header">
-                <div><span class="foliage-eyebrow">World Tool</span><strong>Foliage Editor</strong></div>
+                <div><span class="foliage-eyebrow">World</span><strong>Foliage Editor</strong><small>Paint and configure vegetation</small></div>
                 <button type="button" class="foliage-close" aria-label="Close foliage editor"><i data-lucide="x"></i></button>
             </div>
             <div class="foliage-tabs" role="tablist">

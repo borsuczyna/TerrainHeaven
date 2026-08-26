@@ -59,7 +59,7 @@ export default class MeshCalibrationPanel {
         this.container.innerHTML = `
             <div class="mc-dialog">
                 <div class="mc-header">
-                    <div><span class="mc-eyebrow">Calibrate Scale</span><strong data-role="name"></strong></div>
+                    <div><span class="mc-eyebrow">Mesh</span><strong data-role="name"></strong><small>Calibrate scale and pivot</small></div>
                     <button type="button" class="mc-close" aria-label="Close"><i data-lucide="x"></i></button>
                 </div>
                 <div class="mc-missing" data-view="missing">

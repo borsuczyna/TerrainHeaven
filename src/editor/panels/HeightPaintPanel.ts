@@ -26,7 +26,7 @@ export default class HeightPaintPanel {
         this.container.id = 'height-paint-panel';
         this.container.innerHTML = `
             <div class="height-paint-header">
-                <div><span>Terrain Tool</span><strong>Height Map Painter</strong></div>
+                <div><span>Terrain</span><strong>Height Map Painter</strong><small>Sculpt the terrain surface</small></div>
                 <button type="button" data-action="close" aria-label="Close height map painter"><i data-lucide="x"></i></button>
             </div>
             <div class="height-paint-body">

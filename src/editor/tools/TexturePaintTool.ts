@@ -19,7 +19,6 @@ export default class TexturePaintTool implements Tool {
     private activeTerrain: Terrain | null = null;
     private readonly lastDab = new THREE.Vector3();
     private strokeSeed = 0;
-    private previewShape: 'circle' | 'square' = 'circle';
 
     constructor(
         @inject(SceneManager) private readonly scene: SceneManager,
@@ -28,28 +27,73 @@ export default class TexturePaintTool implements Tool {
         @inject(TextureLibrary) private readonly library: TextureLibrary,
         @inject(TexturePaintPanel) private readonly panel: TexturePaintPanel,
     ) {
-        const material = new THREE.MeshBasicMaterial({ color: 0x55b8ff, transparent: true, opacity: 0.28, depthTest: false, side: THREE.DoubleSide });
-        material.onBeforeCompile = (shader) => {
-            shader.uniforms.brushHardness = { value: 0.45 };
-            material.userData.shader = shader;
-            shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform float brushHardness;')
-                .replace('#include <dithering_fragment>', `
-                    float d = length(vUv - vec2(0.5)) * 2.0;
-                    float alpha = 1.0 - smoothstep(brushHardness, 1.0, d);
-                    gl_FragColor.a *= alpha * 0.65;
-                    #include <dithering_fragment>`);
-        };
+        // A self-contained shader avoids depending on MeshBasicMaterial's optional UV
+        // defines. The previous onBeforeCompile patch referenced vUv while USE_UV was
+        // disabled, which is what caused the fragment shader validation failure.
+        const material = new THREE.ShaderMaterial({
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            uniforms: {
+                brushColor: { value: new THREE.Color(0x4ab7ff) },
+                brushHardness: { value: 0.45 },
+                brushShape: { value: 0 },
+                brushSeed: { value: 0 },
+            },
+            vertexShader: `
+                varying vec2 vBrushUv;
+                void main() {
+                    vBrushUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vBrushUv;
+                uniform vec3 brushColor;
+                uniform float brushHardness;
+                uniform float brushShape;
+                uniform float brushSeed;
+                float hash(vec2 p) {
+                    return fract(sin(dot(p + brushSeed, vec2(127.1, 311.7))) * 43758.5453);
+                }
+                void main() {
+                    vec2 centered = (vBrushUv - 0.5) * 2.0;
+                    float distanceToEdge = brushShape > 2.5 && brushShape < 4.5
+                        ? max(abs(centered.x), abs(centered.y))
+                        : length(centered);
+                    if (distanceToEdge > 1.0) discard;
+                    float core = 1.0 - smoothstep(brushHardness, 1.0, distanceToEdge);
+                    float noise = hash(floor(vBrushUv * 22.0));
+                    if (brushShape > 4.5 && brushShape < 5.5) core *= 0.35 + noise * 0.65;
+                    if (brushShape > 5.5 && brushShape < 6.5) core *= noise > 0.58 ? 1.0 : 0.08;
+                    if (brushShape > 6.5) core *= 0.18 + abs(sin((centered.x + centered.y) * 12.0 + noise * 2.5)) * 0.82;
+                    float outline = 1.0 - smoothstep(0.925, 1.0, distanceToEdge);
+                    outline = max(0.0, 1.0 - outline);
+                    float alpha = max(core * 0.24, outline * 0.9);
+                    gl_FragColor = vec4(brushColor, alpha);
+                }
+            `,
+        });
         this.preview = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
         this.preview.renderOrder = 999;
         this.preview.visible = false;
         this.scene.instance.add(this.preview);
         this.panel.onClear = () => this.clear();
         this.panel.onLayerTextureChanged = (index, path) => void this.setLayer(index, path);
-        this.panel.onLayerTilingChanged = (index, tiling) => { this.activeTerrain?.setTextureLayerTiling(index, tiling); };
+        this.panel.onLayerTilingChanged = (index, tiling) => {
+            for (const terrain of this.getTerrains()) terrain.setTextureLayerTiling(index, tiling);
+        };
         window.addEventListener('texture-paint-panel-closed', () => { this.preview.visible = false; });
     }
 
-    public activate(): void { this.panel.show(); window.addEventListener('mousemove', this.onMouseMove); window.addEventListener('mouseup', this.onMouseUp); }
+    public activate(): void {
+        this.activeTerrain ??= this.getTerrains()[0] ?? null;
+        if (this.activeTerrain) this.panel.syncTerrain(this.activeTerrain.textureLayers);
+        this.panel.show();
+        window.addEventListener('mousemove', this.onMouseMove);
+        window.addEventListener('mouseup', this.onMouseUp);
+    }
     public deactivate(): void {
         if (this.painting) this.history.endAction();
         this.painting = false; this.preview.visible = false; this.panel.hide();
@@ -99,7 +143,7 @@ export default class TexturePaintTool implements Tool {
     }
     private getHit(x: number, y: number): { terrain: Terrain; hit: THREE.Intersection } | null {
         this.mouse.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1); this.raycaster.setFromCamera(this.mouse, this.camera.instance);
-        const terrains = this.scene.getElements().filter((element): element is Terrain => element instanceof Terrain);
+        const terrains = this.getTerrains();
         const hit = this.raycaster.intersectObjects(terrains.map((terrain) => terrain.mesh), false)[0];
         const terrain = hit?.object.userData.worldElement;
         return hit && terrain instanceof Terrain ? { terrain, hit } : null;
@@ -109,18 +153,21 @@ export default class TexturePaintTool implements Tool {
         const s = this.panel.settings; this.preview.visible = true;
         this.preview.position.copy(hit.point).addScaledVector(normal, 0.045); this.preview.scale.setScalar(s.radius);
         this.preview.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal.normalize()); this.preview.rotateZ(THREE.MathUtils.degToRad(s.rotation));
-        const shader = (this.preview.material as THREE.Material).userData.shader; if (shader) shader.uniforms.brushHardness.value = s.shape === 'hard-round' ? 0.98 : s.hardness;
-        const shape = s.shape === 'square' ? 'square' : 'circle';
-        if (shape !== this.previewShape) {
-            this.preview.geometry.dispose();
-            this.preview.geometry = shape === 'square' ? new THREE.PlaneGeometry(2, 2) : new THREE.CircleGeometry(1, 64);
-            this.previewShape = shape;
-        }
+        const material = this.preview.material as THREE.ShaderMaterial;
+        material.uniforms.brushHardness.value = s.shape === 'hard-round' || s.shape === 'hard-square'
+            ? 0.98 : s.shape === 'medium-round' ? Math.max(0.45, s.hardness) : s.hardness;
+        material.uniforms.brushShape.value = {
+            'soft-round': 0, 'medium-round': 1, 'hard-round': 2,
+            'soft-square': 3, 'hard-square': 4, noise: 5, speckle: 6, ridge: 7,
+        }[s.shape];
+        material.uniforms.brushSeed.value = this.strokeSeed;
     }
     private async setLayer(index: number, path: string): Promise<void> {
-        if (!this.activeTerrain) return;
         const texture = path ? await this.library.loadTexture(path) : null;
-        this.activeTerrain.setTexturePaintLayer(index, path, texture);
+        for (const terrain of this.getTerrains()) terrain.setTexturePaintLayer(index, path, texture);
     }
     private clear(): void { if (!this.activeTerrain) return; this.history.beginAction('Clear Terrain Texture Paint'); this.activeTerrain.clearTexturePaint(); this.history.endAction(); }
+    private getTerrains(): Terrain[] {
+        return this.scene.getElements().filter((element): element is Terrain => element instanceof Terrain);
+    }
 }

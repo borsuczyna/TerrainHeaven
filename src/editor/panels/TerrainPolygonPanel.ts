@@ -21,7 +21,7 @@ export default class TerrainPolygonPanel {
         this.container.id = 'terrain-polygon-panel';
         this.container.innerHTML = `
             <div class="terrain-polygon-header">
-                <div><span>Terrain Tool</span><strong>Polygon Terrain</strong></div>
+                <div><span>Terrain</span><strong>Polygon Terrain</strong><small>Draw a custom terrain footprint</small></div>
                 <button type="button" data-action="close" aria-label="Close polygon terrain tool"><i data-lucide="x"></i></button>
             </div>
             <div class="terrain-polygon-body">

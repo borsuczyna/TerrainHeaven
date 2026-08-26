@@ -1,7 +1,10 @@
 export const TERRAIN_TEXTURE_LAYER_COUNT = 4;
 export const DEFAULT_TERRAIN_CONTROL_RESOLUTION = 128;
 
-export type TextureBrushShape = 'soft-round' | 'hard-round' | 'square' | 'noise';
+export type TextureBrushShape =
+    | 'soft-round' | 'medium-round' | 'hard-round'
+    | 'soft-square' | 'hard-square'
+    | 'noise' | 'speckle' | 'ridge';
 
 export interface TexturePaintStroke {
     u: number;
@@ -51,14 +54,21 @@ export default class TerrainTexturePaint {
                 const dv = ((y + 0.5) / this.resolution - stroke.v) / radiusV;
                 const rx = du * cos - dv * sin;
                 const ry = du * sin + dv * cos;
-                const distance = stroke.shape === 'square' ? Math.max(Math.abs(rx), Math.abs(ry)) : Math.hypot(rx, ry);
+                const isSquare = stroke.shape === 'soft-square' || stroke.shape === 'hard-square';
+                const distance = isSquare ? Math.max(Math.abs(rx), Math.abs(ry)) : Math.hypot(rx, ry);
                 if (distance > 1) continue;
 
-                let falloff = stroke.shape === 'hard-round' || stroke.shape === 'square'
-                    ? 1
-                    : 1 - smoothstep(hardness, 1, distance);
+                const effectiveHardness = stroke.shape === 'medium-round' ? Math.max(0.45, hardness)
+                    : stroke.shape === 'hard-round' || stroke.shape === 'hard-square' ? 0.98
+                    : hardness;
+                let falloff = 1 - smoothstep(effectiveHardness, 1, distance);
                 if (stroke.shape === 'noise') {
                     falloff *= 0.35 + hashNoise(x, y, stroke.seed ?? 0) * 0.65;
+                } else if (stroke.shape === 'speckle') {
+                    falloff *= hashNoise(x, y, stroke.seed ?? 0) > 0.58 ? 1 : 0.08;
+                } else if (stroke.shape === 'ridge') {
+                    const noise = hashNoise(x, y, stroke.seed ?? 0);
+                    falloff *= 0.18 + Math.abs(Math.sin((rx + ry) * 12 + noise * 2.5)) * 0.82;
                 }
                 const blend = clamp01(opacity * falloff);
                 if (blend <= 0.0001) continue;

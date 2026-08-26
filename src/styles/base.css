@@ -10,3 +10,106 @@ html, body {
     width: 100vw;
     height: 100vh;
 }
+
+/* Shared visual contract for editor panel headers. Kept in the already-loaded base
+   stylesheet so Vite HMR never has to discover a newly-created @import at runtime. */
+:is(.building-opening-header,.ep-header,.foliage-header,.height-paint-header,.measure-header,
+    .mesh-header,.sp-header,.terrain-polygon-header,.mc-header,.tb-header,.preset-header,.uv-header) {
+    min-height: 62px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 14px;
+    background: linear-gradient(180deg,#292c32,#23262b);
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+:is(.building-opening-header,.ep-header,.foliage-header,.height-paint-header,.measure-header,
+    .mesh-header,.sp-header,.terrain-polygon-header,.mc-header,.tb-header,.preset-header) > div,
+.uv-heading {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0,1fr);
+    column-gap: 9px;
+    align-items: baseline;
+}
+
+:is(.building-opening-header,.foliage-header,.height-paint-header,.measure-header,.mesh-header,
+    .terrain-polygon-header,.mc-header,.preset-header) > div > span,
+:is(.ep-eyebrow,.sp-eyebrow,.tb-eyebrow),
+.uv-heading > span {
+    color: #78baff;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+}
+
+:is(.building-opening-header,.foliage-header,.height-paint-header,.measure-header,.mesh-header,
+    .terrain-polygon-header,.mc-header,.preset-header) > div > strong,
+:is(.ep-title,.sp-title,.tb-title),
+.uv-heading > strong {
+    overflow: hidden;
+    color: #f2f5f8;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:is(.building-opening-header,.ep-header,.foliage-header,.height-paint-header,.measure-header,
+    .mesh-header,.sp-header,.terrain-polygon-header,.mc-header,.tb-header,.preset-header) > div > small,
+.uv-heading > small {
+    grid-column: 1/-1;
+    display: block;
+    margin-top: 2px;
+    overflow: hidden;
+    color: #7f8895;
+    font-size: 9px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    text-transform: none;
+    white-space: nowrap;
+}
+
+:is(.building-opening-header,.ep-header,.foliage-header,.height-paint-header,.measure-header,
+    .mesh-header,.sp-header,.terrain-polygon-header,.mc-header,.tb-header,.preset-header,.uv-header) > button {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 7px;
+    color: #aeb6c2;
+    background: rgba(255,255,255,.06);
+    cursor: pointer;
+}
+
+:is(.building-opening-header,.ep-header,.foliage-header,.height-paint-header,.measure-header,
+    .mesh-header,.sp-header,.terrain-polygon-header,.mc-header,.tb-header,.preset-header,.uv-header) > button:hover {
+    color: white;
+    background: rgba(255,255,255,.13);
+}
+
+:is(.building-opening-header,.ep-header,.foliage-header,.height-paint-header,.measure-header,
+    .mesh-header,.sp-header,.terrain-polygon-header,.mc-header,.tb-header,.preset-header,.uv-header) > button svg {
+    width: 15px;
+    height: 15px;
+}
+
+.uv-header { display: grid; grid-template-columns: minmax(0,1fr) auto 30px; }
+.uv-header .uv-group-select { max-width: 110px; }
+
+#properties-panel .panel-header {
+    min-height: 62px;
+    background: linear-gradient(180deg,#292c32,#23262b);
+}
+#properties-panel .panel-heading { display: grid; grid-template-columns: auto 1fr; column-gap: 9px; align-items: baseline; }
+#properties-panel .panel-eyebrow { color:#78baff;font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase; }
+#properties-panel .panel-title { color:#f2f5f8;font-size:15px;font-weight:650; }

@@ -62,7 +62,7 @@ export default class MeshPanel {
         this.container.id = 'mesh-panel';
         this.container.innerHTML = `
             <div class="mesh-header">
-                <div><span class="mesh-eyebrow">World Tool</span><strong>Mesh Props</strong></div>
+                <div><span class="mesh-eyebrow">World</span><strong>Mesh Props</strong><small>Place and scatter mesh assets</small></div>
                 <button type="button" class="mesh-close" aria-label="Close mesh panel"><i data-lucide="x"></i></button>
             </div>
             <div class="mesh-tabs" role="tablist">

@@ -21,6 +21,7 @@ export default class TextureBrowser {
                 <div class="tb-heading">
                     <span class="tb-eyebrow">Assets</span>
                     <span class="tb-title">Texture Library</span>
+                    <small>Import and manage surface textures</small>
                 </div>
                 <button class="tb-close" type="button" aria-label="Close"><i data-lucide="x"></i></button>
             </div>

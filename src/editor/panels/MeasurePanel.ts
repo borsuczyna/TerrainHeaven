@@ -19,7 +19,7 @@ export default class MeasurePanel {
         this.container.id = 'measure-panel';
         this.container.innerHTML = `
             <div class="measure-header">
-                <div><span>Utility</span><strong>Measure</strong></div>
+                <div><span>Utility</span><strong>Measure</strong><small>Distance and axis delta</small></div>
                 <button type="button" data-action="close" aria-label="Close measure tool"><i data-lucide="x"></i></button>
             </div>
             <div class="measure-body">

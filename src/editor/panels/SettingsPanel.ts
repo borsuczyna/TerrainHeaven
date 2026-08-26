@@ -46,7 +46,7 @@ export default class SettingsPanel {
         const s = this.settings;
         this.container.innerHTML = `
             <div class="sp-header">
-                <div class="sp-heading"><span class="sp-eyebrow">Viewport</span><span class="sp-title">Visual Settings</span></div>
+                <div class="sp-heading"><span class="sp-eyebrow">Viewport</span><span class="sp-title">Visual Settings</span><small>Lighting, grid and preview quality</small></div>
                 <button class="sp-close" type="button" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
             <div class="sp-body">

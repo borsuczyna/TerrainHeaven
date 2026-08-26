@@ -101,7 +101,7 @@ export default class HelpPanel {
     private build(): void {
         this.container.innerHTML = `
             <div class="sp-header">
-                <div class="sp-heading"><span class="sp-eyebrow">Reference</span><span class="sp-title">Keyboard Shortcuts</span></div>
+                <div class="sp-heading"><span class="sp-eyebrow">Reference</span><span class="sp-title">Keyboard Shortcuts</span><small>Editor controls at a glance</small></div>
                 <button class="sp-close" type="button" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
             <div class="sp-body">

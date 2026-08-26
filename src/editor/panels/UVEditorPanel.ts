@@ -39,9 +39,9 @@ export default class UVEditorPanel {
         this.container.id = 'uv-editor';
         this.container.innerHTML = `
             <div class="uv-header">
-                <span class="uv-title">UV Editor</span>
+                <div class="uv-heading"><span>Mapping</span><strong class="uv-title">UV Editor</strong><small>Transform surface coordinates</small></div>
                 <select class="uv-group-select"></select>
-                <button class="uv-close">&times;</button>
+                <button class="uv-close" aria-label="Close UV editor">&times;</button>
             </div>
             <canvas class="uv-canvas"></canvas>
             <div class="uv-footer">
