@@ -17,8 +17,9 @@ let editor;
 try {
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.ok(tools.tools.length >= 16, 'expected a comprehensive MCP tool set');
+    assert.equal(tools.tools.length, 18, 'expected the complete MCP tool set');
     assert.ok(tools.tools.some((tool) => tool.name === 'create_polish_village'));
+    assert.ok(tools.tools.some((tool) => tool.name === 'create_intersection'));
 
     editor = new WebSocket(`ws://127.0.0.1:${port}`);
     await new Promise((resolve, reject) => {
@@ -42,6 +43,10 @@ try {
     const status = await client.callTool({ name: 'connection_status', arguments: {} });
     assert.match(status.content[0].text, /"connected": true/);
     await client.callTool({
+        name: 'create_intersection',
+        arguments: { center: { x: -20, y: 0, z: 0 }, nodeCount: 3, sidewalk: true },
+    });
+    await client.callTool({
         name: 'create_polish_village',
         arguments: { center: { x: 0, y: 0, z: 0 }, houseCount: 4, seed: 5 },
     });
@@ -49,6 +54,7 @@ try {
     const scene = JSON.parse(inspection.content[0].text);
     assert.equal(scene.counts.building, 4);
     assert.equal(scene.counts.road, 1);
+    assert.equal(scene.counts.intersection, 1);
     assert.ok(scene.counts.fence > 8);
     assert.equal(scene.foliageInstances, 36);
     console.log(`MCP smoke test passed (${tools.tools.length} tools, live bridge mutation verified).`);

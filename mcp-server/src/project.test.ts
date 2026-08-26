@@ -31,6 +31,37 @@ describe('ProjectDocument', () => {
         expect((house.buildingOpenings as unknown[]).filter((opening) => (opening as { type: string }).type === 'window').length).toBeGreaterThan(0);
     });
 
+    it('creates current-format T and cross intersections', () => {
+        const document = new ProjectDocument(emptyProject());
+        const tId = document.addIntersection({ x: 4, y: 1, z: 8 }, {
+            nodeCount: 3, width: 10, length: 8, rotation: 90, sidewalk: true,
+            roadTexture: 'road.png', sidewalkTexture: 'sidewalk.png',
+        });
+        const crossId = document.addIntersection({ x: 20, y: 0, z: 0 }, { nodeCount: 4 });
+
+        expect(document.get(tId)).toMatchObject({
+            type: 'intersection', nodes: [{ x: 4, y: 1, z: 8 }], nodeCount: 3,
+            width: 10, length: 8, rotation: 90, edgeType: 'sidewalk',
+            textures: { road: 'road.png', sidewalk: 'sidewalk.png' },
+        });
+        expect(document.get(crossId)).toMatchObject({ nodeCount: 4, width: 8, length: 8 });
+        const [roadId] = document.addRoadPath([
+            { x: 10, y: 1, z: 8 }, { x: 20, y: 1, z: 8 },
+        ]);
+        document.connect(tId, 1, roadId, 0);
+        expect(document.data.connections).toContainEqual({ elementA: tId, nodeA: 1, elementB: roadId, nodeB: 0 });
+        expect(document.summary().elements.find((element) => element.id === tId)?.nodeCount).toBe(3);
+    });
+
+    it('clamps road divisions to the low-poly project limit', () => {
+        const document = new ProjectDocument(emptyProject());
+        const [id] = document.addRoadPath([
+            { x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 },
+        ], { divisions: 99 });
+
+        expect(document.get(id).divisions).toBe(4);
+    });
+
     it('generates a village entirely from native editable elements', () => {
         const document = new ProjectDocument(emptyProject());
         const result = createPolishVillage(document, { houseCount: 6, seed: 7 });

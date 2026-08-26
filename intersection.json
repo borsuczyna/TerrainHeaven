@@ -1,0 +1,1191 @@
+[
+
+    {
+
+        "index": 0,
+
+        "group": "road",
+
+        "label": "center",
+
+        "x": 10.292,
+
+        "y": 0,
+
+        "z": -5.263,
+
+        "triangle": 0,
+
+        "triangleMates": "1,2",
+
+        "coincidentWith": "3,6,9,12,15"
+
+    },
+
+    {
+
+        "index": 1,
+
+        "group": "road",
+
+        "label": "arm2.rightEdge",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -8.243,
+
+        "triangle": 0,
+
+        "triangleMates": "0,2",
+
+        "coincidentWith": "5,18,21"
+
+    },
+
+    {
+
+        "index": 2,
+
+        "group": "road",
+
+        "label": "arm2.leftEdge",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -7.478,
+
+        "triangle": 0,
+
+        "triangleMates": "0,1",
+
+        "coincidentWith": "16,43"
+
+    },
+
+    {
+
+        "index": 3,
+
+        "group": "road",
+
+        "label": "center",
+
+        "x": 10.292,
+
+        "y": 0,
+
+        "z": -5.263,
+
+        "triangle": 1,
+
+        "triangleMates": "4,5",
+
+        "coincidentWith": "0,6,9,12,15"
+
+    },
+
+    {
+
+        "index": 4,
+
+        "group": "road",
+
+        "label": "arm0.leftEdge",
+
+        "x": 12.41,
+
+        "y": 0,
+
+        "z": -7.263,
+
+        "triangle": 1,
+
+        "triangleMates": "3,5",
+
+        "coincidentWith": "8,19"
+
+    },
+
+    {
+
+        "index": 5,
+
+        "group": "road",
+
+        "label": "arm2.rightEdge",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -8.243,
+
+        "triangle": 1,
+
+        "triangleMates": "3,4",
+
+        "coincidentWith": "1,18,21"
+
+    },
+
+    {
+
+        "index": 6,
+
+        "group": "road",
+
+        "label": "center",
+
+        "x": 10.292,
+
+        "y": 0,
+
+        "z": -5.263,
+
+        "triangle": 2,
+
+        "triangleMates": "7,8",
+
+        "coincidentWith": "0,3,9,12,15"
+
+    },
+
+    {
+
+        "index": 7,
+
+        "group": "road",
+
+        "label": "arm0.rightEdge",
+
+        "x": 12.418,
+
+        "y": 0,
+
+        "z": -3.263,
+
+        "triangle": 2,
+
+        "triangleMates": "6,8",
+
+        "coincidentWith": "11,30,33"
+
+    },
+
+    {
+
+        "index": 8,
+
+        "group": "road",
+
+        "label": "arm0.leftEdge",
+
+        "x": 12.41,
+
+        "y": 0,
+
+        "z": -7.263,
+
+        "triangle": 2,
+
+        "triangleMates": "6,7",
+
+        "coincidentWith": "4,19"
+
+    },
+
+    {
+
+        "index": 9,
+
+        "group": "road",
+
+        "label": "center",
+
+        "x": 10.292,
+
+        "y": 0,
+
+        "z": -5.263,
+
+        "triangle": 3,
+
+        "triangleMates": "10,11",
+
+        "coincidentWith": "0,3,6,12,15"
+
+    },
+
+    {
+
+        "index": 10,
+
+        "group": "road",
+
+        "label": "arm1.leftEdge",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -2.282,
+
+        "triangle": 3,
+
+        "triangleMates": "9,11",
+
+        "coincidentWith": "14,31"
+
+    },
+
+    {
+
+        "index": 11,
+
+        "group": "road",
+
+        "label": "arm0.rightEdge",
+
+        "x": 12.418,
+
+        "y": 0,
+
+        "z": -3.263,
+
+        "triangle": 3,
+
+        "triangleMates": "9,10",
+
+        "coincidentWith": "7,30,33"
+
+    },
+
+    {
+
+        "index": 12,
+
+        "group": "road",
+
+        "label": "center",
+
+        "x": 10.292,
+
+        "y": 0,
+
+        "z": -5.263,
+
+        "triangle": 4,
+
+        "triangleMates": "13,14",
+
+        "coincidentWith": "0,3,6,9,15"
+
+    },
+
+    {
+
+        "index": 13,
+
+        "group": "road",
+
+        "label": "arm1.rightEdge",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -3.047,
+
+        "triangle": 4,
+
+        "triangleMates": "12,14",
+
+        "coincidentWith": "17,42,45"
+
+    },
+
+    {
+
+        "index": 14,
+
+        "group": "road",
+
+        "label": "arm1.leftEdge",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -2.282,
+
+        "triangle": 4,
+
+        "triangleMates": "12,13",
+
+        "coincidentWith": "10,31"
+
+    },
+
+    {
+
+        "index": 15,
+
+        "group": "road",
+
+        "label": "center",
+
+        "x": 10.292,
+
+        "y": 0,
+
+        "z": -5.263,
+
+        "triangle": 5,
+
+        "triangleMates": "16,17",
+
+        "coincidentWith": "0,3,6,9,12"
+
+    },
+
+    {
+
+        "index": 16,
+
+        "group": "road",
+
+        "label": "arm2.leftEdge",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -7.478,
+
+        "triangle": 5,
+
+        "triangleMates": "15,17",
+
+        "coincidentWith": "2,43"
+
+    },
+
+    {
+
+        "index": 17,
+
+        "group": "road",
+
+        "label": "arm1.rightEdge",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -3.047,
+
+        "triangle": 5,
+
+        "triangleMates": "15,16",
+
+        "coincidentWith": "13,42,45"
+
+    },
+
+    {
+
+        "index": 18,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerA",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -8.243,
+
+        "triangle": 6,
+
+        "triangleMates": "19,20",
+
+        "coincidentWith": "1,5,21"
+
+    },
+
+    {
+
+        "index": 19,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerB",
+
+        "x": 12.41,
+
+        "y": 0,
+
+        "z": -7.263,
+
+        "triangle": 6,
+
+        "triangleMates": "18,20",
+
+        "coincidentWith": "4,8"
+
+    },
+
+    {
+
+        "index": 20,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerBUp",
+
+        "x": 12.41,
+
+        "y": 0.2,
+
+        "z": -7.263,
+
+        "triangle": 6,
+
+        "triangleMates": "18,19",
+
+        "coincidentWith": "22,25"
+
+    },
+
+    {
+
+        "index": 21,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerA",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -8.243,
+
+        "triangle": 7,
+
+        "triangleMates": "22,23",
+
+        "coincidentWith": "1,5,18"
+
+    },
+
+    {
+
+        "index": 22,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerBUp",
+
+        "x": 12.41,
+
+        "y": 0.2,
+
+        "z": -7.263,
+
+        "triangle": 7,
+
+        "triangleMates": "21,23",
+
+        "coincidentWith": "20,25"
+
+    },
+
+    {
+
+        "index": 23,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerAUp",
+
+        "x": 11.194,
+
+        "y": 0.2,
+
+        "z": -8.243,
+
+        "triangle": 7,
+
+        "triangleMates": "21,22",
+
+        "coincidentWith": "24,27"
+
+    },
+
+    {
+
+        "index": 24,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerAUp",
+
+        "x": 11.194,
+
+        "y": 0.2,
+
+        "z": -8.243,
+
+        "triangle": 8,
+
+        "triangleMates": "25,26",
+
+        "coincidentWith": "23,27"
+
+    },
+
+    {
+
+        "index": 25,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerBUp",
+
+        "x": 12.41,
+
+        "y": 0.2,
+
+        "z": -7.263,
+
+        "triangle": 8,
+
+        "triangleMates": "24,26",
+
+        "coincidentWith": "20,22"
+
+    },
+
+    {
+
+        "index": 26,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].outerB",
+
+        "x": 13.352,
+
+        "y": 0.2,
+
+        "z": -8.43,
+
+        "triangle": 8,
+
+        "triangleMates": "24,25",
+
+        "coincidentWith": "28"
+
+    },
+
+    {
+
+        "index": 27,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].innerAUp",
+
+        "x": 11.194,
+
+        "y": 0.2,
+
+        "z": -8.243,
+
+        "triangle": 9,
+
+        "triangleMates": "28,29",
+
+        "coincidentWith": "23,24"
+
+    },
+
+    {
+
+        "index": 28,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].outerB",
+
+        "x": 13.352,
+
+        "y": 0.2,
+
+        "z": -8.43,
+
+        "triangle": 9,
+
+        "triangleMates": "27,29",
+
+        "coincidentWith": "26"
+
+    },
+
+    {
+
+        "index": 29,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm2->arm0].outerA",
+
+        "x": 12.135,
+
+        "y": 0.2,
+
+        "z": -9.411,
+
+        "triangle": 9,
+
+        "triangleMates": "27,28",
+
+        "coincidentWith": "-"
+
+    },
+
+    {
+
+        "index": 30,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerA",
+
+        "x": 12.418,
+
+        "y": 0,
+
+        "z": -3.263,
+
+        "triangle": 10,
+
+        "triangleMates": "31,32",
+
+        "coincidentWith": "7,11,33"
+
+    },
+
+    {
+
+        "index": 31,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerB",
+
+        "x": 11.194,
+
+        "y": 0,
+
+        "z": -2.282,
+
+        "triangle": 10,
+
+        "triangleMates": "30,32",
+
+        "coincidentWith": "10,14"
+
+    },
+
+    {
+
+        "index": 32,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerBUp",
+
+        "x": 11.194,
+
+        "y": 0.2,
+
+        "z": -2.282,
+
+        "triangle": 10,
+
+        "triangleMates": "30,31",
+
+        "coincidentWith": "34,37"
+
+    },
+
+    {
+
+        "index": 33,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerA",
+
+        "x": 12.418,
+
+        "y": 0,
+
+        "z": -3.263,
+
+        "triangle": 11,
+
+        "triangleMates": "34,35",
+
+        "coincidentWith": "7,11,30"
+
+    },
+
+    {
+
+        "index": 34,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerBUp",
+
+        "x": 11.194,
+
+        "y": 0.2,
+
+        "z": -2.282,
+
+        "triangle": 11,
+
+        "triangleMates": "33,35",
+
+        "coincidentWith": "32,37"
+
+    },
+
+    {
+
+        "index": 35,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerAUp",
+
+        "x": 12.418,
+
+        "y": 0.2,
+
+        "z": -3.263,
+
+        "triangle": 11,
+
+        "triangleMates": "33,34",
+
+        "coincidentWith": "36,39"
+
+    },
+
+    {
+
+        "index": 36,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerAUp",
+
+        "x": 12.418,
+
+        "y": 0.2,
+
+        "z": -3.263,
+
+        "triangle": 12,
+
+        "triangleMates": "37,38",
+
+        "coincidentWith": "35,39"
+
+    },
+
+    {
+
+        "index": 37,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerBUp",
+
+        "x": 11.194,
+
+        "y": 0.2,
+
+        "z": -2.282,
+
+        "triangle": 12,
+
+        "triangleMates": "36,38",
+
+        "coincidentWith": "32,34"
+
+    },
+
+    {
+
+        "index": 38,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].outerB",
+
+        "x": 12.132,
+
+        "y": 0.2,
+
+        "z": -1.111,
+
+        "triangle": 12,
+
+        "triangleMates": "36,37",
+
+        "coincidentWith": "40"
+
+    },
+
+    {
+
+        "index": 39,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].innerAUp",
+
+        "x": 12.418,
+
+        "y": 0.2,
+
+        "z": -3.263,
+
+        "triangle": 13,
+
+        "triangleMates": "40,41",
+
+        "coincidentWith": "35,36"
+
+    },
+
+    {
+
+        "index": 40,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].outerB",
+
+        "x": 12.132,
+
+        "y": 0.2,
+
+        "z": -1.111,
+
+        "triangle": 13,
+
+        "triangleMates": "39,41",
+
+        "coincidentWith": "38"
+
+    },
+
+    {
+
+        "index": 41,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm0->arm1].outerA",
+
+        "x": 13.356,
+
+        "y": 0.2,
+
+        "z": -2.092,
+
+        "triangle": 13,
+
+        "triangleMates": "39,40",
+
+        "coincidentWith": "-"
+
+    },
+
+    {
+
+        "index": 42,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerA",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -3.047,
+
+        "triangle": 14,
+
+        "triangleMates": "43,44",
+
+        "coincidentWith": "13,17,45"
+
+    },
+
+    {
+
+        "index": 43,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerB",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -7.478,
+
+        "triangle": 14,
+
+        "triangleMates": "42,44",
+
+        "coincidentWith": "2,16"
+
+    },
+
+    {
+
+        "index": 44,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerBUp",
+
+        "x": 7.268,
+
+        "y": 0.2,
+
+        "z": -7.478,
+
+        "triangle": 14,
+
+        "triangleMates": "42,43",
+
+        "coincidentWith": "46,49"
+
+    },
+
+    {
+
+        "index": 45,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerA",
+
+        "x": 7.268,
+
+        "y": 0,
+
+        "z": -3.047,
+
+        "triangle": 15,
+
+        "triangleMates": "46,47",
+
+        "coincidentWith": "13,17,42"
+
+    },
+
+    {
+
+        "index": 46,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerBUp",
+
+        "x": 7.268,
+
+        "y": 0.2,
+
+        "z": -7.478,
+
+        "triangle": 15,
+
+        "triangleMates": "45,47",
+
+        "coincidentWith": "44,49"
+
+    },
+
+    {
+
+        "index": 47,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerAUp",
+
+        "x": 7.268,
+
+        "y": 0.2,
+
+        "z": -3.047,
+
+        "triangle": 15,
+
+        "triangleMates": "45,46",
+
+        "coincidentWith": "48,51"
+
+    },
+
+    {
+
+        "index": 48,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerAUp",
+
+        "x": 7.268,
+
+        "y": 0.2,
+
+        "z": -3.047,
+
+        "triangle": 16,
+
+        "triangleMates": "49,50",
+
+        "coincidentWith": "47,51"
+
+    },
+
+    {
+
+        "index": 49,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerBUp",
+
+        "x": 7.268,
+
+        "y": 0.2,
+
+        "z": -7.478,
+
+        "triangle": 16,
+
+        "triangleMates": "48,50",
+
+        "coincidentWith": "44,46"
+
+    },
+
+    {
+
+        "index": 50,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].outerB",
+
+        "x": 5.768,
+
+        "y": 0.2,
+
+        "z": -7.478,
+
+        "triangle": 16,
+
+        "triangleMates": "48,49",
+
+        "coincidentWith": "52"
+
+    },
+
+    {
+
+        "index": 51,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].innerAUp",
+
+        "x": 7.268,
+
+        "y": 0.2,
+
+        "z": -3.047,
+
+        "triangle": 17,
+
+        "triangleMates": "52,53",
+
+        "coincidentWith": "47,48"
+
+    },
+
+    {
+
+        "index": 52,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].outerB",
+
+        "x": 5.768,
+
+        "y": 0.2,
+
+        "z": -7.478,
+
+        "triangle": 17,
+
+        "triangleMates": "51,53",
+
+        "coincidentWith": "50"
+
+    },
+
+    {
+
+        "index": 53,
+
+        "group": "sidewalk",
+
+        "label": "gap[arm1->arm2].outerA",
+
+        "x": 5.768,
+
+        "y": 0.2,
+
+        "z": -3.047,
+
+        "triangle": 17,
+
+        "triangleMates": "51,52",
+
+        "coincidentWith": "-"
+
+    }
+
+]

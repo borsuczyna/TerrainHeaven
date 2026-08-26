@@ -46,4 +46,6 @@ The MCP never manipulates Three.js internals. It edits the same JSON contract us
 4. Use focused creation tools or `apply_batch` for one atomic history entry.
 5. Inspect again and patch individual elements if needed.
 
-High-level tools include complete houses and a small Polish village. Lower-level tools cover terrain, sculpting, roads/bridges, rivers, fences, foliage, element queries/patches, node connections, safe deletion, batch edits, and full project export.
+High-level tools include complete houses and a small Polish village. Lower-level tools cover terrain, sculpting, low-poly roads/bridges, native 3-way and 4-way intersections, rivers, fences, foliage, element queries/patches, node connections, safe deletion, batch edits, and full project export.
+
+Use `create_intersection` whenever three or more roads meet, then connect road endpoints to its outlet nodes with `connect_elements`. Intersection node indices are west `0`, east `1`, north `2`, and south `3`. Road `divisions` are limited to `0..4`; use `0` for straight segments.

@@ -90,10 +90,31 @@ server.registerTool('sculpt_terrain', {
 
 server.registerTool('create_road', {
     title: 'Create road path',
-    description: 'Create a connected native road from two or more world-space points. Each polyline segment remains independently editable. Supports lanes, sidewalks and bridges.',
-    inputSchema: z.object({ points: z.array(vector).min(2), width: z.number().positive().default(3), lanes: z.number().int().min(1).max(8).default(2), sidewalk: z.boolean().default(false), bridge: z.boolean().default(false), divisions: z.number().int().min(0).max(128).default(0) }),
+    description: 'Create a connected low-poly road from two or more world-space points. Use divisions 0 for straight roads and at most 1-4 for genuine curves. Use create_intersection when three or more roads meet.',
+    inputSchema: z.object({ points: z.array(vector).min(2), width: z.number().positive().default(3), lanes: z.number().int().min(1).max(8).default(2), sidewalk: z.boolean().default(false), bridge: z.boolean().default(false), divisions: z.number().int().min(0).max(4).default(0) }),
 }, async ({ points, ...options }) => result(
     await mutate('MCP: create road', (document) => ({ ids: document.addRoadPath(points, options) })),
+));
+
+server.registerTool('create_intersection', {
+    title: 'Create road intersection',
+    description: 'Create a native fixed-footprint 3-way T junction or 4-way cross junction. Node indices are west=0, east=1, north=2 and south=3; rotation rotates the whole junction. Connect each road endpoint with connect_elements.',
+    inputSchema: z.object({
+        center: vector,
+        nodeCount: z.union([z.literal(3), z.literal(4)]).default(3),
+        width: z.number().min(1).default(8),
+        length: z.number().min(1).default(8),
+        outletWidth: z.number().min(0.2).default(4),
+        outletLength: z.number().nonnegative().default(2),
+        rotation: z.number().default(0),
+        sidewalk: z.boolean().default(false),
+        sidewalkWidth: z.number().min(0.1).default(1),
+        curbHeight: z.number().nonnegative().default(0.15),
+        roadTexture: z.string().optional(),
+        sidewalkTexture: z.string().optional(),
+    }),
+}, async ({ center, ...options }) => result(
+    await mutate('MCP: create intersection', (document) => ({ id: document.addIntersection(center, options) })),
 ));
 
 server.registerTool('create_river', {
@@ -155,7 +176,7 @@ server.registerTool('delete_elements', {
 
 server.registerTool('apply_batch', {
     title: 'Apply an atomic scene batch',
-    description: 'Apply many creation, patch, connection or deletion operations as one undoable editor history entry. Supported kinds: terrain, sculpt, road, river, fence, house, foliage, update, connect, delete. If any operation fails, none are sent to the editor.',
+    description: 'Apply many creation, patch, connection or deletion operations as one undoable editor history entry. Supported kinds: terrain, sculpt, road, intersection, river, fence, house, foliage, update, connect, delete. If any operation fails, none are sent to the editor.',
     inputSchema: z.object({ operations: z.array(z.object({ kind: z.string() }).passthrough()).min(1).max(250), label: z.string().default('MCP batch edit') }),
 }, async ({ operations, label }) => result(await mutate(label, (document) => operations.map((operation) => applyOperation(document, operation)))));
 
@@ -170,6 +191,7 @@ function applyOperation(document: ProjectDocument, operation: Record<string, unk
     if (kind === 'terrain') return { id: document.addTerrain(asVec(operation.center), asNumber(operation.width), asNumber(operation.length), operation) };
     if (kind === 'sculpt') return { changedSamples: document.sculptTerrain(asVec(operation.center), asNumber(operation.radius), asNumber(operation.heightDelta)) };
     if (kind === 'road') return { ids: document.addRoadPath(asPoints(operation.points), operation) };
+    if (kind === 'intersection') return { id: document.addIntersection(asVec(operation.center), operation) };
     if (kind === 'river') return { ids: document.addRiver(asPoints(operation.points), asNumber(operation.width, 4), operation) };
     if (kind === 'fence') return { ids: document.addFencePath(asPoints(operation.points), operation) };
     if (kind === 'house') return { id: document.addHouse({ ...operation, center: asVec(operation.center) }) };

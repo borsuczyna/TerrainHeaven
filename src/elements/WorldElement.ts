@@ -476,6 +476,22 @@ export default abstract class WorldElement {
         if (!conn) return basis;
 
         const connBasis = conn.element.getNodeBasis(conn.nodeIndex);
+        const ownFixedProfile = this.getFixedConnectionProfile(index);
+        const connectedFixedProfile = conn.element.getFixedConnectionProfile(conn.nodeIndex);
+
+        // A fixed connection profile describes a rigid mouth, such as an
+        // intersection outlet. Its cross-section must stay exactly on that mouth's
+        // plane. Averaging its basis with an angled road tangent rotates the road's
+        // endpoint, making one corner overlap the intersection while the other leaves
+        // a visible triangular gap.
+        if (ownFixedProfile || connectedFixedProfile) {
+            const fixedBasis = ownFixedProfile ? basis : connBasis;
+            const right = fixedBasis.right.clone();
+            if (basis.forward.dot(fixedBasis.forward) < 0) right.negate();
+            const forward = new THREE.Vector3().crossVectors(basis.up, right).normalize();
+            return { forward, right: right.normalize(), up: basis.up.clone() };
+        }
+
         const avgRight = basis.right.clone();
         // If forwards point opposite (e.g. end-to-end), the connected
         // right is flipped — negate it to keep sides consistent

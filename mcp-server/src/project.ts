@@ -11,6 +11,20 @@ export type RoadOptions = {
     bridge?: boolean;
 };
 
+export type IntersectionOptions = {
+    nodeCount?: 3 | 4;
+    width?: number;
+    length?: number;
+    outletWidth?: number;
+    outletLength?: number;
+    rotation?: number;
+    sidewalk?: boolean;
+    sidewalkWidth?: number;
+    curbHeight?: number;
+    roadTexture?: string;
+    sidewalkTexture?: string;
+};
+
 export type HouseOptions = {
     center: Vec3;
     width?: number;
@@ -206,17 +220,23 @@ export class ProjectDocument {
         });
     }
 
-    public addIntersection(center: Vec3, nodeCount = 4, width = 4): number {
-        const count = clamp(Math.round(nodeCount), 2, 12);
-        const nodes: Vec3[] = [];
-        for (let i = 0; i < count; i++) {
-            const angle = i / count * Math.PI * 2;
-            nodes.push({ x: center.x + Math.cos(angle) * width / 2, y: center.y, z: center.z + Math.sin(angle) * width / 2 });
-        }
+    public addIntersection(center: Vec3, options: IntersectionOptions = {}): number {
+        const nodeCount: 3 | 4 = options.nodeCount === 3 ? 3 : 4;
+        const width = Math.max(1, options.width ?? 8);
+        const length = Math.max(1, options.length ?? width);
+        const outletWidth = clamp(options.outletWidth ?? 4, 0.2, Math.min(width, length));
+        const textures: Record<string, string> = {};
+        if (options.roadTexture) textures.road = options.roadTexture;
+        if (options.sidewalkTexture) textures.sidewalk = options.sidewalkTexture;
         return this.addElement({
-            type: 'intersection', id: -1, nodes, textures: emptyTextures(), textureRotations: emptyRotations(),
-            width, length: width, nodeCount: count, edgeType: 'none', sidewalkWidth: 1, curbHeight: 0.15,
+            type: 'intersection', id: -1, nodes: [copy(center)], textures, textureRotations: emptyRotations(),
+            width, length, nodeCount, rotation: options.rotation ?? 0,
+            outletWidth, outletLength: Math.max(0, options.outletLength ?? 2),
+            edgeType: options.sidewalk ? 'sidewalk' : 'none',
+            sidewalkWidth: Math.max(0.1, options.sidewalkWidth ?? 1),
+            curbHeight: Math.max(0, options.curbHeight ?? 0.15),
             roadTexWidth: 3, roadTexHeight: 3, roadTexOffsetX: 0, roadTexOffsetY: 0,
+            sidewalkTexWidth: 1, sidewalkTexHeight: 1, sidewalkTexOffsetX: 0, sidewalkTexOffsetY: 0,
         });
     }
 
@@ -276,7 +296,9 @@ export class ProjectDocument {
 
     public connect(elementA: number, nodeA: number, elementB: number, nodeB: number): void {
         if (!this.data.elements[elementA] || !this.data.elements[elementB]) throw new Error('Cannot connect a missing element');
-        if (!this.data.elements[elementA].nodes[nodeA] || !this.data.elements[elementB].nodes[nodeB]) throw new Error('Cannot connect a missing node');
+        if (!this.hasNode(this.data.elements[elementA], nodeA) || !this.hasNode(this.data.elements[elementB], nodeB)) {
+            throw new Error('Cannot connect a missing node');
+        }
         const occupied = this.data.connections.some((connection) =>
             (connection.elementA === elementA && connection.nodeA === nodeA)
             || (connection.elementB === elementA && connection.nodeB === nodeA)
@@ -284,6 +306,12 @@ export class ProjectDocument {
             || (connection.elementB === elementB && connection.nodeB === nodeB));
         if (occupied) throw new Error('One of the requested nodes is already connected');
         this.data.connections.push({ elementA, nodeA, elementB, nodeB });
+    }
+
+    private hasNode(element: ElementData, nodeIndex: number): boolean {
+        if (!Number.isInteger(nodeIndex) || nodeIndex < 0) return false;
+        if (element.type === 'intersection') return nodeIndex < clamp(Math.round(numberOption(element.nodeCount, 4)), 3, 4);
+        return nodeIndex < element.nodes.length;
     }
 
     private addElement(element: ElementData): number {
@@ -297,7 +325,10 @@ export class ProjectDocument {
     }
 
     private elementSummary(element: ElementData): ElementSummary {
-        return { id: element.id, type: element.type, nodeCount: element.nodes.length, bounds: boundsOf(element.nodes) };
+        const nodeCount = element.type === 'intersection'
+            ? clamp(Math.round(numberOption(element.nodeCount, 4)), 3, 4)
+            : element.nodes.length;
+        return { id: element.id, type: element.type, nodeCount, bounds: boundsOf(element.nodes) };
     }
 
     private ensureFoliage(): NonNullable<ProjectData['foliage']> {
@@ -307,7 +338,7 @@ export class ProjectDocument {
 }
 
 export function makeRoad(a: Vec3, b: Vec3, options: RoadOptions = {}): ElementData {
-    const divisions = Math.max(0, Math.round(options.divisions ?? 0));
+    const divisions = clamp(Math.round(options.divisions ?? 0), 0, 4);
     return {
         type: 'road', id: -1, nodes: [copy(a), copy(b)], textures: emptyTextures(), textureRotations: emptyRotations(),
         uvTransforms: {}, width: Math.max(0.5, options.width ?? 3), lanes: Math.max(1, Math.round(options.lanes ?? 2)),

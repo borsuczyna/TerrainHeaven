@@ -103,6 +103,38 @@ describe('Intersection fixed footprint', () => {
         expect(Math.max(...vertices.map((vertex) => vertex.z))).toBeCloseTo(2, 8);
     });
 
+    it('keeps an angled road endpoint flush with the intersection mouth', () => {
+        const intersection = new TestIntersection(new THREE.Vector3(), 4);
+        intersection.outletWidth = 4;
+        const road = new TestRoad(new THREE.Vector3(6, 0, 0), new THREE.Vector3(20, 0, 5));
+        road.width = 4;
+        road.connect(0, intersection, 1);
+
+        const endpointVertices = (road.geometryGroups().find((group) => group.name === 'road')?.triangles ?? [])
+            .flatMap((triangle) => [triangle.a, triangle.b, triangle.c])
+            .filter((vertex) => Math.abs(vertex.x - 6) < 1e-8);
+
+        expect(endpointVertices.length).toBeGreaterThan(0);
+        expect(Math.min(...endpointVertices.map((vertex) => vertex.z))).toBeCloseTo(-2, 8);
+        expect(Math.max(...endpointVertices.map((vertex) => vertex.z))).toBeCloseTo(2, 8);
+    });
+
+    it('keeps a road ending at an intersection flush with the intersection mouth', () => {
+        const intersection = new TestIntersection(new THREE.Vector3(), 4);
+        intersection.outletWidth = 4;
+        const road = new TestRoad(new THREE.Vector3(-20, 0, 5), new THREE.Vector3(-6, 0, 0));
+        road.width = 4;
+        road.connect(1, intersection, 0);
+
+        const endpointVertices = (road.geometryGroups().find((group) => group.name === 'road')?.triangles ?? [])
+            .flatMap((triangle) => [triangle.a, triangle.b, triangle.c])
+            .filter((vertex) => Math.abs(vertex.x + 6) < 1e-8);
+
+        expect(endpointVertices.length).toBeGreaterThan(0);
+        expect(Math.min(...endpointVertices.map((vertex) => vertex.z))).toBeCloseTo(-2, 8);
+        expect(Math.max(...endpointVertices.map((vertex) => vertex.z))).toBeCloseTo(2, 8);
+    });
+
     it('round-trips the static outlet settings', () => {
         const intersection = new TestIntersection(new THREE.Vector3(2, 1, -3), 3);
         intersection.width = 11;
