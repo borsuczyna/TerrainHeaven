@@ -11,13 +11,22 @@ type PendingRequest = {
 type BridgeResponse = { id: string; result?: unknown; error?: string };
 
 export class EditorBridgeServer {
-    private readonly server: WebSocketServer;
+    private server: WebSocketServer | null = null;
     private client: WebSocket | null = null;
     private readonly pending = new Map<string, PendingRequest>();
+    private retryTimer: NodeJS.Timeout | null = null;
+    private closed = false;
 
-    public constructor(port = 47831) {
-        this.server = new WebSocketServer({ host: '127.0.0.1', port });
-        this.server.on('connection', (socket) => {
+    public constructor(private readonly port = 47831) {
+        this.listen();
+    }
+
+    private listen(): void {
+        if (this.closed || this.server) return;
+
+        const server = new WebSocketServer({ host: '127.0.0.1', port: this.port });
+        this.server = server;
+        server.on('connection', (socket) => {
             this.client?.close(1000, 'A newer TerrainHeaven editor connected');
             this.client = socket;
             socket.on('message', (payload) => this.handleResponse(String(payload)));
@@ -25,8 +34,21 @@ export class EditorBridgeServer {
                 if (this.client === socket) this.client = null;
             });
         });
-        this.server.on('listening', () => console.error(`[terrainheaven-mcp] Editor bridge listening on ws://127.0.0.1:${port}`));
-        this.server.on('error', (error) => console.error(`[terrainheaven-mcp] Bridge error: ${error.message}`));
+        server.on('listening', () => console.error(`[terrainheaven-mcp] Editor bridge listening on ws://127.0.0.1:${this.port}`));
+        server.on('error', (error) => {
+            console.error(`[terrainheaven-mcp] Bridge error: ${error.message}; retrying in 1500ms`);
+            if (this.server === server) this.server = null;
+            server.close();
+            this.scheduleRetry();
+        });
+    }
+
+    private scheduleRetry(): void {
+        if (this.closed || this.retryTimer) return;
+        this.retryTimer = setTimeout(() => {
+            this.retryTimer = null;
+            this.listen();
+        }, 1500);
     }
 
     public get connected(): boolean {
@@ -46,13 +68,18 @@ export class EditorBridgeServer {
     }
 
     public close(): void {
+        this.closed = true;
+        if (this.retryTimer) clearTimeout(this.retryTimer);
+        this.retryTimer = null;
         for (const request of this.pending.values()) {
             clearTimeout(request.timer);
             request.reject(new Error('Editor bridge closed'));
         }
         this.pending.clear();
         this.client?.close();
-        this.server.close();
+        this.client = null;
+        this.server?.close();
+        this.server = null;
     }
 
     private request(method: string, params?: Record<string, unknown>): Promise<unknown> {
